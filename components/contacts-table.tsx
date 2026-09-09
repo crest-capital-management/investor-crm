@@ -1,0 +1,238 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+
+import { deleteContacts } from "@/app/contacts/actions";
+import {
+  ContactDetailsDialog,
+  type ContactRow,
+} from "@/components/contact-details-dialog";
+import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/toast-provider";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+
+export function ContactsTable({
+  contacts,
+  search,
+}: {
+  contacts: ContactRow[];
+  search: string;
+}) {
+  const router = useRouter();
+  const { toast } = useToast();
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const selectAllRef = useRef<HTMLInputElement>(null);
+  const contactIds = contacts.map((contact) => contact.id);
+  const selectedVisibleCount = contactIds.filter((id) => selectedIds.has(id)).length;
+  const allSelected = contactIds.length > 0 && selectedVisibleCount === contactIds.length;
+  const someSelected = selectedVisibleCount > 0 && !allSelected;
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someSelected;
+    }
+  }, [someSelected]);
+
+  function toggleContact(id: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (allSelected) {
+        contactIds.forEach((id) => next.delete(id));
+      } else {
+        contactIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  }
+
+  async function handleDelete() {
+    setDeleting(true);
+    const result = await deleteContacts([...selectedIds]);
+    setDeleting(false);
+
+    if (result.error) {
+      toast("Failed to delete contacts", "error");
+      setConfirmingDelete(false);
+      return;
+    }
+
+    setSelectedIds(new Set());
+    setConfirmingDelete(false);
+    toast(
+      `${result.deleted} contact${result.deleted === 1 ? "" : "s"} deleted successfully`
+    );
+    router.refresh();
+  }
+
+  return (
+    <>
+      {selectedIds.size > 0 && (
+        <div className="mb-3 flex shrink-0 items-center justify-between rounded-lg border bg-background px-4 py-2.5">
+          <p className="text-sm font-medium">
+            {selectedIds.size} contact{selectedIds.size === 1 ? "" : "s"} selected
+          </p>
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            onClick={() => {
+              setConfirmingDelete(true);
+            }}
+            disabled={deleting}
+          >
+            Delete
+          </Button>
+        </div>
+      )}
+
+      <div className="min-h-0 flex-1 overflow-auto rounded-lg border bg-background">
+        <div className="min-w-full">
+          <table className="w-full border-collapse text-sm">
+            <thead className="sticky top-0 z-10 bg-background">
+              <tr className="border-b bg-background text-left text-muted-foreground">
+                <th className="w-12 px-5 py-3 font-medium">
+                  <input
+                    ref={selectAllRef}
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={toggleAll}
+                    aria-label="Select all contacts"
+                    className="size-4 cursor-pointer accent-primary"
+                  />
+                </th>
+                <th className="w-[25%] px-5 py-3 font-medium">Name</th>
+                <th className="w-[20%] px-5 py-3 font-medium">Phone</th>
+                <th className="w-[20%] px-5 py-3 font-medium">Tags</th>
+                <th className="w-[20%] px-5 py-3 font-medium">Groups</th>
+                <th className="w-[15%] px-5 py-3 font-medium">Date Added</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {contacts.length ? (
+                contacts.map((contact) => (
+                  <ContactDetailsDialog key={contact.id} contact={contact}>
+                    <tr className="cursor-pointer border-b last:border-b-0 hover:bg-muted/20">
+                      <td className="px-5 py-4">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(contact.id)}
+                          onChange={() => toggleContact(contact.id)}
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onClick={(event) => event.stopPropagation()}
+                          aria-label={`Select ${contact.name}`}
+                          className="size-4 cursor-pointer accent-primary"
+                        />
+                      </td>
+                      <td className="px-5 py-4 font-medium">{contact.name}</td>
+                      <td className="px-5 py-4">{contact.phone}</td>
+                      <td className="px-5 py-4">
+                        {contact.tags?.length ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {contact.tags.map((tag) => (
+                              <span
+                                key={tag}
+                                className="inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground"
+                              >
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td className="px-5 py-4">
+                        {contact.contact_groups?.length ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {contact.contact_groups.map((contactGroup) => {
+                              const group = Array.isArray(contactGroup.groups)
+                                ? contactGroup.groups[0]
+                                : contactGroup.groups;
+                              return (
+                                <span
+                                  key={group.id}
+                                  className="inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground"
+                                >
+                                  {group.name}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td className="whitespace-nowrap px-5 py-4">
+                        {new Date(contact.date_saved).toLocaleDateString("en-IN", {
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                        })}
+                      </td>
+                    </tr>
+                  </ContactDetailsDialog>
+                ))
+              ) : (
+                <tr>
+                  <td
+                    colSpan={6}
+                    className="px-5 py-12 text-center text-muted-foreground"
+                  >
+                    {search ? "No contacts found." : "No contacts yet."}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <Dialog open={confirmingDelete} onOpenChange={setConfirmingDelete}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Delete {selectedIds.size} contact{selectedIds.size === 1 ? "" : "s"}?
+            </DialogTitle>
+            <DialogDescription>
+              This will permanently remove the selected contacts. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>
+              Cancel
+            </DialogClose>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleting}
+            >
+              {deleting ? "Deleting..." : "Delete Contacts"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
