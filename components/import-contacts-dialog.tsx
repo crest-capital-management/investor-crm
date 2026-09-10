@@ -26,6 +26,7 @@ type MappedRow = ImportContactRow & { error?: string };
 const CONTACT_FIELDS: Array<{ value: ContactField; label: string; required: boolean }> = [
   { value: "name", label: "Name", required: true },
   { value: "phone", label: "Phone", required: true },
+  { value: "email", label: "Email", required: false },
   { value: "tag", label: "Tag", required: false },
   { value: "dateSaved", label: "Date Saved", required: true },
 ];
@@ -80,18 +81,28 @@ function isValidDate(value: string) {
   );
 }
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 function validateRow(row: ImportContactRow) {
   if (!row.name || !row.phone || !row.dateSaved) return "Name, phone, and date saved are required.";
   if (!/^\d{7,15}$/.test(row.phone)) return "Phone must contain 7-15 digits.";
+  if (row.email && !EMAIL_REGEX.test(row.email)) return "Please enter a valid email address.";
   if (!isValidDate(row.dateSaved)) return "Date Saved must use YYYY-MM-DD.";
   return null;
 }
 
 function getMappedRows(csv: CsvData, mapping: Mapping): MappedRow[] {
   return csv.rows.map((cells) => {
-    const row: ImportContactRow = { name: "", phone: "", tag: "", dateSaved: "" };
+    const row: ImportContactRow = { name: "", phone: "", email: null, tag: "", dateSaved: "" };
     Object.entries(mapping).forEach(([index, field]) => {
-      if (field !== "skip") row[field] = cells[Number(index)]?.trim() ?? "";
+      if (field !== "skip") {
+        const val = cells[Number(index)]?.trim() ?? "";
+        if (field === "email") {
+          row[field] = val || null;
+        } else {
+          row[field] = val;
+        }
+      }
     });
     return { ...row, error: validateRow(row) ?? undefined };
   });
@@ -133,6 +144,35 @@ export function ImportContactsDialog() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
+  function detectInitialMapping(headers: string[]): Mapping {
+    const detected: Mapping = {};
+    const usedFields = new Set<ContactField>();
+
+    headers.forEach((rawHeader, index) => {
+      const normalized = rawHeader.trim().toLowerCase().replace(/[\s_-]+/g, "");
+      let matched: ContactField | null = null;
+
+      if (normalized === "name" || normalized === "fullname" || normalized === "contactname") {
+        matched = "name";
+      } else if (normalized === "phone" || normalized === "phonenumber" || normalized === "mobile") {
+        matched = "phone";
+      } else if (normalized === "email" || normalized === "emailaddress") {
+        matched = "email";
+      } else if (normalized === "tag" || normalized === "tags") {
+        matched = "tag";
+      } else if (normalized === "datesaved" || normalized === "date" || normalized === "saveddate") {
+        matched = "dateSaved";
+      }
+
+      if (matched && !usedFields.has(matched)) {
+        detected[index] = matched;
+        usedFields.add(matched);
+      }
+    });
+
+    return detected;
+  }
+
   async function processFile(file: File) {
     if (!file.name.toLowerCase().endsWith(".csv")) {
       setSelectedFile(null);
@@ -148,7 +188,9 @@ export function ImportContactsDialog() {
     setError(null);
     setParsing(true);
     try {
-      setCsv(parseCsv(await file.text()));
+      const parsedCsv = parseCsv(await file.text());
+      setCsv(parsedCsv);
+      setMapping(detectInitialMapping(parsedCsv.headers));
       setWorkspaceOpen(true);
       setOpen(false);
     } catch (parseError) {
@@ -213,7 +255,7 @@ export function ImportContactsDialog() {
           <div className="flex-1 space-y-6 overflow-y-auto px-6 py-6">
             <div className="rounded-md bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
               <p className="font-medium text-foreground">Expected columns</p>
-              <p className="mt-2">Name</p><p>Phone</p><p>Tag</p><p>Date Saved</p>
+              <p className="mt-2">Name</p><p>Phone</p><p>Email (Optional)</p><p>Tag</p><p>Date Saved</p>
             </div>
             <div className="space-y-2">
               <input ref={fileInputRef} id="contacts-csv" type="file" accept=".csv" onChange={handleFileChange} className="sr-only" />

@@ -106,7 +106,7 @@ export function ContactsTable({
       )}
 
       <div className="min-h-0 flex-1 overflow-auto rounded-lg border bg-background">
-        <div className="min-w-full">
+        <div className="min-w-[760px]">
           <table className="w-full border-collapse text-sm">
             <thead className="sticky top-0 z-10 bg-background">
               <tr className="border-b bg-background text-left text-muted-foreground">
@@ -120,11 +120,11 @@ export function ContactsTable({
                     className="size-4 cursor-pointer accent-primary"
                   />
                 </th>
-                <th className="w-[25%] px-5 py-3 font-medium">Name</th>
-                <th className="w-[20%] px-5 py-3 font-medium">Phone</th>
+                <th className="w-[20%] px-5 py-3 font-medium">Name</th>
+                <th className="w-[18%] px-5 py-3 font-medium">Phone</th>
+                <th className="w-[22%] px-5 py-3 font-medium">Email</th>
                 <th className="w-[20%] px-5 py-3 font-medium">Tags</th>
                 <th className="w-[20%] px-5 py-3 font-medium">Groups</th>
-                <th className="w-[15%] px-5 py-3 font-medium">Date Added</th>
               </tr>
             </thead>
 
@@ -146,6 +146,13 @@ export function ContactsTable({
                       </td>
                       <td className="px-5 py-4 font-medium">{contact.name}</td>
                       <td className="px-5 py-4">{contact.phone}</td>
+                      <td className="px-5 py-4 text-muted-foreground">
+                        {contact.email ? (
+                          <span className="text-foreground">{contact.email}</span>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
                       <td className="px-5 py-4">
                         {contact.tags?.length ? (
                           <div className="flex flex-wrap gap-1.5">
@@ -182,13 +189,6 @@ export function ContactsTable({
                         ) : (
                           <span className="text-muted-foreground">—</span>
                         )}
-                      </td>
-                      <td className="whitespace-nowrap px-5 py-4">
-                        {new Date(contact.date_saved).toLocaleDateString("en-IN", {
-                          day: "numeric",
-                          month: "short",
-                          year: "numeric",
-                        })}
                       </td>
                     </tr>
                   </ContactDetailsDialog>

@@ -23,9 +23,13 @@ export async function middleware(request: NextRequest) {
     },
   );
 
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   const pathname = request.nextUrl.pathname;
-  const isProtectedRoute = /^(?:\/dashboard|\/contacts|\/groups|\/investors)(?:\/|$)/.test(pathname);
+  const isProtectedRoute =
+    pathname === "/" ||
+    /^(?:\/dashboard|\/contacts|\/groups|\/investors|\/my-profile)(?:\/|$)/.test(pathname);
 
   if (!user && isProtectedRoute) {
     return NextResponse.redirect(new URL("/login", request.url));
@@ -40,10 +44,12 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
+    "/",
     "/login",
     "/dashboard/:path*",
     "/contacts/:path*",
     "/groups/:path*",
     "/investors/:path*",
+    "/my-profile/:path*",
   ],
 };

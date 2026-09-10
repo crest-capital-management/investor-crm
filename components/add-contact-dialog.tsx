@@ -50,9 +50,11 @@ export function AddContactDialog() {
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
 
   const [nameError, setNameError] = useState<string | null>(null);
   const [phoneError, setPhoneError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
 
   const [selectedTag, setSelectedTag] = useState<string>("");
 
@@ -62,8 +64,10 @@ export function AddContactDialog() {
   function resetForm() {
     setName("");
     setPhone("");
+    setEmail("");
     setNameError(null);
     setPhoneError(null);
+    setEmailError(null);
     setSelectedTag("");
     setDateSaved(undefined);
     setDateError(null);
@@ -73,11 +77,13 @@ export function AddContactDialog() {
   async function handleSubmit(formData: FormData) {
     setNameError(null);
     setPhoneError(null);
+    setEmailError(null);
     setDateError(null);
     setError(null);
 
     const trimmedName = name.trim();
     const trimmedPhone = phone.trim();
+    const trimmedEmail = email.trim();
 
     let hasError = false;
 
@@ -96,6 +102,11 @@ export function AddContactDialog() {
       hasError = true;
     }
 
+    if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      setEmailError("Please enter a valid email address.");
+      hasError = true;
+    }
+
     if (!dateSaved) {
       setDateError("Date is required.");
       hasError = true;
@@ -105,6 +116,7 @@ export function AddContactDialog() {
 
     formData.set("name", trimmedName);
     formData.set("phone", trimmedPhone);
+    formData.set("email", trimmedEmail ? trimmedEmail.toLowerCase() : "");
     formData.set(
       "tags",
       JSON.stringify(selectedTag ? [selectedTag] : [])
@@ -197,6 +209,25 @@ export function AddContactDialog() {
 
               {phoneError && (
                 <p className="text-sm text-destructive">{phoneError}</p>
+              )}
+            </div>
+
+            {/* Email (Optional) */}
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="email">Email</Label>
+
+              <Input
+                id="email"
+                name="email"
+                type="email"
+                placeholder="e.g. john@example.com (optional)"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="h-10"
+              />
+
+              {emailError && (
+                <p className="text-sm text-destructive">{emailError}</p>
               )}
             </div>
 

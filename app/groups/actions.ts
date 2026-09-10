@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { createClient } from "@/src/lib/supabase/server";
+import { requireActionAuth } from "@/lib/auth";
 import {
   normalizeGroupMembers,
   type GroupContactRelation,
@@ -15,8 +15,11 @@ function validateName(value: string) {
   return null;
 }
 
-async function hasDuplicateName(name: string, excludeId?: string) {
-  const supabase = await createClient();
+async function hasDuplicateName(
+  supabase: NonNullable<Awaited<ReturnType<typeof requireActionAuth>>["supabase"]>,
+  name: string,
+  excludeId?: string,
+) {
   let query = supabase.from("groups").select("id").ilike("name", name).limit(1);
 
   if (excludeId) query = query.neq("id", excludeId);
@@ -26,15 +29,17 @@ async function hasDuplicateName(name: string, excludeId?: string) {
 }
 
 export async function addGroup(formData: FormData) {
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
   const name = String(formData.get("name") ?? "").trim();
   const validationError = validateName(name);
   if (validationError) return { error: validationError };
 
-  const duplicateCheck = await hasDuplicateName(name);
+  const duplicateCheck = await hasDuplicateName(supabase, name);
   if (duplicateCheck.error) return { error: "The group could not be checked for duplicates." };
   if (duplicateCheck.duplicate) return { error: "A group with this name already exists." };
 
-  const supabase = await createClient();
   const { error } = await supabase.from("groups").insert({ name });
   if (error) return { error: "The group could not be created." };
 
@@ -44,15 +49,17 @@ export async function addGroup(formData: FormData) {
 }
 
 export async function updateGroup(id: string, formData: FormData) {
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
   const name = String(formData.get("name") ?? "").trim();
   const validationError = validateName(name);
   if (validationError) return { error: validationError };
 
-  const duplicateCheck = await hasDuplicateName(name, id);
+  const duplicateCheck = await hasDuplicateName(supabase, name, id);
   if (duplicateCheck.error) return { error: "The group could not be checked for duplicates." };
   if (duplicateCheck.duplicate) return { error: "A group with this name already exists." };
 
-  const supabase = await createClient();
   const { error } = await supabase.from("groups").update({ name }).eq("id", id);
   if (error) return { error: "The group could not be updated." };
 
@@ -62,7 +69,9 @@ export async function updateGroup(id: string, formData: FormData) {
 }
 
 export async function deleteGroup(id: string) {
-  const supabase = await createClient();
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
   const { error: relationError } = await supabase
     .from("contact_groups")
     .delete()
@@ -79,11 +88,13 @@ export async function deleteGroup(id: string) {
 }
 
 export async function removeContactFromGroup(groupId: string, contactId: string) {
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
   if (!groupId.trim() || !contactId.trim()) {
     return { error: "The group membership could not be found." };
   }
 
-  const supabase = await createClient();
   const [{ data: group, error: groupError }, { data: contact, error: contactError }] =
     await Promise.all([
       supabase.from("groups").select("id").eq("id", groupId).maybeSingle(),
@@ -118,14 +129,15 @@ export async function removeContactFromGroup(groupId: string, contactId: string)
 }
 
 export async function removeContactsFromGroup(groupId: string, contactIds: string[]) {
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
   const normalizedContactIds = [
     ...new Set(contactIds.filter((id) => typeof id === "string" && id.trim())),
   ];
 
   if (!groupId.trim()) return { error: "The group could not be found." };
   if (!normalizedContactIds.length) return { error: "No contacts were selected." };
-
-  const supabase = await createClient();
   const { data: group, error: groupError } = await supabase
     .from("groups")
     .select("id")
@@ -168,6 +180,9 @@ export async function removeContactsFromGroup(groupId: string, contactIds: strin
 }
 
 export async function deleteGroups(ids: string[]) {
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
   const groupIds = [
     ...new Set(ids.filter((id) => typeof id === "string" && id.trim())),
   ];
@@ -176,7 +191,6 @@ export async function deleteGroups(ids: string[]) {
     return { error: "No groups were selected." };
   }
 
-  const supabase = await createClient();
   const { data: existingGroups, error: lookupError } = await supabase
     .from("groups")
     .select("id")
@@ -212,9 +226,11 @@ export type GroupContactOption = {
 };
 
 export async function getGroupContactOptions(groupId: string, search = "") {
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
   if (!groupId.trim()) return { error: "The group could not be found." };
 
-  const supabase = await createClient();
   const { data: group, error: groupError } = await supabase
     .from("groups")
     .select("id")
@@ -252,6 +268,9 @@ export async function getGroupContactOptions(groupId: string, search = "") {
 }
 
 export async function addContactsToGroup(groupId: string, contactIds: string[]) {
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
   const normalizedContactIds = [
     ...new Set(contactIds.filter((id) => typeof id === "string" && id.trim())),
   ];
@@ -259,7 +278,6 @@ export async function addContactsToGroup(groupId: string, contactIds: string[]) 
   if (!groupId.trim()) return { error: "The group could not be found." };
   if (!normalizedContactIds.length) return { error: "No contacts were selected." };
 
-  const supabase = await createClient();
   const { data: group, error: groupError } = await supabase
     .from("groups")
     .select("id")

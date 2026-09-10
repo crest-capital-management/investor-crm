@@ -47,6 +47,7 @@ export type ContactRow = {
   id: string;
   name: string;
   phone: string;
+  email?: string | null;
   tags: string[] | null;
   date_saved: string;
   contact_groups:
@@ -78,6 +79,7 @@ export function ContactDetailsDialog({
   const [currentContact, setCurrentContact] = useState(contact);
   const [name, setName] = useState(contact.name);
   const [phone, setPhone] = useState(contact.phone);
+  const [email, setEmail] = useState(contact.email ?? "");
   const [tag, setTag] = useState(contact.tags?.[0] ?? "");
   const [dateSaved, setDateSaved] = useState(contact.date_saved.slice(0, 10));
   const [addingTag, setAddingTag] = useState(false);
@@ -92,6 +94,7 @@ export function ContactDetailsDialog({
     setCurrentContact(contact);
     setName(contact.name);
     setPhone(contact.phone);
+    setEmail(contact.email ?? "");
     setTag(contact.tags?.[0] ?? "");
     setDateSaved(contact.date_saved.slice(0, 10));
   }
@@ -117,6 +120,16 @@ export function ContactDetailsDialog({
       toast("Phone number copied");
     } catch {
       toast("Could not copy phone number", "error");
+    }
+  }
+
+  async function copyEmail() {
+    if (!currentContact.email) return;
+    try {
+      await navigator.clipboard.writeText(currentContact.email);
+      toast("Email copied");
+    } catch {
+      toast("Could not copy email", "error");
     }
   }
 
@@ -178,12 +191,18 @@ export function ContactDetailsDialog({
 
     const trimmedName = name.trim();
     const trimmedPhone = phone.trim();
+    const trimmedEmail = email.trim();
+
     if (!trimmedName) {
       setError("Name is required.");
       return;
     }
     if (!/^\d{7,15}$/.test(trimmedPhone)) {
       setError("Enter a valid phone number (7-15 digits).");
+      return;
+    }
+    if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      setError("Please enter a valid email address.");
       return;
     }
     if (!dateSaved) {
@@ -194,6 +213,7 @@ export function ContactDetailsDialog({
     const formData = new FormData();
     formData.set("name", trimmedName);
     formData.set("phone", trimmedPhone);
+    formData.set("email", trimmedEmail ? trimmedEmail.toLowerCase() : "");
     formData.set("tags", JSON.stringify(tag.trim() ? [tag.trim()] : []));
     formData.set("dateSaved", dateSaved);
 
@@ -210,6 +230,7 @@ export function ContactDetailsDialog({
       ...currentContact,
       name: trimmedName,
       phone: trimmedPhone,
+      email: trimmedEmail ? trimmedEmail.toLowerCase() : null,
       tags: tag.trim() ? [tag.trim()] : [],
       date_saved: dateSaved,
     });
@@ -274,6 +295,18 @@ export function ContactDetailsDialog({
                     id={`edit-phone-${currentContact.id}`}
                     value={phone}
                     onChange={(event) => setPhone(event.target.value)}
+                    className="h-10"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor={`edit-email-${currentContact.id}`}>Email</Label>
+                  <Input
+                    id={`edit-email-${currentContact.id}`}
+                    type="email"
+                    placeholder="e.g. john@example.com (optional)"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
                     className="h-10"
                   />
                 </div>
@@ -363,6 +396,24 @@ export function ContactDetailsDialog({
                 <div className="rounded-lg border bg-background px-4 py-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 space-y-2">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Email</p>
+                      {currentContact.email ? (
+                        <p className="truncate">{currentContact.email}</p>
+                      ) : (
+                        <p className="text-muted-foreground">No email added</p>
+                      )}
+                    </div>
+                    {currentContact.email && (
+                      <Button type="button" variant="outline" onClick={copyEmail} className="shrink-0">
+                        <Copy className="size-4" />
+                        Copy
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                <div className="rounded-lg border bg-background px-4 py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-2">
                       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Tags</p>
                       {currentContact.tags?.length ? (
                         <div className="flex flex-wrap gap-1.5">
@@ -397,7 +448,6 @@ export function ContactDetailsDialog({
                     <p>{new Date(currentContact.date_saved).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</p>
                   </div>
                 </div>
-
                 {error && (
                   <p className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
                     {error}

@@ -3,6 +3,7 @@ import { Geist, Geist_Mono, Playfair_Display } from "next/font/google";
 import { AppSidebar } from "@/components/app-sidebar";
 import { TopNav } from "@/components/top-nav";
 import { ToastProvider } from "@/components/toast-provider";
+import { SidebarProvider } from "@/components/sidebar-provider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -33,11 +34,13 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="flex h-full flex-col">
         <ToastProvider>
-          <TopNav />
-          <div className="flex flex-1 overflow-hidden">
-            <AppSidebar />
-            <main className="flex min-h-0 flex-1 flex-col overflow-y-auto">{children}</main>
-          </div>
+          <SidebarProvider>
+            <TopNav />
+            <div className="flex flex-1 overflow-hidden">
+              <AppSidebar />
+              <main className="flex min-h-0 flex-1 flex-col overflow-y-auto">{children}</main>
+            </div>
+          </SidebarProvider>
         </ToastProvider>
       </body>
     </html>

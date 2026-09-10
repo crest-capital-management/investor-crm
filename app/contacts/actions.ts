@@ -1,6 +1,6 @@
 "use server";
 
-import { createClient } from "@/src/lib/supabase/server";
+import { requireActionAuth } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 
 const DUPLICATE_PHONE_ERROR =
@@ -10,9 +10,19 @@ function normalizePhone(value: string) {
   return value.replace(/\D/g, "");
 }
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function isValidEmail(value: string) {
+  return EMAIL_REGEX.test(value);
+}
+
 export async function addContact(formData: FormData) {
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
   const name = formData.get("name") as string;
   const phone = normalizePhone(String(formData.get("phone") ?? ""));
+  const emailRaw = String(formData.get("email") ?? "").trim();
   const tagsRaw = formData.get("tags") as string;
   const dateSaved = formData.get("dateSaved") as string;
 
@@ -31,11 +41,18 @@ export async function addContact(formData: FormData) {
     return { error: "Phone must contain 7-15 digits." };
   }
 
+  let normalizedEmail: string | null = null;
+  if (emailRaw) {
+    if (!isValidEmail(emailRaw)) {
+      return { error: "Please enter a valid email address." };
+    }
+    normalizedEmail = emailRaw.toLowerCase();
+  }
+
   if (!dateSaved) {
     return { error: "Date is required." };
   }
 
-  const supabase = await createClient();
   const { data: existingContacts, error: lookupError } = await supabase
     .from("contacts")
     .select("phone")
@@ -55,7 +72,13 @@ export async function addContact(formData: FormData) {
 
   const { error } = await supabase
     .from("contacts")
-    .insert({ name, phone, tags, date_saved: dateSaved });
+    .insert({
+      name,
+      phone,
+      email: normalizedEmail,
+      tags,
+      date_saved: dateSaved,
+    });
 
   if (error) {
     return { error: error.message };
@@ -66,8 +89,12 @@ export async function addContact(formData: FormData) {
 }
 
 export async function updateContact(id: string, formData: FormData) {
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
   const name = String(formData.get("name") ?? "").trim();
   const phone = normalizePhone(String(formData.get("phone") ?? ""));
+  const emailRaw = String(formData.get("email") ?? "").trim();
   const tagsRaw = String(formData.get("tags") ?? "");
   const dateSaved = String(formData.get("dateSaved") ?? "").trim();
 
@@ -89,11 +116,18 @@ export async function updateContact(id: string, formData: FormData) {
     return { error: "Phone must contain 7-15 digits." };
   }
 
+  let normalizedEmail: string | null = null;
+  if (emailRaw) {
+    if (!isValidEmail(emailRaw)) {
+      return { error: "Please enter a valid email address." };
+    }
+    normalizedEmail = emailRaw.toLowerCase();
+  }
+
   if (!isValidDate(dateSaved)) {
     return { error: "Date must use a valid YYYY-MM-DD date." };
   }
 
-  const supabase = await createClient();
   const { data: duplicate, error: duplicateError } = await supabase
     .from("contacts")
     .select("id")
@@ -130,7 +164,13 @@ export async function updateContact(id: string, formData: FormData) {
 
   const { error } = await supabase
     .from("contacts")
-    .update({ name, phone, tags, date_saved: dateSaved })
+    .update({
+      name,
+      phone,
+      email: normalizedEmail,
+      tags,
+      date_saved: dateSaved,
+    })
     .eq("id", id);
 
   if (error) {
@@ -144,11 +184,13 @@ export async function updateContact(id: string, formData: FormData) {
 const CONTACT_TAG_OPTIONS = ["Investor", "Alumni", "Prospect", "Partner", "Advisor"];
 
 export async function addTagToContact(id: string, tag: string) {
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
   const normalizedTag = tag.trim();
   if (!id.trim()) return { error: "The contact could not be found." };
   if (!CONTACT_TAG_OPTIONS.includes(normalizedTag)) return { error: "That tag is not available." };
 
-  const supabase = await createClient();
   const { data: contact, error: contactError } = await supabase
     .from("contacts")
     .select("id, tags")
@@ -170,12 +212,175 @@ export async function addTagToContact(id: string, tag: string) {
   return { success: true, tags: updatedTags };
 }
 
+export async function addMeetingNote(contactId: string, note: string) {
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
+  const normalizedContactId = contactId.trim();
+  const normalizedNote = note.trim();
+
+  if (!normalizedContactId) return { error: "The contact could not be found." };
+  if (!normalizedNote) return { error: "Meeting note is required." };
+
+  const { data: contact, error: contactError } = await supabase
+    .from("contacts")
+    .select("id")
+    .eq("id", normalizedContactId)
+    .maybeSingle();
+
+  if (contactError || !contact) return { error: "The contact could not be found." };
+
+  const { error } = await supabase.from("interactions").insert({
+    contact_id: normalizedContactId,
+    type: "meeting",
+    note: normalizedNote,
+  });
+
+  if (error) return { error: "The meeting note could not be saved." };
+
+  revalidatePath("/investors");
+  revalidatePath(`/investors/${normalizedContactId}`);
+  return { success: true };
+}
+
+export type MeetingNote = {
+  id: string;
+  note: string;
+  created_at: string;
+};
+
+export async function getMeetingNotes(contactId: string) {
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
+  const normalizedContactId = contactId.trim();
+  if (!normalizedContactId) return { error: "The contact could not be found." };
+
+  const { data: notes, error } = await supabase
+    .from("interactions")
+    .select("id, note, created_at")
+    .eq("contact_id", normalizedContactId)
+    .eq("type", "meeting")
+    .order("created_at", { ascending: false });
+
+  if (error) return { error: "Meeting notes could not be loaded." };
+
+  return { notes: (notes ?? []) as MeetingNote[] };
+}
+
+export async function updateMeetingNote(
+  noteId: string,
+  contactId: string,
+  note: string,
+) {
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
+  const normalizedNoteId = noteId.trim();
+  const normalizedContactId = contactId.trim();
+  const normalizedNote = note.trim();
+
+  if (!normalizedNoteId) return { error: "Invalid note ID." };
+  if (!normalizedContactId) return { error: "The contact could not be found." };
+  if (!normalizedNote) return { error: "Meeting note is required." };
+
+  // Verify contact exists
+  const { data: contact, error: contactError } = await supabase
+    .from("contacts")
+    .select("id")
+    .eq("id", normalizedContactId)
+    .maybeSingle();
+
+  if (contactError || !contact) return { error: "The contact could not be found." };
+
+  // Verify interaction exists, belongs to contact, and is strictly of type 'meeting'
+  const { data: interaction, error: interactionError } = await supabase
+    .from("interactions")
+    .select("id, contact_id, type")
+    .eq("id", normalizedNoteId)
+    .maybeSingle();
+
+  if (interactionError || !interaction) return { error: "Meeting note not found." };
+  if (interaction.contact_id !== normalizedContactId) {
+    return { error: "Meeting note does not belong to this contact." };
+  }
+  if (interaction.type !== "meeting") {
+    return { error: "Only meeting notes can be edited." };
+  }
+
+  // Update only the note text. Preserves created_at, contact_id, type, id.
+  const { error: updateError } = await supabase
+    .from("interactions")
+    .update({ note: normalizedNote })
+    .eq("id", normalizedNoteId)
+    .eq("contact_id", normalizedContactId)
+    .eq("type", "meeting");
+
+  if (updateError) return { error: "The meeting note could not be updated." };
+
+  revalidatePath("/investors");
+  revalidatePath(`/investors/${normalizedContactId}`);
+  return { success: true };
+}
+
+export async function deleteMeetingNote(noteId: string, contactId: string) {
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
+  const normalizedNoteId = noteId.trim();
+  const normalizedContactId = contactId.trim();
+
+  if (!normalizedNoteId) return { error: "Invalid note ID." };
+  if (!normalizedContactId) return { error: "The contact could not be found." };
+
+  // Verify contact exists
+  const { data: contact, error: contactError } = await supabase
+    .from("contacts")
+    .select("id")
+    .eq("id", normalizedContactId)
+    .maybeSingle();
+
+  if (contactError || !contact) return { error: "The contact could not be found." };
+
+  // Verify interaction exists, belongs to contact, and is strictly of type 'meeting'
+  const { data: interaction, error: interactionError } = await supabase
+    .from("interactions")
+    .select("id, contact_id, type")
+    .eq("id", normalizedNoteId)
+    .maybeSingle();
+
+  if (interactionError || !interaction) return { error: "Meeting note not found." };
+  if (interaction.contact_id !== normalizedContactId) {
+    return { error: "Meeting note does not belong to this contact." };
+  }
+  if (interaction.type !== "meeting") {
+    return { error: "Only meeting notes can be deleted." };
+  }
+
+  // Strictly delete where id = noteId, contact_id = contactId, and type = 'meeting'
+  // NEVER allow deleting type = 'follow_up'
+  const { error: deleteError } = await supabase
+    .from("interactions")
+    .delete()
+    .eq("id", normalizedNoteId)
+    .eq("contact_id", normalizedContactId)
+    .eq("type", "meeting");
+
+  if (deleteError) return { error: "The meeting note could not be deleted." };
+
+  revalidatePath("/investors");
+  revalidatePath(`/investors/${normalizedContactId}`);
+  return { success: true };
+}
+
 export type ContactGroupOption = { id: string; name: string };
 
 export async function getContactGroupOptions(contactId: string) {
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
   if (!contactId.trim()) return { error: "The contact could not be found." };
 
-  const supabase = await createClient();
   const [{ data: contact, error: contactError }, { data: groups, error: groupsError }, { data: memberships, error: membershipsError }] = await Promise.all([
     supabase.from("contacts").select("id").eq("id", contactId).maybeSingle(),
     supabase.from("groups").select("id, name").order("name", { ascending: true }),
@@ -192,11 +397,13 @@ export async function getContactGroupOptions(contactId: string) {
 }
 
 export async function addContactToGroups(contactId: string, groupIds: string[]) {
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
   const normalizedGroupIds = [...new Set(groupIds.filter((id) => typeof id === "string" && id.trim()))];
   if (!contactId.trim()) return { error: "The contact could not be found." };
   if (!normalizedGroupIds.length) return { error: "No groups were selected." };
 
-  const supabase = await createClient();
   const [{ data: contact, error: contactError }, { data: groups, error: groupsError }, { data: memberships, error: membershipsError }] = await Promise.all([
     supabase.from("contacts").select("id").eq("id", contactId).maybeSingle(),
     supabase.from("groups").select("id, name").in("id", normalizedGroupIds),
@@ -230,7 +437,9 @@ export async function addContactToGroups(contactId: string, groupIds: string[]) 
 }
 
 export async function deleteContact(id: string) {
-  const supabase = await createClient();
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
   const { error: relationError } = await supabase
     .from("contact_groups")
     .delete()
@@ -251,13 +460,14 @@ export async function deleteContact(id: string) {
 }
 
 export async function deleteContacts(ids: string[]) {
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
   const contactIds = [...new Set(ids.filter(Boolean))];
 
   if (!contactIds.length) {
     return { error: "No contacts were selected." };
   }
-
-  const supabase = await createClient();
   const { error: relationError } = await supabase
     .from("contact_groups")
     .delete()
@@ -283,6 +493,7 @@ export async function deleteContacts(ids: string[]) {
 export type ImportContactRow = {
   name: string;
   phone: string;
+  email?: string | null;
   tag: string;
   dateSaved: string;
 };
@@ -307,6 +518,10 @@ function validateImportRow(row: ImportContactRow) {
     return "Phone must contain 7-15 digits.";
   }
 
+  if (row.email && !isValidEmail(row.email)) {
+    return "Please enter a valid email address.";
+  }
+
   if (!isValidDate(row.dateSaved)) {
     return "Date Saved must use a valid YYYY-MM-DD date.";
   }
@@ -315,17 +530,27 @@ function validateImportRow(row: ImportContactRow) {
 }
 
 export async function importContacts(rowsRaw: string) {
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
   let rows: ImportContactRow[];
 
   try {
     const parsedRows: unknown = JSON.parse(rowsRaw);
     if (!Array.isArray(parsedRows)) throw new Error("Invalid rows");
-    rows = parsedRows.map((row) => ({
-      name: String((row as ImportContactRow).name ?? "").trim(),
-      phone: String((row as ImportContactRow).phone ?? "").trim(),
-      tag: String((row as ImportContactRow).tag ?? "").trim(),
-      dateSaved: String((row as ImportContactRow).dateSaved ?? "").trim(),
-    }));
+    rows = parsedRows.map((row) => {
+      const rowObj = row as ImportContactRow;
+      const emailRaw = rowObj.email !== undefined && rowObj.email !== null
+        ? String(rowObj.email).trim()
+        : "";
+      return {
+        name: String(rowObj.name ?? "").trim(),
+        phone: String(rowObj.phone ?? "").trim(),
+        email: emailRaw || null,
+        tag: String(rowObj.tag ?? "").trim(),
+        dateSaved: String(rowObj.dateSaved ?? "").trim(),
+      };
+    });
   } catch {
     return { error: "The CSV data could not be processed." };
   }
@@ -337,7 +562,6 @@ export async function importContacts(rowsRaw: string) {
   const validRows = rows.filter((row) => !validateImportRow(row));
   const rejected = rows.length - validRows.length;
 
-  const supabase = await createClient();
   const { data: existingContacts, error: lookupError } = await supabase
     .from("contacts")
     .select("phone")
@@ -369,6 +593,7 @@ export async function importContacts(rowsRaw: string) {
       rowsToInsert.map((row) => ({
         name: row.name,
         phone: normalizePhone(row.phone),
+        email: row.email ? row.email.toLowerCase() : null,
         tags: row.tag ? [row.tag] : [],
         date_saved: row.dateSaved,
       }))

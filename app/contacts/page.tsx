@@ -1,4 +1,4 @@
-import { createClient } from "@/src/lib/supabase/server";
+import { requireAuth } from "@/lib/auth";
 import { AddContactDialog } from "@/components/add-contact-dialog";
 import type { ContactRow } from "@/components/contact-details-dialog";
 import { ContactsTable } from "@/components/contacts-table";
@@ -12,17 +12,17 @@ export default async function ContactsPage({
 }) {
   const search = (await searchParams).search?.trim() ?? "";
 
-  const supabase = await createClient();
+  const { supabase } = await requireAuth();
 
   let contactsQuery = supabase
     .from("contacts")
     .select(
-      "id, name, phone, tags, date_saved, contact_groups(groups(id, name))"
+      "id, name, phone, email, tags, date_saved, contact_groups(groups(id, name))"
     );
 
   if (search) {
     contactsQuery = contactsQuery.or(
-      `name.ilike.%${search}%,phone.ilike.%${search}%`
+      `name.ilike.%${search}%,phone.ilike.%${search}%,email.ilike.%${search}%`
     );
   }
 
@@ -39,7 +39,7 @@ export default async function ContactsPage({
 
   if (error || contactMetricsError || groupsError) {
     return (
-      <div className="p-8">
+      <div className="p-4 sm:p-6 lg:p-8">
         <h1 className="text-2xl font-semibold">Contacts</h1>
         <p className="mt-2 text-destructive">
           Error loading contacts: {(error || contactMetricsError || groupsError)?.message}
@@ -58,9 +58,9 @@ export default async function ContactsPage({
   const totalGroups = groups?.length ?? 0;
 
   return (
-    <div className="flex min-h-0 flex-col p-8">
+    <div className="flex min-h-0 flex-col p-4 sm:p-6 lg:p-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Contacts</h1>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -68,7 +68,7 @@ export default async function ContactsPage({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <ImportContactsDialog />
           <AddContactDialog />
         </div>
@@ -101,7 +101,7 @@ export default async function ContactsPage({
         <Input
           name="search"
           defaultValue={search}
-          placeholder="Search by name or phone..."
+          placeholder="Search by name, phone, or email..."
           className="h-10"
         />
       </form>
