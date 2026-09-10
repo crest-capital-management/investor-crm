@@ -4,7 +4,10 @@ import { useState, type ReactElement } from "react";
 import { useRouter } from "next/navigation";
 
 import {
+  addContactToGroups,
+  addTagToContact,
   deleteContact,
+  getContactGroupOptions,
   updateContact,
 } from "@/app/contacts/actions";
 import { TAG_OPTIONS } from "@/components/add-contact-dialog";
@@ -38,7 +41,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { CalendarIcon, Trash2 } from "lucide-react";
+import { CalendarIcon, Copy, Plus, Trash2 } from "lucide-react";
 
 export type ContactRow = {
   id: string;
@@ -77,6 +80,13 @@ export function ContactDetailsDialog({
   const [phone, setPhone] = useState(contact.phone);
   const [tag, setTag] = useState(contact.tags?.[0] ?? "");
   const [dateSaved, setDateSaved] = useState(contact.date_saved.slice(0, 10));
+  const [addingTag, setAddingTag] = useState(false);
+  const [selectedTagToAdd, setSelectedTagToAdd] = useState("");
+  const [addingGroups, setAddingGroups] = useState(false);
+  const [availableGroups, setAvailableGroups] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
+  const [loadingGroups, setLoadingGroups] = useState(false);
+  const [savingGroups, setSavingGroups] = useState(false);
 
   function loadContact() {
     setCurrentContact(contact);
@@ -99,6 +109,67 @@ export function ContactDetailsDialog({
   function beginEdit() {
     setError(null);
     setEditing(true);
+  }
+
+  async function copyPhone() {
+    try {
+      await navigator.clipboard.writeText(currentContact.phone);
+      toast("Phone number copied");
+    } catch {
+      toast("Could not copy phone number", "error");
+    }
+  }
+
+  async function handleAddTag() {
+    if (!selectedTagToAdd) return;
+    setAddingTag(true);
+    const result = await addTagToContact(currentContact.id, selectedTagToAdd);
+    setAddingTag(false);
+    if (result.error) {
+      toast(result.error, "error");
+      return;
+    }
+    setCurrentContact((existing) => ({ ...existing, tags: result.tags ?? existing.tags }));
+    setSelectedTagToAdd("");
+    setAddingTag(false);
+    toast("Tag added successfully");
+  }
+
+  async function openAddGroups() {
+    setAddingGroups(true);
+    setLoadingGroups(true);
+    const result = await getContactGroupOptions(currentContact.id);
+    setLoadingGroups(false);
+    if (result.error) {
+      toast(result.error, "error");
+      return;
+    }
+    setAvailableGroups(result.groups ?? []);
+  }
+
+  function toggleGroupSelection(groupId: string) {
+    setSelectedGroupIds((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  }
+
+  async function handleAddGroups() {
+    if (!selectedGroupIds.size) return;
+    setSavingGroups(true);
+    const result = await addContactToGroups(currentContact.id, [...selectedGroupIds]);
+    setSavingGroups(false);
+    if (result.error) {
+      toast(result.error, "error");
+      return;
+    }
+    setCurrentContact((existing) => ({ ...existing, contact_groups: result.groups ?? existing.contact_groups }));
+    setSelectedGroupIds(new Set());
+    setAddingGroups(false);
+    router.refresh();
+    toast(result.added === 1 ? "Added to group" : `${result.added} groups added`);
   }
 
   async function handleSave(event: React.FormEvent<HTMLFormElement>) {
@@ -271,69 +342,60 @@ export function ContactDetailsDialog({
           ) : (
             <>
               <div className="flex-1 space-y-6 overflow-y-auto px-6 py-6">
-                <div className="space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Name
-                  </p>
-                  <p className="text-base font-medium">{currentContact.name}</p>
-                </div>
-                <div className="space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Phone
-                  </p>
-                  <p>{currentContact.phone}</p>
-                </div>
-                <div className="space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Tags
-                  </p>
-                  {currentContact.tags?.length ? (
-                    <div className="flex flex-wrap gap-1.5">
-                      {currentContact.tags.map((contactTag) => (
-                        <span
-                          key={contactTag}
-                          className="inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground"
-                        >
-                          {contactTag}
-                        </span>
-                      ))}
+                <div className="rounded-lg border bg-background px-4 py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-2">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Name</p>
+                      <p className="truncate text-base font-medium">{currentContact.name}</p>
                     </div>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
+                    <Button type="button" variant="outline" onClick={beginEdit} className="shrink-0">Edit</Button>
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Groups
-                  </p>
-                  {currentContact.contact_groups?.length ? (
-                    <div className="flex flex-wrap gap-1.5">
-                      {currentContact.contact_groups.map(({ groups }) => {
-                        const group = Array.isArray(groups) ? groups[0] : groups;
-                        return (
-                          <span
-                            key={group.id}
-                            className="inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground"
-                          >
-                            {group.name}
-                          </span>
-                        );
-                      })}
+                <div className="rounded-lg border bg-background px-4 py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-2">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Phone</p>
+                      <p className="truncate">{currentContact.phone}</p>
                     </div>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
+                    <Button type="button" variant="outline" onClick={copyPhone} className="shrink-0"><Copy className="size-4" />Copy</Button>
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Date Saved
-                  </p>
-                  <p>
-                    {new Date(currentContact.date_saved).toLocaleDateString(
-                      "en-IN",
-                      { day: "numeric", month: "short", year: "numeric" }
-                    )}
-                  </p>
+                <div className="rounded-lg border bg-background px-4 py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-2">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Tags</p>
+                      {currentContact.tags?.length ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {currentContact.tags.map((contactTag) => (
+                            <span key={contactTag} className="inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">{contactTag}</span>
+                          ))}
+                        </div>
+                      ) : <span className="text-muted-foreground">—</span>}
+                  </div>
+                    <Button type="button" variant="outline" onClick={() => { setSelectedTagToAdd(""); setAddingTag(true); }} className="shrink-0"><Plus className="size-4" />Add Tag</Button>
+                  </div>
+                </div>
+                <div className="rounded-lg border bg-background px-4 py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-2">
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Groups</p>
+                    {currentContact.contact_groups?.length ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {currentContact.contact_groups.map(({ groups }) => {
+                          const group = Array.isArray(groups) ? groups[0] : groups;
+                          return <span key={group.id} className="inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">{group.name}</span>;
+                        })}
+                      </div>
+                    ) : <span className="text-muted-foreground">—</span>}
+                    </div>
+                    <Button type="button" variant="outline" onClick={openAddGroups} className="shrink-0"><Plus className="size-4" />Add to Group</Button>
+                  </div>
+                </div>
+                <div className="rounded-lg border bg-background px-4 py-4">
+                  <div className="min-w-0 space-y-2">
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Date Saved</p>
+                    <p>{new Date(currentContact.date_saved).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</p>
+                  </div>
                 </div>
 
                 {error && (
@@ -385,6 +447,42 @@ export function ContactDetailsDialog({
             >
               {deleting ? "Deleting..." : "Delete Contact"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={addingTag} onOpenChange={setAddingTag}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Tag</DialogTitle>
+            <DialogDescription>Choose an available tag for this contact.</DialogDescription>
+          </DialogHeader>
+          <Select value={selectedTagToAdd} onValueChange={(value) => setSelectedTagToAdd(value ?? "")}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select a tag" /></SelectTrigger>
+            <SelectContent>
+              {TAG_OPTIONS.filter((option) => !currentContact.tags?.some((tagValue) => tagValue.toLowerCase() === option.toLowerCase())).map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+            <Button type="button" onClick={handleAddTag} disabled={!selectedTagToAdd || addingTag}>{addingTag && selectedTagToAdd ? "Adding..." : "Add Tag"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={addingGroups} onOpenChange={(next) => { setAddingGroups(next); if (!next) setSelectedGroupIds(new Set()); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add to Group</DialogTitle>
+            <DialogDescription>Select one or more groups for this contact.</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-64 overflow-y-auto rounded-lg border">
+            {loadingGroups ? <p className="px-4 py-8 text-center text-sm text-muted-foreground">Loading groups...</p> : availableGroups.length ? <div className="divide-y">{availableGroups.map((availableGroup) => <label key={availableGroup.id} className="flex cursor-pointer items-center gap-3 px-3 py-3 hover:bg-muted/20"><input type="checkbox" checked={selectedGroupIds.has(availableGroup.id)} onChange={() => toggleGroupSelection(availableGroup.id)} className="size-4 cursor-pointer accent-primary" /><span className="text-sm font-medium">{availableGroup.name}</span></label>)}</div> : <p className="px-4 py-8 text-center text-sm text-muted-foreground">All groups are already assigned.</p>}
+          </div>
+          <p className="text-sm font-medium text-muted-foreground">{selectedGroupIds.size} group{selectedGroupIds.size === 1 ? "" : "s"} selected</p>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+            <Button type="button" onClick={handleAddGroups} disabled={!selectedGroupIds.size || savingGroups || loadingGroups}>{savingGroups ? "Adding..." : "Add to Group"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

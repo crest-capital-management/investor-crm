@@ -141,6 +141,94 @@ export async function updateContact(id: string, formData: FormData) {
   return { success: true };
 }
 
+const CONTACT_TAG_OPTIONS = ["Investor", "Alumni", "Prospect", "Partner", "Advisor"];
+
+export async function addTagToContact(id: string, tag: string) {
+  const normalizedTag = tag.trim();
+  if (!id.trim()) return { error: "The contact could not be found." };
+  if (!CONTACT_TAG_OPTIONS.includes(normalizedTag)) return { error: "That tag is not available." };
+
+  const supabase = await createClient();
+  const { data: contact, error: contactError } = await supabase
+    .from("contacts")
+    .select("id, tags")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (contactError || !contact) return { error: "The contact could not be found." };
+
+  const tags = Array.isArray(contact.tags) ? contact.tags.filter((value): value is string => typeof value === "string") : [];
+  if (tags.some((value) => value.toLowerCase() === normalizedTag.toLowerCase())) {
+    return { error: "That tag is already assigned to this contact." };
+  }
+
+  const updatedTags = [...tags, normalizedTag];
+  const { error } = await supabase.from("contacts").update({ tags: updatedTags }).eq("id", id);
+  if (error) return { error: "The tag could not be added." };
+
+  revalidatePath("/contacts");
+  return { success: true, tags: updatedTags };
+}
+
+export type ContactGroupOption = { id: string; name: string };
+
+export async function getContactGroupOptions(contactId: string) {
+  if (!contactId.trim()) return { error: "The contact could not be found." };
+
+  const supabase = await createClient();
+  const [{ data: contact, error: contactError }, { data: groups, error: groupsError }, { data: memberships, error: membershipsError }] = await Promise.all([
+    supabase.from("contacts").select("id").eq("id", contactId).maybeSingle(),
+    supabase.from("groups").select("id, name").order("name", { ascending: true }),
+    supabase.from("contact_groups").select("group_id").eq("contact_id", contactId),
+  ]);
+
+  if (contactError || !contact) return { error: "The contact could not be found." };
+  if (groupsError || membershipsError) return { error: "Groups could not be loaded." };
+
+  const memberIds = new Set((memberships ?? []).map((membership) => membership.group_id));
+  return {
+    groups: (groups ?? []).filter((group) => !memberIds.has(group.id)) as ContactGroupOption[],
+  };
+}
+
+export async function addContactToGroups(contactId: string, groupIds: string[]) {
+  const normalizedGroupIds = [...new Set(groupIds.filter((id) => typeof id === "string" && id.trim()))];
+  if (!contactId.trim()) return { error: "The contact could not be found." };
+  if (!normalizedGroupIds.length) return { error: "No groups were selected." };
+
+  const supabase = await createClient();
+  const [{ data: contact, error: contactError }, { data: groups, error: groupsError }, { data: memberships, error: membershipsError }] = await Promise.all([
+    supabase.from("contacts").select("id").eq("id", contactId).maybeSingle(),
+    supabase.from("groups").select("id, name").in("id", normalizedGroupIds),
+    supabase.from("contact_groups").select("group_id").eq("contact_id", contactId).in("group_id", normalizedGroupIds),
+  ]);
+
+  if (contactError || !contact) return { error: "The contact could not be found." };
+  if (groupsError || groups?.length !== normalizedGroupIds.length) return { error: "One or more selected groups could not be found." };
+  if (membershipsError) return { error: "Group memberships could not be checked." };
+
+  const existingIds = new Set((memberships ?? []).map((membership) => membership.group_id));
+  const newGroupIds = normalizedGroupIds.filter((id) => !existingIds.has(id));
+  if (newGroupIds.length) {
+    const { error } = await supabase.from("contact_groups").insert(newGroupIds.map((groupId) => ({ contact_id: contactId, group_id: groupId })));
+    if (error) return { error: "The contact could not be added to the groups." };
+  }
+
+  const { data: updatedMemberships, error: updatedMembershipsError } = await supabase
+    .from("contact_groups")
+    .select("groups(id, name)")
+    .eq("contact_id", contactId);
+  if (updatedMembershipsError) return { error: "The contact groups could not be refreshed." };
+
+  revalidatePath("/contacts");
+  revalidatePath("/groups");
+  return {
+    success: true,
+    added: newGroupIds.length,
+    groups: updatedMemberships ?? [],
+  };
+}
+
 export async function deleteContact(id: string) {
   const supabase = await createClient();
   const { error: relationError } = await supabase
