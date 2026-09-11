@@ -1,9 +1,14 @@
+import type { Metadata } from "next";
 import { AddGroupDialog } from "@/components/add-group-dialog";
 import { GroupRow } from "@/components/group-details-dialog";
 import { GroupsTable } from "@/components/groups-table";
 import { Input } from "@/components/ui/input";
 import { normalizeGroupMembers, type GroupContactRelation } from "@/lib/group-members";
 import { requireAuth } from "@/lib/auth";
+
+export const metadata: Metadata = {
+  title: "Groups",
+};
 
 export default async function GroupsPage({ searchParams }: { searchParams: Promise<{ search?: string }> }) {
   const search = (await searchParams).search?.trim() ?? "";

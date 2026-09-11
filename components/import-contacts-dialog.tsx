@@ -246,7 +246,9 @@ export function ImportContactsDialog() {
           if (!next && !workspaceOpen) resetState();
         }}
       >
-        <SheetTrigger render={<Button variant="outline" />}>Import CSV</SheetTrigger>
+        <SheetTrigger render={<Button variant="outline" className="h-9 px-3 text-xs sm:h-10 sm:px-4 sm:text-sm" />}>
+          Import CSV
+        </SheetTrigger>
         <SheetContent side="right" className="flex flex-col gap-0">
           <SheetHeader className="border-b px-6 py-5">
             <SheetTitle className="text-xl">Import Contacts</SheetTitle>

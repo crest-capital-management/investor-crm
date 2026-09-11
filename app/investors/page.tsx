@@ -1,8 +1,13 @@
+import type { Metadata } from "next";
 import { requireAuth } from "@/lib/auth";
 import {
   InvestorTrackingTable,
   type InvestorTrackingRow,
 } from "@/components/investor-tracking-table";
+
+export const metadata: Metadata = {
+  title: "Investors",
+};
 
 type InteractionRow = {
   contact_id: string;

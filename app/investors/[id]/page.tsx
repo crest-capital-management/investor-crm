@@ -1,8 +1,13 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { InvestorDetail } from "@/components/investor-detail";
 import type { MeetingNote } from "@/app/contacts/actions";
 import type { FollowUp } from "@/app/investors/actions";
+
+export const metadata: Metadata = {
+  title: "Investor Details",
+};
 
 export default async function InvestorDetailPage({
   params,

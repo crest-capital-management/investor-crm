@@ -32,10 +32,10 @@ export function InvestorTrackingTable({
         <table className="w-full border-collapse text-sm">
           <thead className="sticky top-0 z-10 bg-background">
             <tr className="border-b bg-background text-left text-muted-foreground">
-              <th className="w-[30%] px-5 py-3 font-medium">Name</th>
-              <th className="w-[25%] px-5 py-3 font-medium">Phone</th>
-              <th className="w-[22.5%] px-5 py-3 font-medium">Last Interaction</th>
-              <th className="w-[22.5%] px-5 py-3 font-medium">Next Follow-up</th>
+              <th className="w-[30%] px-5 py-2.5 sm:py-3 font-medium">Name</th>
+              <th className="w-[25%] px-5 py-2.5 sm:py-3 font-medium">Phone</th>
+              <th className="w-[22.5%] px-5 py-2.5 sm:py-3 font-medium">Last Interaction</th>
+              <th className="w-[22.5%] px-5 py-2.5 sm:py-3 font-medium">Next Follow-up</th>
             </tr>
           </thead>
 
@@ -55,12 +55,12 @@ export function InvestorTrackingTable({
                   tabIndex={0}
                   role="link"
                 >
-                  <td className="px-5 py-4 font-medium">{investor.name}</td>
-                  <td className="px-5 py-4">{investor.phone}</td>
-                  <td className="whitespace-nowrap px-5 py-4">
+                  <td className="px-5 py-2.5 sm:py-4 font-medium">{investor.name}</td>
+                  <td className="px-5 py-2.5 sm:py-4">{investor.phone}</td>
+                  <td className="whitespace-nowrap px-5 py-2.5 sm:py-4">
                     {formatDate(investor.lastInteraction)}
                   </td>
-                  <td className="whitespace-nowrap px-5 py-4">
+                  <td className="whitespace-nowrap px-5 py-2.5 sm:py-4">
                     {formatDate(investor.nextFollowUp)}
                   </td>
                 </tr>

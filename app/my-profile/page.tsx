@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
 import {
@@ -15,6 +16,10 @@ import {
 } from "lucide-react";
 import { LogoutButton } from "@/components/logout-button";
 import { requireAuth } from "@/lib/auth";
+
+export const metadata: Metadata = {
+  title: "My Profile",
+};
 
 type ProfileData = {
   id: string;
@@ -143,12 +148,12 @@ export default async function MyProfilePage() {
           </div>
 
           <div className="mt-4 flex flex-col gap-3.5 text-sm">
-            <div className="flex items-center justify-between gap-4">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
               <span className="flex items-center gap-2 text-muted-foreground">
-                <Mail className="h-4 w-4" />
+                <Mail className="h-4 w-4 shrink-0" />
                 Email Address
               </span>
-              <span className="font-medium text-foreground truncate max-w-[240px]">
+              <span className="font-medium text-foreground break-all sm:break-normal sm:truncate sm:max-w-[240px]">
                 {profile.email || "—"}
               </span>
             </div>
@@ -185,7 +190,7 @@ export default async function MyProfilePage() {
           <div className="mt-4">
             <h3 className="font-semibold text-foreground">CREST Capital Management</h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              Investor relationship management workspace. Track investor engagements, follow-ups, and contacts.
+              Your investor relationship workspace.
             </p>
 
             <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -233,14 +238,14 @@ export default async function MyProfilePage() {
               <h2 className="font-semibold text-card-foreground">Security & Session</h2>
             </div>
 
-            <div className="mt-4 flex items-center justify-between">
-              <div>
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <div className="min-w-0">
                 <p className="text-sm font-medium text-foreground">Session Status</p>
                 <p className="text-xs text-muted-foreground">
-                  Authenticated session via Supabase Auth
+                  Your account session is active.
                 </p>
               </div>
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+              <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 Active Session
               </span>

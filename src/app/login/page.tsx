@@ -36,10 +36,10 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="grid min-h-screen grid-cols-1 lg:grid-cols-2">
+    <div className="grid min-h-screen grid-cols-1 lg:grid-cols-2">
       {/* Left side: Premium branding */}
-      <div className="flex flex-col justify-center border-b border-border bg-background p-8 sm:p-12 lg:border-b-0 lg:border-r lg:p-16 xl:p-24">
-        <div className="mx-auto w-full max-w-md space-y-8">
+      <div className="flex flex-col justify-center border-b border-border bg-background px-6 py-5 sm:p-12 lg:border-b-0 lg:border-r lg:p-16 xl:p-24">
+        <div className="mx-auto w-full max-w-md sm:space-y-8">
           <div>
             <span
               className="text-5xl sm:text-6xl tracking-wide text-foreground"
@@ -55,7 +55,7 @@ export default function LoginPage() {
             </p>
           </div>
 
-          <div className="space-y-3">
+          <div className="hidden sm:block space-y-3">
             <h1 className="text-2xl sm:text-3xl font-medium tracking-tight text-foreground">
               Investor Relationship Management
             </h1>
@@ -67,7 +67,7 @@ export default function LoginPage() {
       </div>
 
       {/* Right side: Login form */}
-      <div className="flex items-center justify-center bg-muted/40 px-4 py-12">
+      <div className="flex items-center justify-center bg-muted/40 px-4 py-8 sm:py-12">
         <Card className="w-full max-w-md border-border/80 shadow-xs">
           <CardHeader className="space-y-1.5 pb-4">
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -166,6 +166,6 @@ export default function LoginPage() {
           </CardContent>
         </Card>
       </div>
-    </main>
+    </div>
   );
 }

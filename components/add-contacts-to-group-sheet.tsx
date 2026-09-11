@@ -143,6 +143,7 @@ export function AddContactsToGroupSheet({
           <Button
             type="button"
             variant="outline"
+            className="h-8 px-2.5 text-xs sm:h-9 sm:px-3 sm:text-sm"
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
           />
@@ -151,27 +152,27 @@ export function AddContactsToGroupSheet({
         + Add Contacts
       </SheetTrigger>
       <SheetContent side="right" className="flex flex-col gap-0">
-        <SheetHeader className="border-b px-6 py-5">
-          <SheetTitle className="text-xl">Add Contacts</SheetTitle>
-          <SheetDescription className="text-sm">Add existing contacts to this group.</SheetDescription>
+        <SheetHeader className="border-b px-4 py-3.5 sm:px-6 sm:py-5">
+          <SheetTitle className="text-lg sm:text-xl">Add Contacts</SheetTitle>
+          <SheetDescription className="text-xs sm:text-sm">Add existing contacts to this group.</SheetDescription>
         </SheetHeader>
         <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
-          <div className="flex min-h-0 flex-1 flex-col gap-4 px-6 py-6">
+          <div className="flex min-h-0 flex-1 flex-col gap-3 px-4 py-4 sm:gap-4 sm:px-6 sm:py-6">
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search contacts..."
               aria-label="Search contacts"
-              className="h-10"
+              className="h-9 text-sm sm:h-10"
             />
             <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border">
               {loading ? (
-                <p className="px-4 py-8 text-center text-sm text-muted-foreground">Loading contacts...</p>
+                <p className="px-4 py-8 text-center text-xs sm:text-sm text-muted-foreground">Loading contacts...</p>
               ) : error ? (
-                <p className="px-4 py-8 text-center text-sm text-destructive">{error}</p>
+                <p className="px-4 py-8 text-center text-xs sm:text-sm text-destructive">{error}</p>
               ) : contacts.length ? (
                 <div className="divide-y">
-                  <label className="flex cursor-pointer items-center gap-3 border-b bg-muted/20 px-3 py-2.5 text-sm text-muted-foreground">
+                  <label className="flex cursor-pointer items-center gap-3 border-b bg-muted/20 px-3 py-2 text-xs sm:py-2.5 sm:text-sm text-muted-foreground">
                     <input
                       ref={selectAllRef}
                       type="checkbox"
@@ -183,7 +184,7 @@ export function AddContactsToGroupSheet({
                     <span>Select visible contacts</span>
                   </label>
                   {contacts.map((contact) => (
-                    <label key={contact.id} className="flex cursor-pointer items-center gap-3 px-3 py-3 hover:bg-muted/20">
+                    <label key={contact.id} className="flex cursor-pointer items-center gap-3 px-3 py-2 sm:py-3 hover:bg-muted/20">
                       <input
                         type="checkbox"
                         checked={selectedIds.has(contact.id)}
@@ -191,25 +192,25 @@ export function AddContactsToGroupSheet({
                         className="size-4 cursor-pointer accent-primary"
                       />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate font-medium">{contact.name}</span>
-                        <span className="mt-0.5 block text-sm text-muted-foreground">{contact.phone}</span>
+                        <span className="block truncate text-sm font-medium">{contact.name}</span>
+                        <span className="mt-0.5 block text-xs sm:text-sm text-muted-foreground">{contact.phone}</span>
                       </span>
                     </label>
                   ))}
                 </div>
               ) : (
-                <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+                <p className="px-4 py-8 text-center text-xs sm:text-sm text-muted-foreground">
                   {search ? "No contacts found." : totalContacts ? "All contacts are already in this group." : "No contacts available."}
                 </p>
               )}
             </div>
-            <p className="text-sm font-medium text-muted-foreground">
+            <p className="text-xs sm:text-sm font-medium text-muted-foreground">
               {selectedIds.size} contact{selectedIds.size === 1 ? "" : "s"} selected
             </p>
           </div>
-          <SheetFooter className="border-t bg-muted/20 px-6 py-4 sm:flex-row sm:justify-end">
-            <SheetClose render={<Button variant="outline" type="button" />}>Cancel</SheetClose>
-            <Button type="submit" disabled={!selectedIds.size || submitting || loading}>
+          <SheetFooter className="border-t bg-muted/20 px-4 py-3 sm:px-6 sm:py-4 gap-2 sm:flex-row sm:justify-end">
+            <SheetClose render={<Button variant="outline" type="button" className="h-9 px-3 text-xs sm:h-10 sm:px-4 sm:text-sm" />}>Cancel</SheetClose>
+            <Button type="submit" disabled={!selectedIds.size || submitting || loading} className="h-9 px-3 text-xs sm:h-10 sm:px-4 sm:text-sm">
               {submitting ? "Adding..." : "Add Contacts"}
             </Button>
           </SheetFooter>

@@ -4,6 +4,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { TopNav } from "@/components/top-nav";
 import { ToastProvider } from "@/components/toast-provider";
 import { SidebarProvider } from "@/components/sidebar-provider";
+import { MainContent } from "@/components/main-content";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -22,7 +23,10 @@ const playfair = Playfair_Display({
 });
 
 export const metadata: Metadata = {
-  title: "CREST - Investor CRM",
+  title: {
+    default: "CREST CRM",
+    template: "CREST CRM - %s",
+  },
   description: "Internal CRM for managing investor contacts and follow-ups.",
 };
 
@@ -38,7 +42,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             <TopNav />
             <div className="flex flex-1 overflow-hidden">
               <AppSidebar />
-              <main className="flex min-h-0 flex-1 flex-col overflow-y-auto">{children}</main>
+              <MainContent>{children}</MainContent>
             </div>
           </SidebarProvider>
         </ToastProvider>

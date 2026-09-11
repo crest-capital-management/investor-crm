@@ -58,23 +58,23 @@ export function AddGroupDialog() {
 
   return (
     <Sheet open={open} onOpenChange={(next) => { setOpen(next); if (!next) reset(); }}>
-      <SheetTrigger render={<Button />}>+ Add Group</SheetTrigger>
+      <SheetTrigger render={<Button className="h-9 px-3 text-xs sm:h-10 sm:px-4 sm:text-sm" />}>+ Add Group</SheetTrigger>
       <SheetContent side="right" className="flex flex-col gap-0">
-        <SheetHeader className="border-b px-6 py-5">
-          <SheetTitle className="text-xl">Add Group</SheetTitle>
-          <SheetDescription className="text-sm">Create a group for organizing contacts.</SheetDescription>
+        <SheetHeader className="border-b px-4 py-3.5 sm:px-6 sm:py-5">
+          <SheetTitle className="text-lg sm:text-xl">Add Group</SheetTitle>
+          <SheetDescription className="text-xs sm:text-sm">Create a group for organizing contacts.</SheetDescription>
         </SheetHeader>
         <form onSubmit={handleSubmit} className="flex flex-1 flex-col">
-          <div className="flex-1 space-y-6 px-6 py-6">
-            <div className="flex flex-col gap-2">
+          <div className="flex-1 space-y-4 px-4 py-4 sm:space-y-6 sm:px-6 sm:py-6">
+            <div className="flex flex-col gap-1.5 sm:gap-2">
               <Label htmlFor="group-name">Group name</Label>
-              <Input id="group-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Family Offices" className="h-10" />
+              <Input id="group-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Family Offices" className="h-9 text-sm sm:h-10" />
               {error && <p className="text-sm text-destructive">{error}</p>}
             </div>
           </div>
-          <SheetFooter className="border-t bg-muted/20 px-6 py-4 sm:flex-row sm:justify-end">
-            <SheetClose render={<Button variant="outline" type="button" className="h-10" />}>Cancel</SheetClose>
-            <Button type="submit" disabled={submitting} className="h-10">{submitting ? "Saving..." : "Save Group"}</Button>
+          <SheetFooter className="border-t bg-muted/20 px-4 py-3 sm:px-6 sm:py-4 gap-2 sm:flex-row sm:justify-end">
+            <SheetClose render={<Button variant="outline" type="button" className="h-9 px-3 text-xs sm:h-10 sm:px-4 sm:text-sm" />}>Cancel</SheetClose>
+            <Button type="submit" disabled={submitting} className="h-9 px-3 text-xs sm:h-10 sm:px-4 sm:text-sm">{submitting ? "Saving..." : "Save Group"}</Button>
           </SheetFooter>
         </form>
       </SheetContent>

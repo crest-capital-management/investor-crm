@@ -262,8 +262,8 @@ export function ContactDetailsDialog({
       <Sheet open={open} onOpenChange={handleOpenChange}>
         <SheetTrigger nativeButton={false} render={children} />
         <SheetContent side="right" className="flex flex-col gap-0">
-          <SheetHeader className="border-b px-6 py-5">
-            <SheetTitle className="text-xl">
+          <SheetHeader className="border-b px-4 py-3.5 sm:px-6 sm:py-5">
+            <SheetTitle className="text-lg sm:text-xl">
               {editing ? "Edit Contact" : "Contact Details"}
             </SheetTitle>
             <SheetDescription className="text-sm">
@@ -278,28 +278,28 @@ export function ContactDetailsDialog({
               onSubmit={handleSave}
               className="flex flex-1 flex-col overflow-y-auto"
             >
-              <div className="flex-1 space-y-6 px-6 py-6">
-                <div className="flex flex-col gap-2">
+              <div className="flex-1 space-y-4 px-4 py-4 sm:space-y-6 sm:px-6 sm:py-6">
+                <div className="flex flex-col gap-1.5 sm:gap-2">
                   <Label htmlFor={`edit-name-${currentContact.id}`}>Name</Label>
                   <Input
                     id={`edit-name-${currentContact.id}`}
                     value={name}
                     onChange={(event) => setName(event.target.value)}
-                    className="h-10"
+                    className="h-9 text-sm sm:h-10"
                   />
                 </div>
 
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-1.5 sm:gap-2">
                   <Label htmlFor={`edit-phone-${currentContact.id}`}>Phone</Label>
                   <Input
                     id={`edit-phone-${currentContact.id}`}
                     value={phone}
                     onChange={(event) => setPhone(event.target.value)}
-                    className="h-10"
+                    className="h-9 text-sm sm:h-10"
                   />
                 </div>
 
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-1.5 sm:gap-2">
                   <Label htmlFor={`edit-email-${currentContact.id}`}>Email</Label>
                   <Input
                     id={`edit-email-${currentContact.id}`}
@@ -307,17 +307,17 @@ export function ContactDetailsDialog({
                     placeholder="e.g. john@example.com (optional)"
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
-                    className="h-10"
+                    className="h-9 text-sm sm:h-10"
                   />
                 </div>
 
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-1.5 sm:gap-2">
                   <Label>Tag</Label>
                   <Select
                     value={tag}
                     onValueChange={(value) => setTag(value ?? "")}
                   >
-                    <SelectTrigger className="h-10 w-full">
+                    <SelectTrigger className="h-9 text-sm sm:h-10 w-full">
                       <SelectValue placeholder="Select a tag" />
                     </SelectTrigger>
 
@@ -331,7 +331,7 @@ export function ContactDetailsDialog({
                   </Select>
                 </div>
 
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-1.5 sm:gap-2">
                   <Label htmlFor={`edit-date-${currentContact.id}`}>
                     Date Saved to Phonebook
                   </Label>
@@ -342,7 +342,7 @@ export function ContactDetailsDialog({
                       type="date"
                       value={dateSaved}
                       onChange={(event) => setDateSaved(event.target.value)}
-                      className="h-10 pl-9"
+                      className="h-9 text-sm sm:h-10 pl-9"
                     />
                   </div>
                 </div>
@@ -354,7 +354,7 @@ export function ContactDetailsDialog({
                 )}
               </div>
 
-              <SheetFooter className="border-t bg-muted/20 px-6 py-4 sm:flex-row sm:justify-end">
+              <SheetFooter className="border-t bg-muted/20 px-4 py-3 sm:px-6 sm:py-4 sm:flex-row sm:justify-end gap-2">
                 <Button
                   type="button"
                   variant="outline"
@@ -364,38 +364,43 @@ export function ContactDetailsDialog({
                     setError(null);
                   }}
                   disabled={saving}
+                  className="h-9 px-3 text-xs sm:h-10 sm:px-4 sm:text-sm"
                 >
                   Cancel
                 </Button>
-                <Button type="submit" disabled={saving}>
+                <Button
+                  type="submit"
+                  disabled={saving}
+                  className="h-9 px-3 text-xs sm:h-10 sm:px-4 sm:text-sm"
+                >
                   {saving ? "Saving..." : "Save Contact"}
                 </Button>
               </SheetFooter>
             </form>
           ) : (
             <>
-              <div className="flex-1 space-y-6 overflow-y-auto px-6 py-6">
-                <div className="rounded-lg border bg-background px-4 py-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0 space-y-2">
+              <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4 sm:space-y-6 sm:px-6 sm:py-6">
+                <div className="rounded-lg border bg-background px-3.5 py-3 sm:px-4 sm:py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2.5 sm:gap-3">
+                    <div className="min-w-0 space-y-1 sm:space-y-2">
                       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Name</p>
                       <p className="truncate text-base font-medium">{currentContact.name}</p>
                     </div>
-                    <Button type="button" variant="outline" onClick={beginEdit} className="shrink-0">Edit</Button>
+                    <Button type="button" variant="outline" onClick={beginEdit} className="h-8 px-2.5 text-xs sm:h-9 sm:px-3 sm:text-sm shrink-0">Edit</Button>
                   </div>
                 </div>
-                <div className="rounded-lg border bg-background px-4 py-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0 space-y-2">
+                <div className="rounded-lg border bg-background px-3.5 py-3 sm:px-4 sm:py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2.5 sm:gap-3">
+                    <div className="min-w-0 space-y-1 sm:space-y-2">
                       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Phone</p>
                       <p className="truncate">{currentContact.phone}</p>
                     </div>
-                    <Button type="button" variant="outline" onClick={copyPhone} className="shrink-0"><Copy className="size-4" />Copy</Button>
+                    <Button type="button" variant="outline" onClick={copyPhone} className="h-8 px-2.5 text-xs sm:h-9 sm:px-3 sm:text-sm shrink-0"><Copy className="size-3.5 sm:size-4" />Copy</Button>
                   </div>
                 </div>
-                <div className="rounded-lg border bg-background px-4 py-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0 space-y-2">
+                <div className="rounded-lg border bg-background px-3.5 py-3 sm:px-4 sm:py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2.5 sm:gap-3">
+                    <div className="min-w-0 space-y-1 sm:space-y-2">
                       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Email</p>
                       {currentContact.email ? (
                         <p className="truncate">{currentContact.email}</p>
@@ -404,16 +409,16 @@ export function ContactDetailsDialog({
                       )}
                     </div>
                     {currentContact.email && (
-                      <Button type="button" variant="outline" onClick={copyEmail} className="shrink-0">
-                        <Copy className="size-4" />
+                      <Button type="button" variant="outline" onClick={copyEmail} className="h-8 px-2.5 text-xs sm:h-9 sm:px-3 sm:text-sm shrink-0">
+                        <Copy className="size-3.5 sm:size-4" />
                         Copy
                       </Button>
                     )}
                   </div>
                 </div>
-                <div className="rounded-lg border bg-background px-4 py-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0 space-y-2">
+                <div className="rounded-lg border bg-background px-3.5 py-3 sm:px-4 sm:py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2.5 sm:gap-3">
+                    <div className="min-w-0 space-y-1 sm:space-y-2">
                       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Tags</p>
                       {currentContact.tags?.length ? (
                         <div className="flex flex-wrap gap-1.5">
@@ -422,28 +427,28 @@ export function ContactDetailsDialog({
                           ))}
                         </div>
                       ) : <span className="text-muted-foreground">—</span>}
-                  </div>
-                    <Button type="button" variant="outline" onClick={() => { setSelectedTagToAdd(""); setAddingTag(true); }} className="shrink-0"><Plus className="size-4" />Add Tag</Button>
-                  </div>
-                </div>
-                <div className="rounded-lg border bg-background px-4 py-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0 space-y-2">
-                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Groups</p>
-                    {currentContact.contact_groups?.length ? (
-                      <div className="flex flex-wrap gap-1.5">
-                        {currentContact.contact_groups.map(({ groups }) => {
-                          const group = Array.isArray(groups) ? groups[0] : groups;
-                          return <span key={group.id} className="inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">{group.name}</span>;
-                        })}
-                      </div>
-                    ) : <span className="text-muted-foreground">—</span>}
                     </div>
-                    <Button type="button" variant="outline" onClick={openAddGroups} className="shrink-0"><Plus className="size-4" />Add to Group</Button>
+                    <Button type="button" variant="outline" onClick={() => { setSelectedTagToAdd(""); setAddingTag(true); }} className="h-8 px-2.5 text-xs sm:h-9 sm:px-3 sm:text-sm shrink-0"><Plus className="size-3.5 sm:size-4" />Add Tag</Button>
                   </div>
                 </div>
-                <div className="rounded-lg border bg-background px-4 py-4">
-                  <div className="min-w-0 space-y-2">
+                <div className="rounded-lg border bg-background px-3.5 py-3 sm:px-4 sm:py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2.5 sm:gap-3">
+                    <div className="min-w-0 space-y-1 sm:space-y-2">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Groups</p>
+                      {currentContact.contact_groups?.length ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {currentContact.contact_groups.map(({ groups }) => {
+                            const group = Array.isArray(groups) ? groups[0] : groups;
+                            return <span key={group.id} className="inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">{group.name}</span>;
+                          })}
+                        </div>
+                      ) : <span className="text-muted-foreground">—</span>}
+                    </div>
+                    <Button type="button" variant="outline" onClick={openAddGroups} className="h-8 px-2.5 text-xs sm:h-9 sm:px-3 sm:text-sm shrink-0"><Plus className="size-3.5 sm:size-4" />Add to Group</Button>
+                  </div>
+                </div>
+                <div className="rounded-lg border bg-background px-3.5 py-3 sm:px-4 sm:py-4">
+                  <div className="min-w-0 space-y-1 sm:space-y-2">
                     <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Date Saved</p>
                     <p>{new Date(currentContact.date_saved).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</p>
                   </div>
@@ -455,19 +460,67 @@ export function ContactDetailsDialog({
                 )}
               </div>
 
-              <SheetFooter className="border-t bg-muted/20 px-6 py-4 sm:flex-row sm:justify-between">
-                <Button
-                  type="button"
-                  variant="destructive"
-                  onClick={() => setConfirmingDelete(true)}
-                  disabled={deleting}
-                >
-                  <Trash2 className="size-4" />
-                  Delete Contact
-                </Button>
-                <div className="flex gap-2">
-                  <SheetClose render={<Button variant="outline" />}>Close</SheetClose>
-                  <Button type="button" onClick={beginEdit}>
+              <SheetFooter className="border-t bg-muted/20 px-3 py-3 sm:px-3 sm:py-4">
+                {/* Mobile: Edit Contact full-width on top, Close & Delete Contact equal-width below */}
+                <div className="flex flex-col gap-2 w-full sm:hidden">
+                  <Button
+                    type="button"
+                    onClick={beginEdit}
+                    className="w-full h-9 px-3 text-xs font-medium"
+                  >
+                    Edit Contact
+                  </Button>
+                  <div className="grid grid-cols-2 gap-2 w-full">
+                    <SheetClose
+                      render={
+                        <Button
+                          variant="outline"
+                          className="w-full h-9 px-3 text-xs font-medium"
+                        />
+                      }
+                    >
+                      Close
+                    </SheetClose>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      onClick={() => setConfirmingDelete(true)}
+                      disabled={deleting}
+                      className="w-full h-9 px-3 text-xs font-medium"
+                    >
+                      <Trash2 className="size-3.5" />
+                      Delete Contact
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Desktop & Tablet: Delete Contact, Close & Edit Contact in order with small gap */}
+                <div className="hidden sm:flex sm:items-center sm:justify-end sm:gap-2 sm:w-full">
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={() => setConfirmingDelete(true)}
+                    disabled={deleting}
+                    className="h-10 px-4 text-sm font-medium shrink-0"
+                  >
+                    <Trash2 className="size-4" />
+                    Delete Contact
+                  </Button>
+                  <SheetClose
+                    render={
+                      <Button
+                        variant="outline"
+                        className="h-10 px-4 text-sm font-medium"
+                      />
+                    }
+                  >
+                    Close
+                  </SheetClose>
+                  <Button
+                    type="button"
+                    onClick={beginEdit}
+                    className="h-10 px-4 text-sm font-medium"
+                  >
                     Edit Contact
                   </Button>
                 </div>

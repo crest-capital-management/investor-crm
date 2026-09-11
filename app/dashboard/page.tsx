@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import {
   Users,
@@ -10,6 +11,10 @@ import {
 } from "lucide-react";
 import { requireAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+
+export const metadata: Metadata = {
+  title: "Dashboard",
+};
 
 type ContactItem = {
   id: string;
@@ -206,7 +211,7 @@ export default async function DashboardPage() {
       </div>
 
       {/* 5 Summary Cards */}
-      <div className="mt-4 grid shrink-0 grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
+      <div className="mt-4 grid shrink-0 grid-cols-2 gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
         {summaryCards.map((card) => {
           const Icon = card.icon;
           return (

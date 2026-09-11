@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { LayoutDashboard, Users, Folder, TrendingUp } from "lucide-react";
 import { useSidebar } from "@/components/sidebar-provider";
 import {
   Sheet,
@@ -14,10 +15,10 @@ import {
 } from "@/components/ui/sheet";
 
 const navItems = [
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/contacts", label: "Contacts" },
-  { href: "/groups", label: "Groups" },
-  { href: "/investors", label: "Investors" },
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/contacts", label: "Contacts", icon: Users },
+  { href: "/groups", label: "Groups", icon: Folder },
+  { href: "/investors", label: "Investors", icon: TrendingUp },
 ];
 
 export function AppSidebar() {
@@ -46,19 +47,21 @@ export function AppSidebar() {
     <nav className="flex flex-col gap-1">
       {navItems.map((item) => {
         const isActive = pathname === item.href;
+        const Icon = item.icon;
         return (
           <Link
             key={item.href}
             href={item.href}
             onClick={isMobile ? close : undefined}
             className={cn(
-              "rounded-md px-3 py-2 text-sm font-medium transition-colors",
+              "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
               isActive
                 ? "bg-accent text-accent-foreground"
                 : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
             )}
           >
-            {item.label}
+            <Icon className="h-3.5 w-3.5 shrink-0" />
+            <span>{item.label}</span>
           </Link>
         );
       })}

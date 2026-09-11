@@ -110,7 +110,7 @@ export function ContactsTable({
           <table className="w-full border-collapse text-sm">
             <thead className="sticky top-0 z-10 bg-background">
               <tr className="border-b bg-background text-left text-muted-foreground">
-                <th className="w-12 px-5 py-3 font-medium">
+                <th className="w-12 px-5 py-2.5 sm:py-3 font-medium">
                   <input
                     ref={selectAllRef}
                     type="checkbox"
@@ -120,11 +120,11 @@ export function ContactsTable({
                     className="size-4 cursor-pointer accent-primary"
                   />
                 </th>
-                <th className="w-[20%] px-5 py-3 font-medium">Name</th>
-                <th className="w-[18%] px-5 py-3 font-medium">Phone</th>
-                <th className="w-[22%] px-5 py-3 font-medium">Email</th>
-                <th className="w-[20%] px-5 py-3 font-medium">Tags</th>
-                <th className="w-[20%] px-5 py-3 font-medium">Groups</th>
+                <th className="w-[20%] px-5 py-2.5 sm:py-3 font-medium">Name</th>
+                <th className="w-[18%] px-5 py-2.5 sm:py-3 font-medium">Phone</th>
+                <th className="w-[22%] px-5 py-2.5 sm:py-3 font-medium">Email</th>
+                <th className="w-[20%] px-5 py-2.5 sm:py-3 font-medium">Tags</th>
+                <th className="w-[20%] px-5 py-2.5 sm:py-3 font-medium">Groups</th>
               </tr>
             </thead>
 
@@ -133,7 +133,7 @@ export function ContactsTable({
                 contacts.map((contact) => (
                   <ContactDetailsDialog key={contact.id} contact={contact}>
                     <tr className="cursor-pointer border-b last:border-b-0 hover:bg-muted/20">
-                      <td className="px-5 py-4">
+                      <td className="px-5 py-2.5 sm:py-4">
                         <input
                           type="checkbox"
                           checked={selectedIds.has(contact.id)}
@@ -144,16 +144,16 @@ export function ContactsTable({
                           className="size-4 cursor-pointer accent-primary"
                         />
                       </td>
-                      <td className="px-5 py-4 font-medium">{contact.name}</td>
-                      <td className="px-5 py-4">{contact.phone}</td>
-                      <td className="px-5 py-4 text-muted-foreground">
+                      <td className="px-5 py-2.5 sm:py-4 font-medium">{contact.name}</td>
+                      <td className="px-5 py-2.5 sm:py-4">{contact.phone}</td>
+                      <td className="px-5 py-2.5 sm:py-4 text-muted-foreground">
                         {contact.email ? (
                           <span className="text-foreground">{contact.email}</span>
                         ) : (
                           "—"
                         )}
                       </td>
-                      <td className="px-5 py-4">
+                      <td className="px-5 py-2.5 sm:py-4">
                         {contact.tags?.length ? (
                           <div className="flex flex-wrap gap-1.5">
                             {contact.tags.map((tag) => (
@@ -169,7 +169,7 @@ export function ContactsTable({
                           <span className="text-muted-foreground">—</span>
                         )}
                       </td>
-                      <td className="px-5 py-4">
+                      <td className="px-5 py-2.5 sm:py-4">
                         {contact.contact_groups?.length ? (
                           <div className="flex flex-wrap gap-1.5">
                             {contact.contact_groups.map((contactGroup) => {

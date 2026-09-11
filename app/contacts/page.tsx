@@ -1,9 +1,14 @@
+import type { Metadata } from "next";
 import { requireAuth } from "@/lib/auth";
 import { AddContactDialog } from "@/components/add-contact-dialog";
 import type { ContactRow } from "@/components/contact-details-dialog";
 import { ContactsTable } from "@/components/contacts-table";
 import { ImportContactsDialog } from "@/components/import-contacts-dialog";
 import { Input } from "@/components/ui/input";
+
+export const metadata: Metadata = {
+  title: "Contacts",
+};
 
 export default async function ContactsPage({
   searchParams,
@@ -68,14 +73,14 @@ export default async function ContactsPage({
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2">
           <ImportContactsDialog />
           <AddContactDialog />
         </div>
       </div>
 
       {/* Overview */}
-      <div className="mt-3 grid shrink-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-3 grid shrink-0 grid-cols-2 gap-3 lg:grid-cols-4">
         {[
           { label: "Total Contacts", value: totalContacts },
           { label: "Investors", value: investors },

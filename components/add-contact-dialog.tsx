@@ -153,12 +153,14 @@ export function AddContactDialog() {
         }
       }}
     >
-      <SheetTrigger render={<Button />}>+ Add Contact</SheetTrigger>
+      <SheetTrigger render={<Button className="h-9 px-3 text-xs sm:h-10 sm:px-4 sm:text-sm" />}>
+        + Add Contact
+      </SheetTrigger>
 
       {/* Right-side Sheet is intentionally preserved */}
       <SheetContent side="right" className="flex flex-col gap-0">
-        <SheetHeader className="border-b px-6 py-5">
-          <SheetTitle className="text-xl">Add Contact</SheetTitle>
+        <SheetHeader className="border-b px-4 py-3.5 sm:px-6 sm:py-5">
+          <SheetTitle className="text-lg sm:text-xl">Add Contact</SheetTitle>
           <SheetDescription className="text-sm">
             Enter the contact&apos;s details below.
           </SheetDescription>
@@ -168,16 +170,16 @@ export function AddContactDialog() {
           action={handleSubmit}
           className="flex flex-1 flex-col overflow-y-auto"
         >
-          <div className="flex-1 space-y-6 px-6 py-6">
+          <div className="flex-1 space-y-4 px-4 py-4 sm:space-y-6 sm:px-6 sm:py-6">
             <div>
               <p className="text-sm font-medium">Contact details</p>
-              <p className="mt-1 text-xs text-muted-foreground">
+              <p className="mt-0.5 text-xs text-muted-foreground sm:mt-1">
                 Add the basic information for this contact.
               </p>
             </div>
 
             {/* Name */}
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-1.5 sm:gap-2">
               <Label htmlFor="name">Name</Label>
 
               <Input
@@ -186,7 +188,7 @@ export function AddContactDialog() {
                 placeholder="e.g. John Doe"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="h-10"
+                className="h-9 text-sm sm:h-10"
               />
 
               {nameError && (
@@ -195,7 +197,7 @@ export function AddContactDialog() {
             </div>
 
             {/* Phone */}
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-1.5 sm:gap-2">
               <Label htmlFor="phone">Phone</Label>
 
               <Input
@@ -204,7 +206,7 @@ export function AddContactDialog() {
                 placeholder="e.g. 9876543210"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
-                className="h-10"
+                className="h-9 text-sm sm:h-10"
               />
 
               {phoneError && (
@@ -213,7 +215,7 @@ export function AddContactDialog() {
             </div>
 
             {/* Email (Optional) */}
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-1.5 sm:gap-2">
               <Label htmlFor="email">Email</Label>
 
               <Input
@@ -223,7 +225,7 @@ export function AddContactDialog() {
                 placeholder="e.g. john@example.com (optional)"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="h-10"
+                className="h-9 text-sm sm:h-10"
               />
 
               {emailError && (
@@ -232,14 +234,14 @@ export function AddContactDialog() {
             </div>
 
             {/* Tag */}
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-1.5 sm:gap-2">
               <Label>Tag</Label>
 
               <Select
                 value={selectedTag}
                 onValueChange={(value) => setSelectedTag(value ?? "")}
               >
-                <SelectTrigger className="h-10 w-full">
+                <SelectTrigger className="h-9 text-sm sm:h-10 w-full">
                   <SelectValue placeholder="Select a tag" />
                 </SelectTrigger>
 
@@ -254,7 +256,7 @@ export function AddContactDialog() {
             </div>
 
             {/* Date */}
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-1.5 sm:gap-2">
               <Label>Date Saved to Phonebook</Label>
 
               <Popover>
@@ -263,7 +265,7 @@ export function AddContactDialog() {
                     <Button
                       type="button"
                       variant="outline"
-                      className="h-10 w-full justify-start gap-2 font-normal"
+                      className="h-9 text-sm sm:h-10 w-full justify-start gap-2 font-normal"
                     />
                   }
                 >
@@ -307,13 +309,13 @@ export function AddContactDialog() {
           </div>
 
           {/* Footer */}
-          <SheetFooter className="border-t bg-muted/20 px-6 py-4 sm:flex-row sm:justify-end">
+          <SheetFooter className="border-t bg-muted/20 px-4 py-3 sm:px-6 sm:py-4 sm:flex-row sm:justify-end gap-2">
             <SheetClose
               render={
                 <Button
                   variant="outline"
                   type="button"
-                  className="h-10"
+                  className="h-9 px-3 text-xs sm:h-10 sm:px-4 sm:text-sm"
                 />
               }
             >
@@ -323,7 +325,7 @@ export function AddContactDialog() {
             <Button
               type="submit"
               disabled={submitting}
-              className="h-10"
+              className="h-9 px-3 text-xs sm:h-10 sm:px-4 sm:text-sm"
             >
               {submitting ? "Saving..." : "Save Contact"}
             </Button>
