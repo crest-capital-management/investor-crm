@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { requireAuth } from "@/lib/auth";
+import { LiveSearchInput } from "@/components/live-search-input";
 import {
   InvestorTrackingTable,
   type InvestorTrackingRow,
@@ -19,13 +20,30 @@ type FollowUpRow = {
   due_date: string;
 };
 
-export default async function InvestorsPage() {
+export default async function InvestorsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ search?: string }>;
+}) {
+  const search = (await searchParams).search?.trim() ?? "";
+
   const { supabase } = await requireAuth();
-  const { data: contacts, error: contactsError } = await supabase
+
+  let contactsQuery = supabase
     .from("contacts")
-    .select("id, name, phone, tags, date_saved, contact_groups(groups(id, name))")
+    .select("id, name, phone, email, tags, date_saved, contact_groups(groups(id, name))")
     .contains("tags", ["Investor"])
-    .order("name", { ascending: true });
+    .is("deleted_at", null);
+
+  if (search) {
+    contactsQuery = contactsQuery.or(
+      `name.ilike.%${search}%,phone.ilike.%${search}%,email.ilike.%${search}%`
+    );
+  }
+
+  const { data: contacts, error: contactsError } = await contactsQuery.order("name", {
+    ascending: true,
+  });
 
   if (contactsError) {
     return (
@@ -46,12 +64,14 @@ export default async function InvestorsPage() {
             .from("interactions")
             .select("contact_id, created_at")
             .in("contact_id", contactIds)
+            .is("deleted_at", null)
             .order("created_at", { ascending: false }),
           supabase
             .from("follow_ups")
             .select("contact_id, due_date")
             .in("contact_id", contactIds)
             .eq("is_done", false)
+            .is("deleted_at", null)
             .order("due_date", { ascending: true }),
         ])
       : [
@@ -99,6 +119,11 @@ export default async function InvestorsPage() {
           Monitor investor interactions and upcoming follow-ups.
         </p>
       </div>
+
+      <LiveSearchInput
+        paramName="search"
+        placeholder="Search by name, phone, or email..."
+      />
 
       <div className="mt-3 flex min-h-0 flex-1 flex-col">
         <InvestorTrackingTable investors={rows} />

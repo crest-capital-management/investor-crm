@@ -4,7 +4,8 @@ import { AddContactDialog } from "@/components/add-contact-dialog";
 import type { ContactRow } from "@/components/contact-details-dialog";
 import { ContactsTable } from "@/components/contacts-table";
 import { ImportContactsDialog } from "@/components/import-contacts-dialog";
-import { Input } from "@/components/ui/input";
+import { LiveSearchInput } from "@/components/live-search-input";
+import { TagFilter } from "@/components/tag-filter";
 
 export const metadata: Metadata = {
   title: "Contacts",
@@ -13,9 +14,14 @@ export const metadata: Metadata = {
 export default async function ContactsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ search?: string }>;
+  searchParams: Promise<{ search?: string; tags?: string }>;
 }) {
-  const search = (await searchParams).search?.trim() ?? "";
+  const resolvedSearchParams = await searchParams;
+  const search = resolvedSearchParams.search?.trim() ?? "";
+  const tagsParam = resolvedSearchParams.tags?.trim() ?? "";
+  const selectedTags = tagsParam
+    ? tagsParam.split(",").map((t) => t.trim()).filter(Boolean)
+    : [];
 
   const { supabase } = await requireAuth();
 
@@ -23,7 +29,8 @@ export default async function ContactsPage({
     .from("contacts")
     .select(
       "id, name, phone, email, tags, date_saved, contact_groups(groups(id, name))"
-    );
+    )
+    .is("deleted_at", null);
 
   if (search) {
     contactsQuery = contactsQuery.or(
@@ -31,9 +38,13 @@ export default async function ContactsPage({
     );
   }
 
+  if (selectedTags.length > 0) {
+    contactsQuery = contactsQuery.overlaps("tags", selectedTags);
+  }
+
   const [contactsResult, contactMetricsResult, groupsResult] = await Promise.all([
     contactsQuery.order("date_saved", { ascending: false }),
-    supabase.from("contacts").select("tags"),
+    supabase.from("contacts").select("tags").is("deleted_at", null),
     supabase.from("groups").select("id"),
   ]);
 
@@ -101,20 +112,20 @@ export default async function ContactsPage({
         ))}
       </div>
 
-      {/* Search */}
-      <form action="/contacts" method="get" className="mt-3 max-w-md">
-        <Input
-          name="search"
-          defaultValue={search}
+      {/* Search & Tag Filter */}
+      <div className="mt-3 flex flex-wrap items-center gap-2.5 sm:gap-3">
+        <LiveSearchInput
+          paramName="search"
           placeholder="Search by name, phone, or email..."
-          className="h-10"
+          className="mt-0 w-full sm:w-80 max-w-md"
         />
-      </form>
+        <TagFilter />
+      </div>
 
       {/* Table */}
       <div className="mt-3 flex min-h-0 flex-1 flex-col">
         <ContactsTable
-          key={search}
+          key={`${search}-${tagsParam}`}
           contacts={(contacts ?? []) as ContactRow[]}
           search={search}
         />

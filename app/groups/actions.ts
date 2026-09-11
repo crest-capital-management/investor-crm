@@ -246,7 +246,7 @@ export async function getGroupContactOptions(groupId: string, search = "") {
 
   if (membershipError) return { error: "Contacts could not be loaded." };
 
-  let contactsQuery = supabase.from("contacts").select("id, name, phone");
+  let contactsQuery = supabase.from("contacts").select("id, name, phone").is("deleted_at", null);
   const trimmedSearch = search.trim();
   if (trimmedSearch) {
     contactsQuery = contactsQuery.or(

@@ -41,21 +41,22 @@ export async function addContact(formData: FormData) {
     return { error: "Phone must contain 7-15 digits." };
   }
 
-  let normalizedEmail: string | null = null;
-  if (emailRaw) {
-    if (!isValidEmail(emailRaw)) {
-      return { error: "Please enter a valid email address." };
-    }
-    normalizedEmail = emailRaw.toLowerCase();
+  if (!emailRaw) {
+    return { error: "Email is required." };
   }
+  if (!isValidEmail(emailRaw)) {
+    return { error: "Please enter a valid email address." };
+  }
+  const normalizedEmail = emailRaw.toLowerCase();
 
-  if (!dateSaved) {
-    return { error: "Date is required." };
+  if (dateSaved && !isValidDate(dateSaved)) {
+    return { error: "Date must use a valid YYYY-MM-DD date." };
   }
 
   const { data: existingContacts, error: lookupError } = await supabase
     .from("contacts")
     .select("phone")
+    .is("deleted_at", null)
     .limit(10000);
 
   if (lookupError) {
@@ -77,7 +78,7 @@ export async function addContact(formData: FormData) {
       phone,
       email: normalizedEmail,
       tags,
-      date_saved: dateSaved,
+      date_saved: dateSaved || null,
     });
 
   if (error) {
@@ -116,15 +117,15 @@ export async function updateContact(id: string, formData: FormData) {
     return { error: "Phone must contain 7-15 digits." };
   }
 
-  let normalizedEmail: string | null = null;
-  if (emailRaw) {
-    if (!isValidEmail(emailRaw)) {
-      return { error: "Please enter a valid email address." };
-    }
-    normalizedEmail = emailRaw.toLowerCase();
+  if (!emailRaw) {
+    return { error: "Email is required." };
   }
+  if (!isValidEmail(emailRaw)) {
+    return { error: "Please enter a valid email address." };
+  }
+  const normalizedEmail = emailRaw.toLowerCase();
 
-  if (!isValidDate(dateSaved)) {
+  if (dateSaved && !isValidDate(dateSaved)) {
     return { error: "Date must use a valid YYYY-MM-DD date." };
   }
 
@@ -133,6 +134,7 @@ export async function updateContact(id: string, formData: FormData) {
     .select("id")
     .eq("phone", phone)
     .neq("id", id)
+    .is("deleted_at", null)
     .limit(1)
     .maybeSingle();
 
@@ -148,6 +150,7 @@ export async function updateContact(id: string, formData: FormData) {
     .from("contacts")
     .select("id, phone")
     .neq("id", id)
+    .is("deleted_at", null)
     .limit(10000);
 
   if (normalizedLookupError) {
@@ -169,7 +172,7 @@ export async function updateContact(id: string, formData: FormData) {
       phone,
       email: normalizedEmail,
       tags,
-      date_saved: dateSaved,
+      date_saved: dateSaved || null,
     })
     .eq("id", id);
 
@@ -261,6 +264,7 @@ export async function getMeetingNotes(contactId: string) {
     .select("id, note, created_at")
     .eq("contact_id", normalizedContactId)
     .eq("type", "meeting")
+    .is("deleted_at", null)
     .order("created_at", { ascending: false });
 
   if (error) return { error: "Meeting notes could not be loaded." };
@@ -357,11 +361,11 @@ export async function deleteMeetingNote(noteId: string, contactId: string) {
     return { error: "Only meeting notes can be deleted." };
   }
 
-  // Strictly delete where id = noteId, contact_id = contactId, and type = 'meeting'
+  // Strictly soft-delete where id = noteId, contact_id = contactId, and type = 'meeting'
   // NEVER allow deleting type = 'follow_up'
   const { error: deleteError } = await supabase
     .from("interactions")
-    .delete()
+    .update({ deleted_at: new Date().toISOString() })
     .eq("id", normalizedNoteId)
     .eq("contact_id", normalizedContactId)
     .eq("type", "meeting");
@@ -440,16 +444,10 @@ export async function deleteContact(id: string) {
   const { supabase, error: authError } = await requireActionAuth();
   if (authError || !supabase) return { error: "Unauthorized" };
 
-  const { error: relationError } = await supabase
-    .from("contact_groups")
-    .delete()
-    .eq("contact_id", id);
-
-  if (relationError) {
-    return { error: "The contact could not be deleted." };
-  }
-
-  const { error } = await supabase.from("contacts").delete().eq("id", id);
+  const { error } = await supabase
+    .from("contacts")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", id);
 
   if (error) {
     return { error: "The contact could not be deleted." };
@@ -510,19 +508,19 @@ function isValidDate(value: string) {
 }
 
 function validateImportRow(row: ImportContactRow) {
-  if (!row.name || !row.phone || !row.dateSaved) {
-    return "Name, phone, and date saved are required.";
+  if (!row.name || !row.phone || !row.email) {
+    return "Name, phone, and email are required.";
   }
 
   if (!/^\d{7,15}$/.test(row.phone)) {
     return "Phone must contain 7-15 digits.";
   }
 
-  if (row.email && !isValidEmail(row.email)) {
+  if (!isValidEmail(row.email)) {
     return "Please enter a valid email address.";
   }
 
-  if (!isValidDate(row.dateSaved)) {
+  if (row.dateSaved && !isValidDate(row.dateSaved)) {
     return "Date Saved must use a valid YYYY-MM-DD date.";
   }
 
@@ -595,7 +593,7 @@ export async function importContacts(rowsRaw: string) {
         phone: normalizePhone(row.phone),
         email: row.email ? row.email.toLowerCase() : null,
         tags: row.tag ? [row.tag] : [],
-        date_saved: row.dateSaved,
+        date_saved: row.dateSaved || null,
       }))
     );
 

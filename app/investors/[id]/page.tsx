@@ -20,6 +20,7 @@ export default async function InvestorDetailPage({
     .from("contacts")
     .select("id, name, phone, email, tags")
     .eq("id", id)
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (contactError || !contact || !contact.tags?.some((tag: string) => tag.toLowerCase() === "investor")) {
@@ -31,12 +32,14 @@ export default async function InvestorDetailPage({
     .select("id, note, created_at")
     .eq("contact_id", id)
     .eq("type", "meeting")
+    .is("deleted_at", null)
     .order("created_at", { ascending: false });
 
   const { data: followUps, error: followUpsError } = await supabase
     .from("follow_ups")
     .select("id, due_date, message, is_done, created_at")
     .eq("contact_id", id)
+    .is("deleted_at", null)
     .order("is_done", { ascending: true })
     .order("due_date", { ascending: true })
     .order("created_at", { ascending: true });

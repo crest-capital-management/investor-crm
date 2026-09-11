@@ -41,7 +41,12 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { CalendarIcon, Copy, Plus, Trash2 } from "lucide-react";
+import { Copy, Plus, Trash2 } from "lucide-react";
+import {
+  DateSavedPicker,
+  parseISODate,
+  toISODateString,
+} from "@/components/date-saved-picker";
 
 export type ContactRow = {
   id: string;
@@ -49,7 +54,7 @@ export type ContactRow = {
   phone: string;
   email?: string | null;
   tags: string[] | null;
-  date_saved: string;
+  date_saved: string | null;
   contact_groups:
     | Array<{
         groups:
@@ -81,7 +86,7 @@ export function ContactDetailsDialog({
   const [phone, setPhone] = useState(contact.phone);
   const [email, setEmail] = useState(contact.email ?? "");
   const [tag, setTag] = useState(contact.tags?.[0] ?? "");
-  const [dateSaved, setDateSaved] = useState(contact.date_saved.slice(0, 10));
+  const [dateSaved, setDateSaved] = useState(contact.date_saved ? contact.date_saved.slice(0, 10) : "");
   const [addingTag, setAddingTag] = useState(false);
   const [selectedTagToAdd, setSelectedTagToAdd] = useState("");
   const [addingGroups, setAddingGroups] = useState(false);
@@ -96,7 +101,7 @@ export function ContactDetailsDialog({
     setPhone(contact.phone);
     setEmail(contact.email ?? "");
     setTag(contact.tags?.[0] ?? "");
-    setDateSaved(contact.date_saved.slice(0, 10));
+    setDateSaved(contact.date_saved ? contact.date_saved.slice(0, 10) : "");
   }
 
   function handleOpenChange(next: boolean) {
@@ -201,12 +206,11 @@ export function ContactDetailsDialog({
       setError("Enter a valid phone number (7-15 digits).");
       return;
     }
-    if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
-      setError("Please enter a valid email address.");
+    if (!trimmedEmail) {
+      setError("Email is required.");
       return;
-    }
-    if (!dateSaved) {
-      setError("Date is required.");
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      setError("Please enter a valid email address.");
       return;
     }
 
@@ -232,7 +236,7 @@ export function ContactDetailsDialog({
       phone: trimmedPhone,
       email: trimmedEmail ? trimmedEmail.toLowerCase() : null,
       tags: tag.trim() ? [tag.trim()] : [],
-      date_saved: dateSaved,
+      date_saved: dateSaved || null,
     });
     setEditing(false);
     router.refresh();
@@ -331,21 +335,12 @@ export function ContactDetailsDialog({
                   </Select>
                 </div>
 
-                <div className="flex flex-col gap-1.5 sm:gap-2">
-                  <Label htmlFor={`edit-date-${currentContact.id}`}>
-                    Date Saved to Phonebook
-                  </Label>
-                  <div className="relative">
-                    <CalendarIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      id={`edit-date-${currentContact.id}`}
-                      type="date"
-                      value={dateSaved}
-                      onChange={(event) => setDateSaved(event.target.value)}
-                      className="h-9 text-sm sm:h-10 pl-9"
-                    />
-                  </div>
-                </div>
+                <DateSavedPicker
+                  value={dateSaved ? parseISODate(dateSaved) : undefined}
+                  onChange={(date) =>
+                    setDateSaved(date ? toISODateString(date) : "")
+                  }
+                />
 
                 {error && (
                   <p className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -450,7 +445,17 @@ export function ContactDetailsDialog({
                 <div className="rounded-lg border bg-background px-3.5 py-3 sm:px-4 sm:py-4">
                   <div className="min-w-0 space-y-1 sm:space-y-2">
                     <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Date Saved</p>
-                    <p>{new Date(currentContact.date_saved).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</p>
+                    <p>
+                      {currentContact.date_saved ? (
+                        new Date(currentContact.date_saved).toLocaleDateString("en-IN", {
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                        })
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </p>
                   </div>
                 </div>
                 {error && (

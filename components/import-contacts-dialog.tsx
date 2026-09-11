@@ -17,6 +17,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { FileText, Loader2, Upload } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 type ContactField = keyof ImportContactRow;
 type Mapping = Record<number, ContactField | "skip">;
@@ -26,9 +27,9 @@ type MappedRow = ImportContactRow & { error?: string };
 const CONTACT_FIELDS: Array<{ value: ContactField; label: string; required: boolean }> = [
   { value: "name", label: "Name", required: true },
   { value: "phone", label: "Phone", required: true },
-  { value: "email", label: "Email", required: false },
+  { value: "email", label: "Email", required: true },
   { value: "tag", label: "Tag", required: false },
-  { value: "dateSaved", label: "Date Saved", required: true },
+  { value: "dateSaved", label: "Date Saved", required: false },
 ];
 
 function parseCsv(text: string): CsvData {
@@ -84,10 +85,10 @@ function isValidDate(value: string) {
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function validateRow(row: ImportContactRow) {
-  if (!row.name || !row.phone || !row.dateSaved) return "Name, phone, and date saved are required.";
+  if (!row.name || !row.phone || !row.email) return "Name, phone, and email are required.";
   if (!/^\d{7,15}$/.test(row.phone)) return "Phone must contain 7-15 digits.";
-  if (row.email && !EMAIL_REGEX.test(row.email)) return "Please enter a valid email address.";
-  if (!isValidDate(row.dateSaved)) return "Date Saved must use YYYY-MM-DD.";
+  if (!EMAIL_REGEX.test(row.email)) return "Please enter a valid email address.";
+  if (row.dateSaved && !isValidDate(row.dateSaved)) return "Date Saved must use YYYY-MM-DD.";
   return null;
 }
 
@@ -119,6 +120,7 @@ export function ImportContactsDialog() {
   const [error, setError] = useState<string | null>(null);
   const [parsing, setParsing] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const mappedRows = csv ? getMappedRows(csv, mapping) : [];
@@ -140,6 +142,7 @@ export function ImportContactsDialog() {
     setError(null);
     setParsing(false);
     setImporting(false);
+    setIsDragging(false);
     setWorkspaceOpen(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
@@ -206,6 +209,27 @@ export function ImportContactsDialog() {
     if (file) await processFile(file);
   }
 
+  function handleDragOver(event: React.DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setIsDragging(true);
+  }
+
+  function handleDragLeave(event: React.DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+    setIsDragging(false);
+  }
+
+  async function handleDrop(event: React.DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setIsDragging(false);
+    const file = event.dataTransfer.files?.[0];
+    if (file) {
+      await processFile(file);
+    }
+  }
+
   function handleMappingChange(columnIndex: number, field: ContactField | "skip") {
     setMapping((current) => {
       const next = { ...current };
@@ -264,14 +288,23 @@ export function ImportContactsDialog() {
               <div
                 role="button"
                 tabIndex={0}
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => {
+                  if (isDragging) return;
+                  fileInputRef.current?.click();
+                }}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
                     fileInputRef.current?.click();
                   }
                 }}
-                className="flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed px-6 py-8 text-center transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                className={cn(
+                  "flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed px-6 py-8 text-center transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                  isDragging && "border-primary bg-primary/5"
+                )}
               >
                 {!selectedFile ? (
                   <>

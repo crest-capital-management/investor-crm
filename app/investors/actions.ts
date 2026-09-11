@@ -37,6 +37,7 @@ export async function getFollowUps(contactId: string) {
     .from("follow_ups")
     .select("id, due_date, message, is_done, created_at")
     .eq("contact_id", normalizedContactId)
+    .is("deleted_at", null)
     .order("is_done", { ascending: true })
     .order("due_date", { ascending: true })
     .order("created_at", { ascending: true });
@@ -281,7 +282,7 @@ export async function deleteFollowUp(followUpId: string, contactId: string) {
 
   const { error: deleteError } = await supabase
     .from("follow_ups")
-    .delete()
+    .update({ deleted_at: new Date().toISOString() })
     .eq("id", normalizedFollowUpId)
     .eq("is_done", false);
 
@@ -336,7 +337,7 @@ export async function deleteCompletedFollowUp(followUpId: string, contactId: str
   // deletion of other follow_up interactions with identical messages.
   const { error: deleteError } = await supabase
     .from("follow_ups")
-    .delete()
+    .update({ deleted_at: new Date().toISOString() })
     .eq("id", normalizedFollowUpId)
     .eq("is_done", true);
 

@@ -16,19 +16,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { Calendar } from "@/components/ui/calendar";
-import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { CalendarIcon } from "lucide-react";
+import { DateSavedPicker } from "@/components/date-saved-picker";
 import { addContact } from "@/app/contacts/actions";
 import { useToast } from "@/components/toast-provider";
 
@@ -102,13 +96,11 @@ export function AddContactDialog() {
       hasError = true;
     }
 
-    if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
-      setEmailError("Please enter a valid email address.");
+    if (!trimmedEmail) {
+      setEmailError("Email is required.");
       hasError = true;
-    }
-
-    if (!dateSaved) {
-      setDateError("Date is required.");
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      setEmailError("Please enter a valid email address.");
       hasError = true;
     }
 
@@ -256,50 +248,11 @@ export function AddContactDialog() {
             </div>
 
             {/* Date */}
-            <div className="flex flex-col gap-1.5 sm:gap-2">
-              <Label>Date Saved to Phonebook</Label>
-
-              <Popover>
-                <PopoverTrigger
-                  render={
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-9 text-sm sm:h-10 w-full justify-start gap-2 font-normal"
-                    />
-                  }
-                >
-                  <CalendarIcon className="size-4" />
-
-                  {dateSaved ? (
-                    dateSaved.toLocaleDateString("en-GB", {
-                      day: "2-digit",
-                      month: "short",
-                      year: "numeric",
-                    })
-                  ) : (
-                    <span className="text-muted-foreground">
-                      Pick a date
-                    </span>
-                  )}
-                </PopoverTrigger>
-
-                <PopoverContent
-                  className="w-auto p-0"
-                  align="start"
-                >
-                  <Calendar
-                    mode="single"
-                    selected={dateSaved}
-                    onSelect={setDateSaved}
-                  />
-                </PopoverContent>
-              </Popover>
-
-              {dateError && (
-                <p className="text-sm text-destructive">{dateError}</p>
-              )}
-            </div>
+            <DateSavedPicker
+              value={dateSaved}
+              onChange={setDateSaved}
+              error={dateError}
+            />
 
             {error && (
               <p className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">

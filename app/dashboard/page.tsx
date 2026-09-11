@@ -74,15 +74,20 @@ export default async function DashboardPage() {
 
   const [contactsResult, followUpsResult, interactionsResult] =
     await Promise.all([
-      supabase.from("contacts").select("id, name, tags"),
+      supabase
+        .from("contacts")
+        .select("id, name, tags")
+        .is("deleted_at", null),
       supabase
         .from("follow_ups")
         .select("id, contact_id, due_date, message, is_done, created_at")
         .eq("is_done", false)
+        .is("deleted_at", null)
         .order("due_date", { ascending: true }),
       supabase
         .from("interactions")
         .select("id, contact_id, type, note, created_at")
+        .is("deleted_at", null)
         .order("created_at", { ascending: false })
         .limit(30),
     ]);
