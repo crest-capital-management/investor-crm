@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { LayoutDashboard, Users, Folder, TrendingUp } from "lucide-react";
+import { LayoutDashboard, Users, Folder, TrendingUp, Megaphone } from "lucide-react";
 import { useSidebar } from "@/components/sidebar-provider";
 import {
   Sheet,
@@ -19,6 +19,7 @@ const navItems = [
   { href: "/contacts", label: "Contacts", icon: Users },
   { href: "/groups", label: "Groups", icon: Folder },
   { href: "/investors", label: "Investors", icon: TrendingUp },
+  { href: "/broadcasts", label: "Broadcasts", icon: Megaphone },
 ];
 
 export function AppSidebar() {
