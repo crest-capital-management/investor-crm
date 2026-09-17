@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { LayoutDashboard, Users, Folder, TrendingUp, Megaphone } from "lucide-react";
+import { LayoutDashboard, Users, Folder, TrendingUp, Megaphone, FileText } from "lucide-react";
 import { useSidebar } from "@/components/sidebar-provider";
 import {
   Sheet,
@@ -20,6 +20,7 @@ const navItems = [
   { href: "/groups", label: "Groups", icon: Folder },
   { href: "/investors", label: "Investors", icon: TrendingUp },
   { href: "/broadcasts", label: "Broadcasts", icon: Megaphone },
+  { href: "/templates", label: "Templates", icon: FileText },
 ];
 
 export function AppSidebar() {
@@ -73,7 +74,7 @@ export function AppSidebar() {
     <>
       {/* Desktop Persistent Sidebar (1024px and above) */}
       <aside className="hidden lg:flex w-64 shrink-0 flex-col border-r bg-card p-4">
-        <div className="mb-4 text-lg font-semibold">Investor CRM</div>
+        <div className="mb-4 text-lg font-semibold font-heading">Investor CRM</div>
         {renderNavLinks(false)}
         <div className="flex-1" />
       </aside>
@@ -82,7 +83,7 @@ export function AppSidebar() {
       <Sheet open={isOpen} onOpenChange={setIsOpen}>
         <SheetContent side="left" className="flex w-72 flex-col p-4">
           <SheetHeader className="p-0 text-left">
-            <SheetTitle className="text-lg font-semibold">Investor CRM</SheetTitle>
+            <SheetTitle className="text-lg font-semibold font-heading">Investor CRM</SheetTitle>
             <SheetDescription className="sr-only">Main navigation menu</SheetDescription>
           </SheetHeader>
           <div className="mt-4">

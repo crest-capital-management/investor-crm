@@ -22,6 +22,57 @@ function markAndCheckDuplicateId(id: string | undefined): boolean {
   return false;
 }
 
+// In-memory bounded cache for recently processed Meta status updates (wamid:status)
+const processedStatusKeys = new Set<string>();
+
+export function markAndCheckDuplicateStatus(
+  id: string | undefined,
+  status: string | undefined
+): boolean {
+  if (!id || !status) return false;
+  const key = `${id}:${status}`;
+  if (processedStatusKeys.has(key)) {
+    return true;
+  }
+  if (processedStatusKeys.size >= MAX_CACHE_SIZE) {
+    const oldestKey = processedStatusKeys.values().next().value;
+    if (oldestKey) {
+      processedStatusKeys.delete(oldestKey);
+    }
+  }
+  processedStatusKeys.add(key);
+  return false;
+}
+
+export interface MetaStatusError {
+  code: number;
+  title?: string;
+  message?: string;
+  error_data?: {
+    details?: string;
+  };
+}
+
+export interface MetaStatusUpdate {
+  id?: string;
+  status?: "sent" | "delivered" | "read" | "failed" | string;
+  timestamp?: string | number;
+  recipient_id?: string;
+  conversation?: {
+    id?: string;
+    origin?: {
+      type?: string;
+    };
+  };
+  pricing?: {
+    billable?: boolean;
+    pricing_model?: string;
+    category?: string;
+  };
+  errors?: MetaStatusError[];
+  [key: string]: unknown;
+}
+
 interface MetaMediaData {
   id?: string;
   link?: string;
@@ -66,7 +117,7 @@ interface MetaChangeValue {
   }>;
   messages?: MetaMessageBase[];
   message_echoes?: MetaMessageBase[];
-  statuses?: unknown[];
+  statuses?: MetaStatusUpdate[];
 }
 
 interface MetaChange {
@@ -229,6 +280,21 @@ export async function POST(request: Request) {
           console.error("[WhatsApp Webhook] Error processing echo:", err);
         }
       }
+
+      // 3. Process Outbound Message Delivery Statuses (value.statuses)
+      const statuses = Array.isArray(value.statuses) ? value.statuses : [];
+      for (const statusObj of statuses) {
+        try {
+          await processStatusUpdate(statusObj as MetaStatusUpdate);
+          processedCount++;
+        } catch (err) {
+          // Error isolation: single status failure does not crash the webhook batch
+          console.error(
+            "[WhatsApp Webhook] Error processing status update:",
+            err
+          );
+        }
+      }
     }
   }
 
@@ -236,6 +302,43 @@ export async function POST(request: Request) {
     success: true,
     processed: processedCount,
   });
+}
+
+export async function processStatusUpdate(statusUpdate: MetaStatusUpdate) {
+  const { id: messageId, status, recipient_id, errors } = statusUpdate;
+
+  if (!messageId || !status) {
+    return { success: false, reason: "Missing messageId or status" };
+  }
+
+  // Idempotency: avoid processing identical (messageId, status) events more than once
+  if (markAndCheckDuplicateStatus(messageId, status)) {
+    return { success: true, duplicate: true };
+  }
+
+  const firstError =
+    Array.isArray(errors) && errors.length > 0 ? errors[0] : null;
+  const errorInfo = firstError
+    ? ` code=${firstError.code} title="${firstError.title || firstError.message || ""}"`
+    : "";
+
+  console.log(
+    `[WhatsApp Webhook] Delivery status update: wamid=${messageId} status=${status}${errorInfo}`
+  );
+
+  // NOTE: Schema limitation audit
+  // The current whatsapp_messages schema does not have status, error, or meta_message_id columns,
+  // and the broadcasts table does not record per-message wamid values or recipient failure states.
+  // Per architectural constraints, status transitions (sent, delivered, read, failed) are acknowledged
+  // and logged safely without attempting non-existent database column mutations or inventing synthetic relationships.
+
+  return {
+    success: true,
+    messageId,
+    status,
+    recipientId: recipient_id,
+    errorCode: firstError?.code,
+  };
 }
 
 interface ProcessMessageArgs {

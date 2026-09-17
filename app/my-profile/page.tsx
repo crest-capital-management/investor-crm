@@ -21,6 +21,8 @@ export const metadata: Metadata = {
   title: "My Profile",
 };
 
+import { getUserDisplayName, getUserInitials } from "@/lib/user";
+
 type ProfileData = {
   id: string;
   email: string;
@@ -32,34 +34,12 @@ type ProfileData = {
 };
 
 function extractProfileDetails(user: User): ProfileData {
-  const meta = user.user_metadata ?? {};
-  const rawName = (meta.full_name || meta.name || "").trim();
-  const email = user.email ?? "";
-
-  let displayName = rawName;
-  if (!displayName && email) {
-    const handle = email.split("@")[0] || "";
-    displayName = handle
-      .split(/[._-]/)
-      .filter(Boolean)
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-      .join(" ");
-  }
-  if (!displayName) {
-    displayName = "User";
-  }
-
-  const nameParts = displayName.trim().split(/\s+/);
-  let initials = "U";
-  if (nameParts.length >= 2) {
-    initials = `${nameParts[0][0]}${nameParts[1][0]}`.toUpperCase();
-  } else if (nameParts[0]) {
-    initials = nameParts[0].slice(0, 2).toUpperCase();
-  }
+  const displayName = getUserDisplayName(user);
+  const initials = getUserInitials(displayName);
 
   return {
     id: user.id,
-    email,
+    email: user.email ?? "",
     displayName,
     initials,
     isEmailVerified: Boolean(user.email_confirmed_at),

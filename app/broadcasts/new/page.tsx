@@ -6,6 +6,7 @@ import { BroadcastEditor } from "@/components/broadcast-editor";
 import type {
   GroupOption,
   ContactOption,
+  TemplateOption,
 } from "@/app/broadcasts/actions";
 
 export const metadata: Metadata = {
@@ -15,7 +16,7 @@ export const metadata: Metadata = {
 export default async function NewBroadcastPage() {
   const { supabase } = await requireAuth();
 
-  const [groupsResult, contactsResult] = await Promise.all([
+  const [groupsResult, contactsResult, templatesResult] = await Promise.all([
     supabase
       .from("groups")
       .select("id, name")
@@ -25,10 +26,16 @@ export default async function NewBroadcastPage() {
       .select("id, name, phone")
       .is("deleted_at", null)
       .order("name", { ascending: true }),
+    supabase
+      .from("templates")
+      .select("id, name, category, body_text, variables, approved_at")
+      .is("deleted_at", null)
+      .order("name", { ascending: true }),
   ]);
 
   const groups = (groupsResult.data ?? []) as GroupOption[];
   const contacts = (contactsResult.data ?? []) as ContactOption[];
+  const templates = (templatesResult.data ?? []) as TemplateOption[];
 
   return (
     <div className="flex min-h-0 flex-col p-4 sm:p-6 lg:p-8">
@@ -49,7 +56,12 @@ export default async function NewBroadcastPage() {
       </div>
 
       <div className="mt-6 max-w-4xl">
-        <BroadcastEditor mode="create" groups={groups} contacts={contacts} />
+        <BroadcastEditor
+          mode="create"
+          groups={groups}
+          contacts={contacts}
+          templates={templates}
+        />
       </div>
     </div>
   );

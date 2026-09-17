@@ -281,7 +281,7 @@ export function ImportContactsDialog() {
           <div className="flex-1 space-y-6 overflow-y-auto px-6 py-6">
             <div className="rounded-md bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
               <p className="font-medium text-foreground">Expected columns</p>
-              <p className="mt-2">Name</p><p>Phone</p><p>Email (Optional)</p><p>Tag</p><p>Date Saved</p>
+              <p className="mt-2">Name</p><p>Phone</p><p>Email</p><p>Tag</p><p>Date Saved (Optional)</p>
             </div>
             <div className="space-y-2">
               <input ref={fileInputRef} id="contacts-csv" type="file" accept=".csv" onChange={handleFileChange} className="sr-only" />

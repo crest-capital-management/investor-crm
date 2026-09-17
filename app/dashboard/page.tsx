@@ -9,8 +9,18 @@ import {
   ArrowUpRight,
   Calendar,
 } from "lucide-react";
+import { startOfWeek, subWeeks, addDays, format } from "date-fns";
 import { requireAuth } from "@/lib/auth";
+import { getUserDisplayName } from "@/lib/user";
 import { cn } from "@/lib/utils";
+import {
+  FollowUpTrendChart,
+  TagDistributionChart,
+  InvestorsGoingQuietList,
+  type FollowUpTrendPoint,
+  type TagDistributionPoint,
+  type QuietInvestorItem,
+} from "@/components/dashboard-analytics";
 
 export const metadata: Metadata = {
   title: "Dashboard",
@@ -39,6 +49,40 @@ type InteractionRecord = {
   created_at: string;
 };
 
+type WeekBucket = {
+  label: string;
+  start: Date;
+  end: Date;
+  created: number;
+  completed: number;
+};
+
+function getEightWeekBuckets(now: Date): WeekBucket[] {
+  const buckets: WeekBucket[] = [];
+  for (let i = 7; i >= 0; i--) {
+    const ref = subWeeks(now, i);
+    const start = startOfWeek(ref, { weekStartsOn: 1 });
+    const safeStart = new Date(
+      start.getFullYear(),
+      start.getMonth(),
+      start.getDate(),
+      0,
+      0,
+      0,
+      0
+    );
+    const safeEnd = addDays(safeStart, 7);
+    buckets.push({
+      label: format(safeStart, "MMM d"),
+      start: safeStart,
+      end: safeEnd,
+      created: 0,
+      completed: 0,
+    });
+  }
+  return buckets;
+}
+
 function formatDueDate(dueDate: string) {
   if (!dueDate) return "No date";
   const [year, month, day] = dueDate.split("-").map(Number);
@@ -64,33 +108,86 @@ function formatActivityDate(isoString: string) {
   });
 }
 
+function getGreeting(name: string, date: Date): string {
+  const hour = date.getHours();
+  let timeGreeting = "Good morning";
+  if (hour >= 12 && hour < 17) {
+    timeGreeting = "Good afternoon";
+  } else if (hour >= 17) {
+    timeGreeting = "Good evening";
+  }
+  return `${timeGreeting}, ${name}`;
+}
+
+function formatBannerDate(d: Date): string {
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const months = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  ];
+  const weekday = days[d.getDay()];
+  const month = months[d.getMonth()];
+  const day = d.getDate();
+  return `${weekday}, ${month} ${day}`;
+}
+
 export default async function DashboardPage() {
-  const { supabase } = await requireAuth();
+  const { supabase, user } = await requireAuth();
   const now = new Date();
+  const displayName = getUserDisplayName(user);
+  const greeting = getGreeting(displayName, now);
+  const bannerDate = formatBannerDate(now);
+
   const todayStr = now.toISOString().slice(0, 10);
   const thirtyDaysAgo = new Date(now);
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
   const thirtyDaysAgoIso = thirtyDaysAgo.toISOString();
 
-  const [contactsResult, followUpsResult, interactionsResult] =
-    await Promise.all([
-      supabase
-        .from("contacts")
-        .select("id, name, tags")
-        .is("deleted_at", null),
-      supabase
-        .from("follow_ups")
-        .select("id, contact_id, due_date, message, is_done, created_at")
-        .eq("is_done", false)
-        .is("deleted_at", null)
-        .order("due_date", { ascending: true }),
-      supabase
-        .from("interactions")
-        .select("id, contact_id, type, note, created_at")
-        .is("deleted_at", null)
-        .order("created_at", { ascending: false })
-        .limit(30),
-    ]);
+  // 8-week date calculation for trend queries
+  const weekBuckets = getEightWeekBuckets(now);
+  const eightWeeksAgoIso = weekBuckets[0].start.toISOString();
+
+  const [
+    contactsResult,
+    followUpsResult,
+    interactionsResult,
+    createdTrendResult,
+    completedTrendResult,
+    allInteractionsResult,
+  ] = await Promise.all([
+    supabase
+      .from("contacts")
+      .select("id, name, tags")
+      .is("deleted_at", null),
+    supabase
+      .from("follow_ups")
+      .select("id, contact_id, due_date, message, is_done, created_at")
+      .eq("is_done", false)
+      .is("deleted_at", null)
+      .order("due_date", { ascending: true }),
+    supabase
+      .from("interactions")
+      .select("id, contact_id, type, note, created_at")
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(30),
+    supabase
+      .from("follow_ups")
+      .select("id, created_at")
+      .is("deleted_at", null)
+      .gte("created_at", eightWeeksAgoIso),
+    supabase
+      .from("interactions")
+      .select("id, created_at")
+      .eq("type", "follow_up")
+      .is("deleted_at", null)
+      .gte("created_at", eightWeeksAgoIso),
+    supabase
+      .from("interactions")
+      .select("contact_id, created_at")
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false }),
+  ]);
 
   const { data: contacts, error: contactsError } = contactsResult;
   const { data: pendingFollowUps, error: followUpsError } = followUpsResult;
@@ -195,20 +292,136 @@ export default async function DashboardPage() {
     8
   );
 
+  // --- Analytics: Widget 1: Follow-up Completion Trend ---
+  const createdTrend = createdTrendResult.data ?? [];
+  const completedTrend = completedTrendResult.data ?? [];
+
+  for (const item of createdTrend) {
+    const time = new Date(item.created_at).getTime();
+    for (const b of weekBuckets) {
+      if (time >= b.start.getTime() && time < b.end.getTime()) {
+        b.created++;
+        break;
+      }
+    }
+  }
+
+  for (const item of completedTrend) {
+    const time = new Date(item.created_at).getTime();
+    for (const b of weekBuckets) {
+      if (time >= b.start.getTime() && time < b.end.getTime()) {
+        b.completed++;
+        break;
+      }
+    }
+  }
+
+  const followUpTrendData: FollowUpTrendPoint[] = weekBuckets.map((b) => ({
+    week: b.label,
+    created: b.created,
+    completed: b.completed,
+  }));
+
+  // --- Analytics: Widget 2: Tag Distribution ---
+  const STANDARD_TAGS = [
+    "Investor",
+    "Alumni",
+    "Prospect",
+    "Partner",
+    "Advisor",
+  ] as const;
+  const tagCounts: Record<string, number> = {
+    Investor: 0,
+    Alumni: 0,
+    Prospect: 0,
+    Partner: 0,
+    Advisor: 0,
+  };
+
+  for (const contact of (contacts ?? []) as ContactItem[]) {
+    if (Array.isArray(contact.tags)) {
+      for (const tag of contact.tags) {
+        if (typeof tag === "string") {
+          const normalized = tag.trim().toLowerCase();
+          const matched = STANDARD_TAGS.find(
+            (t) => t.toLowerCase() === normalized
+          );
+          if (matched) {
+            tagCounts[matched]++;
+          }
+        }
+      }
+    }
+  }
+
+  const tagDistributionData: TagDistributionPoint[] = STANDARD_TAGS.map(
+    (name) => ({
+      name,
+      count: tagCounts[name] || 0,
+    })
+  );
+
+  // --- Analytics: Widget 3: Investors Going Quiet ---
+  const allInteractions = allInteractionsResult.data ?? [];
+  const latestInteractionByContact = new Map<string, string>();
+  for (const item of allInteractions) {
+    if (!latestInteractionByContact.has(item.contact_id)) {
+      latestInteractionByContact.set(item.contact_id, item.created_at);
+    }
+  }
+
+  const quietInvestors: QuietInvestorItem[] = (
+    (contacts ?? []) as ContactItem[]
+  )
+    .filter((contact) =>
+      Boolean(
+        Array.isArray(contact.tags) &&
+          contact.tags.some(
+            (tag: string) => tag.trim().toLowerCase() === "investor"
+          )
+      )
+    )
+    .map((investor) => {
+      const lastContactIso = latestInteractionByContact.get(investor.id) ?? null;
+      let daysAgo: number | null = null;
+      if (lastContactIso) {
+        const lastDate = new Date(lastContactIso);
+        if (!isNaN(lastDate.getTime())) {
+          const diffMs = now.getTime() - lastDate.getTime();
+          daysAgo = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+        }
+      }
+      return {
+        id: investor.id,
+        name: investor.name,
+        daysAgo,
+        lastContactIso,
+      };
+    });
+
   return (
     <div className="flex min-h-0 flex-col p-4 sm:p-6 lg:p-8">
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      {/* Greeting Banner */}
+      <div className="rounded-xl border bg-card p-5 shadow-sm sm:flex sm:items-center sm:justify-between sm:p-6">
         <div>
-          <h1 className="text-2xl font-semibold">Dashboard</h1>
+          <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            Dashboard
+          </span>
+          <h1 className="mt-1 text-2xl font-semibold text-foreground sm:text-3xl">
+            {greeting}
+          </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Overview of your investor pipeline and latest follow-ups.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="mt-4 flex items-center gap-3 sm:mt-0">
+          <div className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-3 py-1.5 text-xs font-medium text-muted-foreground">
+            <Calendar className="size-3.5" />
+            <span>{bannerDate}</span>
+          </div>
           <Link
             href="/investors"
-            className="inline-flex h-9 items-center justify-center rounded-md border bg-background px-3 text-xs font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
+            className="inline-flex h-8 items-center justify-center rounded-lg border border-input bg-background px-3 text-xs font-medium shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground"
           >
             View All Investors
           </Link>
@@ -216,7 +429,7 @@ export default async function DashboardPage() {
       </div>
 
       {/* 5 Summary Cards */}
-      <div className="mt-4 grid shrink-0 grid-cols-2 gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
+      <div className="mt-6 grid shrink-0 grid-cols-2 gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
         {summaryCards.map((card) => {
           const Icon = card.icon;
           return (
@@ -425,6 +638,38 @@ export default async function DashboardPage() {
                 );
               })
             )}
+          </div>
+        </div>
+      </div>
+
+      {/* Section 3: Analytics */}
+      <div className="mt-8 flex flex-col gap-4">
+        <div className="flex flex-col gap-1 border-t pt-6">
+          <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            Analytics
+          </span>
+          <h2 className="text-lg font-semibold tracking-tight text-foreground sm:text-xl">
+            Pipeline & Engagement Insights
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            Follow-up completion trends, contact tag segmentation, and investor engagement health.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 xl:grid-cols-3">
+          {/* Widget 1: Follow-up Completion Trend */}
+          <div className="rounded-xl border bg-card p-5 shadow-sm">
+            <FollowUpTrendChart data={followUpTrendData} />
+          </div>
+
+          {/* Widget 2: Tag Distribution */}
+          <div className="rounded-xl border bg-card p-5 shadow-sm">
+            <TagDistributionChart data={tagDistributionData} />
+          </div>
+
+          {/* Widget 3: Investors Going Quiet */}
+          <div className="rounded-xl border bg-card p-5 shadow-sm lg:col-span-2 xl:col-span-1">
+            <InvestorsGoingQuietList investors={quietInvestors} />
           </div>
         </div>
       </div>

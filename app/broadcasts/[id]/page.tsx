@@ -7,6 +7,7 @@ import { BroadcastEditor } from "@/components/broadcast-editor";
 import type {
   GroupOption,
   ContactOption,
+  TemplateOption,
   BroadcastData,
 } from "@/app/broadcasts/actions";
 
@@ -22,11 +23,11 @@ export default async function BroadcastDetailPage({ params }: PageProps) {
   const { id } = await params;
   const { supabase } = await requireAuth();
 
-  const [broadcastResult, groupsResult, contactsResult] = await Promise.all([
+  const [broadcastResult, groupsResult, contactsResult, templatesResult] = await Promise.all([
     supabase
       .from("broadcasts")
       .select(
-        "id, message_text, target_type, target_ids, status, scheduled_for, sent_at, created_at"
+        "id, message_text, target_type, target_ids, status, scheduled_for, sent_at, created_at, template_id, variable_mappings"
       )
       .eq("id", id)
       .is("deleted_at", null)
@@ -40,6 +41,11 @@ export default async function BroadcastDetailPage({ params }: PageProps) {
       .select("id, name, phone")
       .is("deleted_at", null)
       .order("name", { ascending: true }),
+    supabase
+      .from("templates")
+      .select("id, name, category, body_text, variables, approved_at")
+      .is("deleted_at", null)
+      .order("name", { ascending: true }),
   ]);
 
   if (broadcastResult.error || !broadcastResult.data) {
@@ -49,6 +55,7 @@ export default async function BroadcastDetailPage({ params }: PageProps) {
   const broadcast = broadcastResult.data as BroadcastData;
   const groups = (groupsResult.data ?? []) as GroupOption[];
   const contacts = (contactsResult.data ?? []) as ContactOption[];
+  const templates = (templatesResult.data ?? []) as TemplateOption[];
 
   const isSent = broadcast.status === "sent";
   const isScheduled = broadcast.status === "scheduled";
@@ -92,6 +99,7 @@ export default async function BroadcastDetailPage({ params }: PageProps) {
           existingBroadcast={broadcast}
           groups={groups}
           contacts={contacts}
+          templates={templates}
         />
       </div>
     </div>

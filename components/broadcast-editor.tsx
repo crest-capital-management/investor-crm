@@ -1,12 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { TAG_OPTIONS } from "@/components/add-contact-dialog";
 import {
   createBroadcastDraft,
@@ -15,6 +22,7 @@ import {
   type TargetType,
   type GroupOption,
   type ContactOption,
+  type TemplateOption,
   type BroadcastData,
 } from "@/app/broadcasts/actions";
 import { useToast } from "@/components/toast-provider";
@@ -25,13 +33,104 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { CalendarIcon, Clock, Search, Users } from "lucide-react";
+import { CalendarIcon, Clock, Search, Users, FileText, Variable, Eye, X } from "lucide-react";
 import { startOfToday } from "date-fns";
+import {
+  extractPlaceholders,
+} from "@/components/template-editor";
+
+export type VariableMappingType = "contact_field" | "static";
+export type SupportedContactField = "first_name" | "name" | "phone" | "email";
+
+export interface ContactFieldMapping {
+  type: "contact_field";
+  field: SupportedContactField;
+  fallback?: string;
+}
+
+export interface StaticMapping {
+  type: "static";
+  value: string;
+}
+
+export type VariableMapping = ContactFieldMapping | StaticMapping;
+export type VariableMappings = Record<string, VariableMapping>;
+
+export const SAMPLE_PREVIEW_CONTACT: Record<SupportedContactField, string> = {
+  first_name: "Aditya",
+  name: "Aditya Dhikale",
+  phone: "+91 98765 43210",
+  email: "aditya@crestcapital.com",
+};
+
+function createDefaultMappings(
+  placeholders: string[],
+  existing?: Record<string, unknown> | null
+): VariableMappings {
+  const mappings: VariableMappings = {};
+  for (const ph of placeholders) {
+    if (existing && existing[ph] && typeof existing[ph] === "object") {
+      const raw = existing[ph] as Record<string, unknown>;
+      if (raw.type === "static") {
+        mappings[ph] = {
+          type: "static",
+          value: typeof raw.value === "string" ? raw.value : "",
+        };
+        continue;
+      } else if (raw.type === "contact_field") {
+        const field =
+          raw.field === "name" ||
+          raw.field === "phone" ||
+          raw.field === "email"
+            ? (raw.field as SupportedContactField)
+            : "first_name";
+        mappings[ph] = {
+          type: "contact_field",
+          field,
+          fallback:
+            typeof raw.fallback === "string" ? raw.fallback : "Investor",
+        };
+        continue;
+      }
+    }
+    mappings[ph] = {
+      type: "contact_field",
+      field: "first_name",
+      fallback: "Investor",
+    };
+  }
+  return mappings;
+}
+
+function computeResolvedMessage(
+  body: string,
+  mappings: VariableMappings,
+  placeholders: string[]
+): string {
+  let resolved = body;
+  for (const ph of placeholders) {
+    const mapping = mappings[ph];
+    let val = `{{${ph}}}`;
+    if (mapping) {
+      if (mapping.type === "static") {
+        val = mapping.value || `{{${ph}}}`;
+      } else if (mapping.type === "contact_field") {
+        val =
+          SAMPLE_PREVIEW_CONTACT[mapping.field] ||
+          mapping.fallback ||
+          `{{${ph}}}`;
+      }
+    }
+    resolved = resolved.replaceAll(`{{${ph}}}`, val);
+  }
+  return resolved;
+}
 
 export interface BroadcastEditorProps {
   mode: "create" | "edit";
   groups: GroupOption[];
   contacts: ContactOption[];
+  templates?: TemplateOption[];
   existingBroadcast?: BroadcastData | null;
 }
 
@@ -122,6 +221,7 @@ export function BroadcastEditor({
   mode,
   groups = [],
   contacts = [],
+  templates = [],
   existingBroadcast,
 }: BroadcastEditorProps) {
   const router = useRouter();
@@ -135,6 +235,170 @@ export function BroadcastEditor({
   const [messageText, setMessageText] = useState(() => {
     return existingBroadcast?.message_text ?? "";
   });
+
+  // Template Mode State & Variable Mappings
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>(() => {
+    return existingBroadcast?.template_id ?? "";
+  });
+  const [templateSourceBody, setTemplateSourceBody] = useState<string>(() => {
+    if (existingBroadcast?.template_id && templates.length > 0) {
+      const tmpl = templates.find((t) => t.id === existingBroadcast.template_id);
+      return tmpl?.body_text ?? "";
+    }
+    return "";
+  });
+  const [templateMode, setTemplateMode] = useState<"custom" | "template">(() => {
+    return existingBroadcast?.template_id ? "template" : "custom";
+  });
+  const [variableMappings, setVariableMappings] = useState<VariableMappings>(() => {
+    if (existingBroadcast?.template_id && templates.length > 0) {
+      const tmpl = templates.find((t) => t.id === existingBroadcast.template_id);
+      if (tmpl) {
+        const placeholders = extractPlaceholders(tmpl.body_text);
+        return createDefaultMappings(
+          placeholders,
+          existingBroadcast.variable_mappings
+        );
+      }
+    }
+    return {};
+  });
+
+
+  const selectedTemplate = useMemo(() => {
+    return templates.find((t) => t.id === selectedTemplateId) ?? null;
+  }, [templates, selectedTemplateId]);
+
+  // Detected placeholders in current template source body
+  const detectedPlaceholders = useMemo(() => {
+    if (!templateSourceBody) return [];
+    return extractPlaceholders(templateSourceBody);
+  }, [templateSourceBody]);
+
+  function handleSelectTemplate(templateId: string) {
+    if (isReadOnly) return;
+    setSelectedTemplateId(templateId);
+    if (messageError) setMessageError(null);
+
+    const tmpl = templates.find((t) => t.id === templateId);
+    if (tmpl) {
+      setTemplateMode("template");
+      setTemplateSourceBody(tmpl.body_text);
+
+      const placeholders = extractPlaceholders(tmpl.body_text);
+      const initialMappings = createDefaultMappings(placeholders);
+      setVariableMappings(initialMappings);
+
+      const initialResolved = computeResolvedMessage(
+        tmpl.body_text,
+        initialMappings,
+        placeholders
+      );
+      setMessageText(initialResolved);
+    } else {
+      setTemplateMode("custom");
+      setTemplateSourceBody("");
+      setVariableMappings({});
+    }
+  }
+
+  function handleMappingTypeChange(ph: string, type: VariableMappingType) {
+    if (isReadOnly) return;
+    const current = variableMappings[ph];
+    let next: VariableMapping;
+    if (type === "static") {
+      next = {
+        type: "static",
+        value: current && current.type === "static" ? current.value : "",
+      };
+    } else {
+      next = {
+        type: "contact_field",
+        field: "first_name",
+        fallback:
+          current && current.type === "contact_field"
+            ? current.fallback ?? "Investor"
+            : "Investor",
+      };
+    }
+    const nextMappings = { ...variableMappings, [ph]: next };
+    setVariableMappings(nextMappings);
+    const updated = computeResolvedMessage(
+      templateSourceBody,
+      nextMappings,
+      detectedPlaceholders
+    );
+    setMessageText(updated);
+    if (messageError) setMessageError(null);
+  }
+
+  function handleMappingFieldChange(ph: string, field: SupportedContactField) {
+    if (isReadOnly) return;
+    const current = variableMappings[ph];
+    const fallback =
+      current && current.type === "contact_field"
+        ? current.fallback
+        : "Investor";
+    const next: VariableMapping = {
+      type: "contact_field",
+      field,
+      fallback,
+    };
+    const nextMappings = { ...variableMappings, [ph]: next };
+    setVariableMappings(nextMappings);
+    const updated = computeResolvedMessage(
+      templateSourceBody,
+      nextMappings,
+      detectedPlaceholders
+    );
+    setMessageText(updated);
+    if (messageError) setMessageError(null);
+  }
+
+  function handleMappingFallbackChange(ph: string, fallback: string) {
+    if (isReadOnly) return;
+    const current = variableMappings[ph];
+    if (current && current.type === "contact_field") {
+      const next: VariableMapping = {
+        ...current,
+        fallback,
+      };
+      const nextMappings = { ...variableMappings, [ph]: next };
+      setVariableMappings(nextMappings);
+      const updated = computeResolvedMessage(
+        templateSourceBody,
+        nextMappings,
+        detectedPlaceholders
+      );
+      setMessageText(updated);
+    }
+  }
+
+  function handleMappingStaticValueChange(ph: string, value: string) {
+    if (isReadOnly) return;
+    const next: VariableMapping = {
+      type: "static",
+      value,
+    };
+    const nextMappings = { ...variableMappings, [ph]: next };
+    setVariableMappings(nextMappings);
+    const updated = computeResolvedMessage(
+      templateSourceBody,
+      nextMappings,
+      detectedPlaceholders
+    );
+    setMessageText(updated);
+    if (messageError) setMessageError(null);
+  }
+
+  function handleClearTemplate() {
+    setSelectedTemplateId("");
+    setTemplateSourceBody("");
+    setVariableMappings({});
+    setTemplateMode("custom");
+    if (messageError) setMessageError(null);
+  }
+
   const [targetType, setTargetType] = useState<TargetType>(() => {
     return existingBroadcast?.target_type ?? "group";
   });
@@ -321,6 +585,34 @@ export function BroadcastEditor({
       return;
     }
 
+    // If template mode is active with variables, validate that every placeholder has a valid mapping
+    if (templateMode === "template" && detectedPlaceholders.length > 0) {
+      for (const ph of detectedPlaceholders) {
+        const mapping = variableMappings[ph];
+        if (!mapping) {
+          setMessageError(`Please configure variable mapping for {{${ph}}}.`);
+          return;
+        }
+        if (mapping.type === "static") {
+          if (!mapping.value || !mapping.value.trim()) {
+            setMessageError(`Please enter a value for {{${ph}}} static text.`);
+            return;
+          }
+        } else if (mapping.type === "contact_field") {
+          const validFields: SupportedContactField[] = [
+            "first_name",
+            "name",
+            "phone",
+            "email",
+          ];
+          if (!validFields.includes(mapping.field)) {
+            setMessageError(`Please select a valid contact field for {{${ph}}}.`);
+            return;
+          }
+        }
+      }
+    }
+
     let targetIds: string[] = [];
     if (targetType === "group") {
       if (selectedGroupIds.length === 0) {
@@ -360,6 +652,15 @@ export function BroadcastEditor({
     setSubmitting(true);
     let result: { success?: boolean; error?: string };
 
+    const templateIdPayload =
+      templateMode === "template" && selectedTemplateId
+        ? selectedTemplateId
+        : null;
+    const variableMappingsPayload =
+      templateMode === "template" && selectedTemplateId
+        ? variableMappings
+        : {};
+
     if (isEditing && existingBroadcast) {
       result = await updateBroadcast(existingBroadcast.id, {
         message_text: trimmedMessage,
@@ -368,6 +669,8 @@ export function BroadcastEditor({
         ...(isEditingScheduled && scheduledDate
           ? { scheduled_for: scheduledDate.toISOString() }
           : {}),
+        template_id: templateIdPayload,
+        variable_mappings: variableMappingsPayload,
       });
     } else if (scheduleMode === "later") {
       if (!scheduledDate) {
@@ -380,12 +683,16 @@ export function BroadcastEditor({
         target_type: targetType,
         target_ids: targetIds,
         scheduled_for: scheduledDate.toISOString(),
+        template_id: templateIdPayload,
+        variable_mappings: variableMappingsPayload,
       });
     } else {
       result = await createBroadcastDraft({
         message_text: trimmedMessage,
         target_type: targetType,
         target_ids: targetIds,
+        template_id: templateIdPayload,
+        variable_mappings: variableMappingsPayload,
       });
     }
 
@@ -421,12 +728,214 @@ export function BroadcastEditor({
 
       {/* Message Text Section */}
       <section className="rounded-lg border bg-background p-5">
-        <h2 className="text-base font-semibold">Message</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Compose the text that will be sent via WhatsApp to all target recipients.
-        </p>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-base font-semibold">Message</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Compose custom message text or populate from a pre-defined WhatsApp template.
+            </p>
+          </div>
+          {!isReadOnly && (
+            <div className="flex items-center gap-2">
+              <Select
+                value={selectedTemplateId || "none"}
+                disabled={templates.length === 0}
+                onValueChange={(value) => {
+                  handleSelectTemplate(value === "none" || !value ? "" : value);
+                }}
+              >
+                <SelectTrigger
+                  className="h-8 w-[260px] max-w-xs text-xs font-medium"
+                  aria-label="Use Template"
+                >
+                  <SelectValue
+                    placeholder={
+                      templates.length === 0
+                        ? "No templates available"
+                        : "-- Use a Template (Optional) --"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">
+                    {templates.length === 0
+                      ? "No templates available"
+                      : "-- Use a Template (Optional) --"}
+                  </SelectItem>
+                  {templates.map((tmpl) => (
+                    <SelectItem key={tmpl.id} value={tmpl.id}>
+                      {tmpl.name} ({tmpl.category || "General"})
+                      {tmpl.approved_at ? " ✓" : " (Draft)"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedTemplateId && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleClearTemplate}
+                  className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <X className="size-3.5 mr-1" />
+                  Clear
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Template info banner if selected */}
+        {selectedTemplate && (
+          <div className="mt-3 flex items-center justify-between rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs">
+            <div className="flex items-center gap-2">
+              <FileText className="size-4 text-primary" />
+              <span className="font-medium text-foreground">
+                Loaded Template: <code className="font-mono text-primary font-semibold">{selectedTemplate.name}</code>
+              </span>
+              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase font-medium text-muted-foreground">
+                {selectedTemplate.category || "Template"}
+              </span>
+            </div>
+            <span className="text-[11px] text-muted-foreground">
+              {detectedPlaceholders.length} variable{detectedPlaceholders.length === 1 ? "" : "s"}
+            </span>
+          </div>
+        )}
+
+        {/* Dynamic Variable Mapping if template has placeholders */}
+        {selectedTemplate && detectedPlaceholders.length > 0 && (
+          <div className="mt-4 rounded-md border bg-muted/20 p-3.5 text-xs">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 font-medium text-foreground">
+                <Variable className="size-3.5 text-muted-foreground" />
+                <span>Variable Mappings</span>
+              </div>
+              <span className="text-[11px] text-muted-foreground">
+                Map variables to contact fields or custom text
+              </span>
+            </div>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Configure how each placeholder will resolve for recipients. The preview below reflects these mappings against sample contact data.
+            </p>
+
+            <div className="mt-3 space-y-2.5">
+              {detectedPlaceholders.map((ph) => {
+                const mapping = variableMappings[ph] ?? {
+                  type: "contact_field",
+                  field: "first_name",
+                  fallback: "Investor",
+                };
+                const sampleVal = selectedTemplate.variables?.[ph];
+
+                return (
+                  <div
+                    key={ph}
+                    className="flex flex-col gap-2 rounded-md border border-border/60 bg-background/60 p-2.5 sm:flex-row sm:items-center sm:gap-3"
+                  >
+                    {/* Variable Tag & Template Sample */}
+                    <div className="flex items-center gap-2 sm:w-36 shrink-0">
+                      <span className="inline-flex items-center rounded bg-primary/10 px-2 py-1 font-mono text-xs font-semibold text-primary">
+                        {`{{${ph}}}`}
+                      </span>
+                      {sampleVal && (
+                        <span
+                          className="text-[10px] text-muted-foreground truncate max-w-[80px]"
+                          title={`Template sample: ${sampleVal}`}
+                        >
+                          ex: &quot;{sampleVal}&quot;
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Source Selector: Contact Field vs Custom Text */}
+                    <div className="flex items-center gap-2 shrink-0">
+                      <select
+                        value={
+                          mapping.type === "static" ? "static" : mapping.field
+                        }
+                        disabled={isReadOnly}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === "static") {
+                            handleMappingTypeChange(ph, "static");
+                          } else {
+                            if (mapping.type !== "contact_field") {
+                              handleMappingTypeChange(ph, "contact_field");
+                            }
+                            handleMappingFieldChange(
+                              ph,
+                              val as SupportedContactField
+                            );
+                          }
+                        }}
+                        className="h-8 rounded-md border border-input bg-background px-2.5 text-xs font-medium shadow-xs focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring outline-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                        aria-label={`Source for variable ${ph}`}
+                      >
+                        <optgroup label="Contact Field">
+                          <option value="first_name">First Name</option>
+                          <option value="name">Full Name</option>
+                          <option value="phone">Phone</option>
+                          <option value="email">Email</option>
+                        </optgroup>
+                        <optgroup label="Custom">
+                          <option value="static">Custom Text</option>
+                        </optgroup>
+                      </select>
+                    </div>
+
+                    {/* Input field based on type */}
+                    <div className="flex-1 min-w-0">
+                      {mapping.type === "static" ? (
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] text-muted-foreground shrink-0">
+                            Value:
+                          </span>
+                          <Input
+                            placeholder="Enter static text..."
+                            value={mapping.value ?? ""}
+                            disabled={isReadOnly}
+                            onChange={(e) =>
+                              handleMappingStaticValueChange(ph, e.target.value)
+                            }
+                            className="h-8 text-xs flex-1"
+                          />
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] text-muted-foreground shrink-0">
+                            Fallback:
+                          </span>
+                          <Input
+                            placeholder="e.g. Investor"
+                            value={mapping.fallback ?? ""}
+                            disabled={isReadOnly}
+                            onChange={(e) =>
+                              handleMappingFallbackChange(ph, e.target.value)
+                            }
+                            className="h-8 text-xs flex-1"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Message text field (Editable resolved message) */}
         <div className="mt-4 flex flex-col gap-2">
-          <Label htmlFor="broadcast-message">Message text</Label>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="broadcast-message">Message text</Label>
+            {selectedTemplate && (
+              <span className="text-[11px] text-muted-foreground">
+                You can make additional custom edits directly below.
+              </span>
+            )}
+          </div>
           <Textarea
             id="broadcast-message"
             placeholder="Type your broadcast message here..."
@@ -437,12 +946,32 @@ export function BroadcastEditor({
               if (messageError) setMessageError(null);
             }}
             rows={5}
-            className="resize-y"
+            className="resize-y font-sans text-sm leading-relaxed"
           />
           {messageError && (
             <p className="text-sm text-destructive">{messageError}</p>
           )}
         </div>
+
+        {/* WhatsApp-style Preview Bubble */}
+        {messageText.trim() && (
+          <div className="mt-4 rounded-lg border bg-muted/30 p-3.5">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                <Eye className="size-3.5" />
+                <span>Message Preview</span>
+              </div>
+              {selectedTemplate && detectedPlaceholders.length > 0 && (
+                <span className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded border border-border/50">
+                  Previewed with sample contact: <strong className="font-medium text-foreground">Aditya Dhikale</strong>
+                </span>
+              )}
+            </div>
+            <div className="inline-block max-w-lg rounded-xl rounded-tl-xs bg-emerald-500/10 border border-emerald-500/20 px-3.5 py-2.5 shadow-xs text-sm leading-relaxed text-foreground whitespace-pre-wrap dark:bg-emerald-950/30">
+              {messageText}
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Targeting Options Section */}
