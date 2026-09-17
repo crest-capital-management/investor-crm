@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactElement } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import {
@@ -41,7 +42,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { Copy, Plus, Trash2 } from "lucide-react";
+import { Copy, Plus, Trash2, ExternalLink } from "lucide-react";
 import {
   DateSavedPicker,
   parseISODate,
@@ -375,6 +376,14 @@ export function ContactDetailsDialog({
           ) : (
             <>
               <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4 sm:space-y-6 sm:px-6 sm:py-6">
+                <Link
+                  href={`/contacts/${currentContact.id}`}
+                  className="inline-flex h-9 sm:h-10 w-full items-center justify-center gap-2 rounded-lg border bg-background px-4 text-xs sm:text-sm font-medium hover:bg-muted transition-colors"
+                >
+                  View Full Details
+                  <ExternalLink className="size-3.5 sm:size-4 text-muted-foreground" />
+                </Link>
+
                 <div className="rounded-lg border bg-background px-3.5 py-3 sm:px-4 sm:py-4">
                   <div className="flex flex-wrap items-start justify-between gap-2.5 sm:gap-3">
                     <div className="min-w-0 space-y-1 sm:space-y-2">

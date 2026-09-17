@@ -49,9 +49,7 @@ import {
   type WhatsAppMessage,
 } from "@/components/whatsapp-history";
 
-export type { WhatsAppMessage };
-
-type InvestorContact = {
+type Contact = {
   id: string;
   name: string;
   phone: string;
@@ -59,8 +57,8 @@ type InvestorContact = {
   tags: string[] | null;
 };
 
-type InvestorDetailProps = {
-  contact: InvestorContact;
+type ContactDetailProps = {
+  contact: Contact;
   initialNotes: MeetingNote[];
   notesError: string | null;
   initialFollowUps: FollowUp[];
@@ -145,13 +143,11 @@ function NoteHistory({
       })}
     </div>
   ) : (
-    <p className="text-sm text-muted-foreground">Record what was discussed with this investor.</p>
+    <p className="text-sm text-muted-foreground">Record what was discussed with this contact.</p>
   );
 }
 
-
-
-export function InvestorDetail({
+export function ContactDetail({
   contact,
   initialNotes,
   notesError,
@@ -159,7 +155,7 @@ export function InvestorDetail({
   followUpsError,
   initialWhatsAppMessages = [],
   whatsAppMessagesError = null,
-}: InvestorDetailProps) {
+}: ContactDetailProps) {
   const router = useRouter();
   const { toast } = useToast();
   const [notes, setNotes] = useState(initialNotes);
@@ -456,20 +452,20 @@ export function InvestorDetail({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <Link
-            href="/investors"
+            href="/contacts"
             className="mb-3 inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
           >
             <ArrowLeft className="size-4" />
-            Back to Investors
+            Back to Contacts
           </Link>
           <h1 className="text-2xl font-semibold">{contact.name}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Investor relationship details</p>
+          <p className="mt-1 text-sm text-muted-foreground">Contact relationship details</p>
         </div>
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
         <section className="rounded-lg border bg-background p-5">
-          <h2 className="text-base font-semibold">Investor</h2>
+          <h2 className="text-base font-semibold">Contact</h2>
           <div className="mt-4 space-y-4">
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Name</p>
@@ -503,10 +499,21 @@ export function InvestorDetail({
               </div>
             )}
             <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Status</p>
-              <span className="mt-1 inline-flex rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
-                Investor
-              </span>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Tags</p>
+              {contact.tags?.length ? (
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {contact.tags.map((tag) => (
+                    <span
+                      key={tag}
+                      className="inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground"
+                    >
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-1 text-muted-foreground">No tags assigned</p>
+              )}
             </div>
           </div>
         </section>
@@ -515,7 +522,7 @@ export function InvestorDetail({
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <h2 className="text-base font-semibold">Meeting Notes</h2>
-              <p className="mt-1 text-sm text-muted-foreground">Record and review investor conversations.</p>
+              <p className="mt-1 text-sm text-muted-foreground">Record and review contact conversations.</p>
             </div>
             <Button type="button" variant="outline" onClick={() => setAddingMeetingNote(true)}>
               Add Meeting Note
@@ -540,7 +547,7 @@ export function InvestorDetail({
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <h2 className="text-base font-semibold">Follow-ups</h2>
-              <p className="mt-1 text-sm text-muted-foreground">Keep track of future investor actions.</p>
+              <p className="mt-1 text-sm text-muted-foreground">Keep track of future contact actions.</p>
             </div>
             <Button type="button" variant="outline" onClick={() => setAddingFollowUp(true)}>
               Add Follow-up
@@ -627,16 +634,16 @@ export function InvestorDetail({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add Meeting Note</DialogTitle>
-            <DialogDescription>Record what was discussed with this investor.</DialogDescription>
+            <DialogDescription>Record what was discussed with this contact.</DialogDescription>
           </DialogHeader>
           <form onSubmit={handleAddMeetingNote} className="space-y-4">
             <div className="flex flex-col gap-2">
-              <label htmlFor="meeting-note" className="text-sm font-medium">Meeting note</label>
+              <label htmlFor="contact-meeting-note" className="text-sm font-medium">Meeting note</label>
               <textarea
-                id="meeting-note"
+                id="contact-meeting-note"
                 value={meetingNote}
                 onChange={(event) => setMeetingNote(event.target.value)}
-                placeholder="e.g. Discussed Q4 investment priorities."
+                placeholder="e.g. Discussed project timeline."
                 rows={5}
                 className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring min-h-24 w-full rounded-md border px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
                 disabled={savingMeetingNote}
@@ -666,9 +673,9 @@ export function InvestorDetail({
           </DialogHeader>
           <form onSubmit={handleSaveEditMeetingNote} className="space-y-4">
             <div className="flex flex-col gap-2">
-              <label htmlFor="edit-meeting-note" className="text-sm font-medium">Meeting note</label>
+              <label htmlFor="contact-edit-meeting-note" className="text-sm font-medium">Meeting note</label>
               <textarea
-                id="edit-meeting-note"
+                id="contact-edit-meeting-note"
                 value={editMeetingNoteText}
                 onChange={(event) => setEditMeetingNoteText(event.target.value)}
                 rows={5}
@@ -695,7 +702,7 @@ export function InvestorDetail({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete Meeting Note?</DialogTitle>
+            <DialogTitle>Delete meeting note?</DialogTitle>
             <DialogDescription>
               Are you sure you want to delete this meeting note? This action cannot be undone.
             </DialogDescription>
@@ -727,7 +734,7 @@ export function InvestorDetail({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add Follow-up</DialogTitle>
-            <DialogDescription>Schedule a future action for this investor.</DialogDescription>
+            <DialogDescription>Schedule a future action for this contact.</DialogDescription>
           </DialogHeader>
           <form onSubmit={handleAddFollowUp} className="space-y-4">
             <div className="flex flex-col gap-2">
@@ -760,12 +767,12 @@ export function InvestorDetail({
               </Popover>
             </div>
             <div className="flex flex-col gap-2">
-              <label htmlFor="follow-up-message" className="text-sm font-medium">Message</label>
+              <label htmlFor="contact-follow-up-message" className="text-sm font-medium">Message</label>
               <textarea
-                id="follow-up-message"
+                id="contact-follow-up-message"
                 value={followUpMessage}
                 onChange={(event) => setFollowUpMessage(event.target.value)}
-                placeholder="e.g. Send the updated investment proposal."
+                placeholder="e.g. Send the updated proposal."
                 rows={4}
                 className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring min-h-24 w-full rounded-md border px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
                 disabled={savingFollowUp}
@@ -828,9 +835,9 @@ export function InvestorDetail({
               </Popover>
             </div>
             <div className="flex flex-col gap-2">
-              <label htmlFor="edit-follow-up-message" className="text-sm font-medium">Message</label>
+              <label htmlFor="contact-edit-follow-up-message" className="text-sm font-medium">Message</label>
               <textarea
-                id="edit-follow-up-message"
+                id="contact-edit-follow-up-message"
                 value={editFollowUpMessage}
                 onChange={(event) => setEditFollowUpMessage(event.target.value)}
                 rows={4}
@@ -891,10 +898,10 @@ export function InvestorDetail({
             <DialogDescription className="space-y-2">
               <span>This follow-up has already been marked as completed.</span>
               <span className="block">
-                Deleting it will remove the follow-up from this investor&apos;s follow-up history.
+                Deleting it will remove the follow-up from this contact&apos;s follow-up history.
               </span>
               <span className="block">
-                The completion interaction will remain in the investor&apos;s interaction history.
+                The completion interaction will remain in the contact&apos;s interaction history.
               </span>
               <span className="block font-medium text-foreground">
                 This action cannot be undone.
@@ -916,6 +923,7 @@ export function InvestorDetail({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
       {/* Mark as Done Confirmation Dialog */}
       <Dialog
         open={Boolean(confirmingCompleteFollowUp)}
@@ -927,7 +935,7 @@ export function InvestorDetail({
           <DialogHeader>
             <DialogTitle>Mark follow-up as completed?</DialogTitle>
             <DialogDescription>
-              This will mark this follow-up as completed and add it to the investor&apos;s interaction history.
+              This will mark this follow-up as completed and add it to the contact&apos;s interaction history.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
-import { CreateBroadcastSheet, type BroadcastData } from "@/components/create-broadcast-sheet";
+import type { BroadcastData } from "@/app/broadcasts/actions";
 import { BroadcastsTable } from "@/components/broadcasts-table";
+import { Button } from "@/components/ui/button";
 
 export const metadata: Metadata = {
   title: "Broadcasts",
@@ -55,7 +57,11 @@ export default async function BroadcastsPage() {
             Compose and track message broadcasts.
           </p>
         </div>
-        <CreateBroadcastSheet groups={groups} contacts={contacts} />
+        <Link href="/broadcasts/new">
+          <Button className="h-9 px-3 text-xs sm:h-10 sm:px-4 sm:text-sm">
+            + New Broadcast
+          </Button>
+        </Link>
       </div>
 
       <div className="mt-6 flex min-h-0 flex-1 flex-col">

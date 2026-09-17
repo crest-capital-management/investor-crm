@@ -9,6 +9,28 @@ import {
 
 export type TargetType = "group" | "tag" | "manual";
 
+export interface GroupOption {
+  id: string;
+  name: string;
+}
+
+export interface ContactOption {
+  id: string;
+  name: string;
+  phone: string;
+}
+
+export interface BroadcastData {
+  id: string;
+  message_text: string;
+  target_type: TargetType;
+  target_ids: string[];
+  status: "draft" | "scheduled" | "sent";
+  created_at: string;
+  scheduled_for?: string | null;
+  sent_at?: string | null;
+}
+
 export interface CreateBroadcastDraftInput {
   message_text: string;
   target_type: TargetType;

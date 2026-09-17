@@ -2,6 +2,7 @@
 
 import { requireActionAuth } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
+import type { WhatsAppMessage } from "@/components/whatsapp-history";
 
 const DUPLICATE_PHONE_ERROR =
   "This phone number is already associated with another contact.";
@@ -270,6 +271,25 @@ export async function getMeetingNotes(contactId: string) {
   if (error) return { error: "Meeting notes could not be loaded." };
 
   return { notes: (notes ?? []) as MeetingNote[] };
+}
+
+export async function getWhatsAppMessages(contactId: string) {
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
+  const normalizedContactId = contactId.trim();
+  if (!normalizedContactId) return { error: "The contact could not be found." };
+
+  const { data: messages, error } = await supabase
+    .from("whatsapp_messages")
+    .select("id, direction, message_text, media_url, sent_at, created_at")
+    .eq("contact_id", normalizedContactId)
+    .is("deleted_at", null)
+    .order("sent_at", { ascending: true });
+
+  if (error) return { error: "WhatsApp messages could not be loaded." };
+
+  return { messages: (messages ?? []) as WhatsAppMessage[] };
 }
 
 export async function updateMeetingNote(

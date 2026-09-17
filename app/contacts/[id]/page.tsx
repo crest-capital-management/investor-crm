@@ -1,15 +1,16 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
-import { InvestorDetail, type WhatsAppMessage } from "@/components/investor-detail";
+import { ContactDetail } from "@/components/contact-detail";
 import type { MeetingNote } from "@/app/contacts/actions";
 import type { FollowUp } from "@/app/investors/actions";
+import type { WhatsAppMessage } from "@/components/whatsapp-history";
 
 export const metadata: Metadata = {
-  title: "Investor Details",
+  title: "Contact Details",
 };
 
-export default async function InvestorDetailPage({
+export default async function ContactDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
@@ -23,7 +24,7 @@ export default async function InvestorDetailPage({
     .is("deleted_at", null)
     .maybeSingle();
 
-  if (contactError || !contact || !contact.tags?.some((tag: string) => tag.toLowerCase() === "investor")) {
+  if (contactError || !contact) {
     notFound();
   }
 
@@ -52,7 +53,7 @@ export default async function InvestorDetailPage({
     .order("sent_at", { ascending: true });
 
   return (
-    <InvestorDetail
+    <ContactDetail
       contact={contact}
       initialNotes={notesError ? [] : (notes ?? []) as MeetingNote[]}
       notesError={notesError ? "Meeting notes could not be loaded." : null}

@@ -6,13 +6,10 @@ import {
   deleteBroadcast,
   deleteBroadcasts,
   sendBroadcastNow,
-} from "@/app/broadcasts/actions";
-import {
-  CreateBroadcastSheet,
   type GroupOption,
   type ContactOption,
   type BroadcastData,
-} from "@/components/create-broadcast-sheet";
+} from "@/app/broadcasts/actions";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/toast-provider";
 import {
@@ -51,14 +48,12 @@ function formatBroadcastDateTime(dateStr: string | null | undefined): string {
 
 export interface BroadcastsTableProps {
   broadcasts: BroadcastData[];
-  groups: GroupOption[];
-  contacts: ContactOption[];
+  groups?: GroupOption[];
+  contacts?: ContactOption[];
 }
 
 export function BroadcastsTable({
   broadcasts,
-  groups,
-  contacts,
 }: BroadcastsTableProps) {
   const router = useRouter();
   const { toast } = useToast();
@@ -72,9 +67,6 @@ export function BroadcastsTable({
 
   const [broadcastToSend, setBroadcastToSend] = useState<BroadcastData | null>(null);
   const [sending, setSending] = useState(false);
-
-  const [editingBroadcast, setEditingBroadcast] = useState<BroadcastData | null>(null);
-  const [editSheetOpen, setEditSheetOpen] = useState(false);
 
   const selectAllRef = useRef<HTMLInputElement>(null);
   const broadcastIds = broadcasts.map((b) => b.id);
@@ -184,12 +176,6 @@ export function BroadcastsTable({
     router.refresh();
   }
 
-  function openEditSheet(broadcast: BroadcastData) {
-    if (broadcast.status !== "draft" && broadcast.status !== "scheduled") return;
-    setEditingBroadcast(broadcast);
-    setEditSheetOpen(true);
-  }
-
   function getRecipientCountDescription(broadcast: BroadcastData) {
     if (broadcast.target_type === "manual") {
       const count = broadcast.target_ids.length;
@@ -256,12 +242,8 @@ export function BroadcastsTable({
                 broadcasts.map((broadcast) => (
                   <tr
                     key={broadcast.id}
-                    onClick={() => openEditSheet(broadcast)}
-                    className={`border-b last:border-b-0 hover:bg-muted/20 ${
-                      broadcast.status === "draft" || broadcast.status === "scheduled"
-                        ? "cursor-pointer"
-                        : ""
-                    }`}
+                    onClick={() => router.push(`/broadcasts/${broadcast.id}`)}
+                    className="border-b last:border-b-0 hover:bg-muted/20 cursor-pointer"
                   >
                     <td
                       className="px-5 py-2.5 sm:py-4"
@@ -333,7 +315,9 @@ export function BroadcastsTable({
                             </DropdownMenuItem>
                           )}
                           {broadcast.status === "draft" || broadcast.status === "scheduled" ? (
-                            <DropdownMenuItem onClick={() => openEditSheet(broadcast)}>
+                            <DropdownMenuItem
+                              onClick={() => router.push(`/broadcasts/${broadcast.id}`)}
+                            >
                               Edit
                             </DropdownMenuItem>
                           ) : (
@@ -366,19 +350,6 @@ export function BroadcastsTable({
           </table>
         </div>
       </div>
-
-      {/* Edit Broadcast Sheet */}
-      <CreateBroadcastSheet
-        groups={groups}
-        contacts={contacts}
-        open={editSheetOpen}
-        onOpenChange={(next) => {
-          setEditSheetOpen(next);
-          if (!next) setEditingBroadcast(null);
-        }}
-        editingBroadcast={editingBroadcast}
-        trigger={null}
-      />
 
       {/* Send Now Confirmation Dialog */}
       <Dialog
