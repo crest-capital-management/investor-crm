@@ -16,6 +16,7 @@ import {
 import {
   addMeetingNote,
   deleteMeetingNote,
+  generateWhatsAppSummary,
   getMeetingNotes,
   updateMeetingNote,
   type MeetingNote,
@@ -65,6 +66,8 @@ type ContactDetailProps = {
   followUpsError: string | null;
   initialWhatsAppMessages?: WhatsAppMessage[];
   whatsAppMessagesError?: string | null;
+  initialWhatsAppSummary?: string | null;
+  initialWhatsAppSummaryGeneratedAt?: string | null;
 };
 
 function toISODateString(date: Date) {
@@ -155,9 +158,38 @@ export function ContactDetail({
   followUpsError,
   initialWhatsAppMessages = [],
   whatsAppMessagesError = null,
+  initialWhatsAppSummary = null,
+  initialWhatsAppSummaryGeneratedAt = null,
 }: ContactDetailProps) {
   const router = useRouter();
   const { toast } = useToast();
+  const [summary, setSummary] = useState<string | null>(initialWhatsAppSummary);
+  const [summaryGeneratedAt, setSummaryGeneratedAt] = useState<string | null>(initialWhatsAppSummaryGeneratedAt);
+  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+
+  async function handleRefreshSummary() {
+    setIsGeneratingSummary(true);
+    setSummaryError(null);
+    try {
+      const result = await generateWhatsAppSummary(contact.id);
+      if ("error" in result && result.error) {
+        setSummaryError(result.error);
+        toast(result.error, "error");
+      } else if ("success" in result && result.success) {
+        setSummary(result.summary);
+        setSummaryGeneratedAt(result.generatedAt);
+        toast("WhatsApp summary updated.");
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to generate summary.";
+      setSummaryError(msg);
+      toast(msg, "error");
+    } finally {
+      setIsGeneratingSummary(false);
+    }
+  }
+
   const [notes, setNotes] = useState(initialNotes);
   const [loadingNotes, setLoadingNotes] = useState(false);
   const [addingMeetingNote, setAddingMeetingNote] = useState(false);
@@ -619,6 +651,11 @@ export function ContactDetail({
         <WhatsAppHistory
           messages={initialWhatsAppMessages}
           error={whatsAppMessagesError}
+          summary={summary}
+          summaryGeneratedAt={summaryGeneratedAt}
+          onRefreshSummary={handleRefreshSummary}
+          isGeneratingSummary={isGeneratingSummary}
+          summaryError={summaryError}
           className="mb-8"
         />
       </div>

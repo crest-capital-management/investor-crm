@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowDownLeft, ArrowUpRight } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Loader2, RefreshCw, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -26,6 +26,11 @@ export type WhatsAppHistoryProps = {
   error?: string | null;
   isLoading?: boolean;
   className?: string;
+  summary?: string | null;
+  summaryGeneratedAt?: string | null;
+  onRefreshSummary?: () => void;
+  isGeneratingSummary?: boolean;
+  summaryError?: string | null;
 };
 
 function formatWhatsAppDate(sentAt: string | null, createdAt: string) {
@@ -49,6 +54,11 @@ export function WhatsAppHistory({
   error = null,
   isLoading = false,
   className,
+  summary = null,
+  summaryGeneratedAt = null,
+  onRefreshSummary,
+  isGeneratingSummary = false,
+  summaryError = null,
 }: WhatsAppHistoryProps) {
   const [open, setOpen] = useState(false);
 
@@ -106,38 +116,94 @@ export function WhatsAppHistory({
               Loading WhatsApp messages...
             </p>
           ) : hasMessages && lastMessage ? (
-            <div className="flex flex-col gap-2 rounded-lg border bg-muted/20 p-3.5">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                <span className="font-medium text-foreground">Latest Message</span>
-                <span>
-                  Last message:{" "}
-                  {formatWhatsAppDate(lastMessage.sent_at, lastMessage.created_at)}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 min-w-0">
-                <span
-                  className={cn(
-                    "inline-flex items-center gap-1 shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium",
-                    isLastInbound
-                      ? "bg-blue-500/10 text-blue-600 dark:text-blue-400"
-                      : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                  )}
-                >
-                  {isLastInbound ? (
-                    <>
-                      <ArrowDownLeft className="size-3" />
-                      Inbound
-                    </>
+            <div className="flex flex-col gap-3">
+              {/* AI Summary Card */}
+              <div className="flex flex-col gap-2 rounded-lg border bg-muted/20 p-3.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-1.5 font-medium text-foreground">
+                    <Sparkles className="size-3.5 text-primary" />
+                    <span>AI Summary</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {summaryGeneratedAt && (
+                      <span>
+                        Generated: {formatWhatsAppDate(summaryGeneratedAt, summaryGeneratedAt)}
+                      </span>
+                    )}
+                    {onRefreshSummary && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={onRefreshSummary}
+                        disabled={isGeneratingSummary}
+                        className="h-7 px-2.5 text-xs font-medium"
+                      >
+                        {isGeneratingSummary ? (
+                          <>
+                            <Loader2 className="mr-1.5 size-3 animate-spin" />
+                            {summary ? "Refreshing..." : "Generating..."}
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="mr-1.5 size-3" />
+                            {summary ? "Refresh Summary" : "Generate Summary"}
+                          </>
+                        )}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                {summaryError && (
+                  <p className="text-xs text-destructive">{summaryError}</p>
+                )}
+
+                <div className="text-xs leading-relaxed text-foreground/90">
+                  {summary ? (
+                    <p className="whitespace-pre-wrap">{summary}</p>
                   ) : (
-                    <>
-                      <ArrowUpRight className="size-3" />
-                      Outbound
-                    </>
+                    <p className="italic text-muted-foreground">
+                      No summary generated yet.
+                    </p>
                   )}
-                </span>
-                <p className="truncate text-xs text-foreground/80 flex-1">
-                  {lastMessageText}
-                </p>
+                </div>
+              </div>
+
+              {/* Latest Message Card */}
+              <div className="flex flex-col gap-2 rounded-lg border bg-muted/20 p-3.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">Latest Message</span>
+                  <span>
+                    Last message:{" "}
+                    {formatWhatsAppDate(lastMessage.sent_at, lastMessage.created_at)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 min-w-0">
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1 shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium",
+                      isLastInbound
+                        ? "bg-blue-500/10 text-blue-600 dark:text-blue-400"
+                        : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                    )}
+                  >
+                    {isLastInbound ? (
+                      <>
+                        <ArrowDownLeft className="size-3" />
+                        Inbound
+                      </>
+                    ) : (
+                      <>
+                        <ArrowUpRight className="size-3" />
+                        Outbound
+                      </>
+                    )}
+                  </span>
+                  <p className="truncate text-xs text-foreground/80 flex-1">
+                    {lastMessageText}
+                  </p>
+                </div>
               </div>
             </div>
           ) : (

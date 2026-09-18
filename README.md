@@ -1,92 +1,74 @@
 # CREST Capital Management - Investor CRM
 
-An internal, high-performance Customer Relationship Management (CRM) application built specifically for **CREST Capital Management** to organize, track, and nurture investor relationships, interactions, and follow-ups.
+An internal, single-user CRM built for CREST Capital Management to organize, track, and nurture investor relationships across meetings, follow-ups, and WhatsApp communications with ~100–120 investors, advisors, and prospects.
 
----
+## Current Status
 
-## Current Status: Phase 1 (Feature-Complete & Demo-Ready)
+Core contact management, investor tracking, WhatsApp integration (webhook + broadcasts + templates), dashboard analytics, and an AI-generated WhatsApp chat summary feature are all built and working. Live WhatsApp message delivery is currently blocked by a Meta Business Account restriction (see Known Limitations below) — this is a Meta-side issue, not a code issue.
 
-Phase 1 development is complete. The system provides an end-to-end foundation for managing contacts, grouping investors, logging interaction notes, scheduling follow-ups, and monitoring key metrics across desktop and mobile devices.
-
----
-
-## Implemented Features (Phase 1)
+## Implemented Features
 
 ### 1. Contact Management
-- Full lifecycle management for contacts: create, view, edit, search, and delete.
-- Detailed contact profile sheet displaying name, phone number, email, assigned tags, groups, and date saved.
-- Quick copy-to-clipboard functionality for phone numbers and email addresses.
+- Full lifecycle management: create, view, edit, search, and soft-delete (`deleted_at`).
+- Full contact detail page (`/contacts/[id]`) — profile, meeting notes, follow-ups, WhatsApp history, and AI chat summary — works for any contact regardless of tag.
+- Quick-edit Sheet (`contact-details-dialog.tsx`) for Name/Phone/Email/Tags/Groups/Date Saved, with a "View Full Details" link to the full page.
+- Quick copy-to-clipboard for phone numbers and email addresses.
 - Search and filtering across contacts by name, phone, or email.
 
 ### 2. CSV Import
-- Dedicated CSV upload modal with drag-and-drop or file browsing.
-- Intelligent column mapping for **Name**, **Phone**, **Email** (optional), **Tag**, and **Date Saved**.
-- In-browser validation (validates phone digits, email syntax, date format, and required values).
-- Data preview table highlighting valid records and actionable validation errors before committing.
-- Bulk batch insertion directly into the database.
+- Drag-and-drop or file-browse CSV upload modal.
+- Column mapping for Name, Phone, Email (optional), Tag, and Date Saved.
+- In-browser validation (phone digits, email syntax, date format, required fields) with a preview table before committing.
+- Bulk batch insertion into the database.
+- Not yet tested: importing a real Google Contacts export (manual CSV export chosen over live OAuth sync — see Roadmap).
 
-### 3. Email Support
-- First-class support for optional contact email addresses.
-- RFC-compliant email format validation on creation, editing, and CSV import.
-- Integrated one-click copy button and dedicated email display on contact cards.
+### 3. Tags & Custom Groups
+- Standard tags (Investor, Alumni, Prospect, Partner, Advisor) plus custom tags, single source of truth exported from `add-contact-dialog.tsx`.
+- Custom group creation, editing, and deletion (groups use intentional hard-delete, not soft-delete).
+- Bulk checkbox-based group assignment/removal, with a "Select All" / indeterminate toggle.
 
-### 4. Tags & Custom Groups
-- Predefined and custom tags (e.g., `Investor`, `Family Office`, `VC`, `Angel`, `Founder`).
-- Dynamic addition of tags directly from the contact details sheet.
-- Custom group creation, editing, and deletion.
-- Visual member counters and badges across tables and dialogs.
+### 4. Investor Tracking (`/investors`)
+- Dedicated pipeline view filtering all contacts tagged Investor.
+- Full investor detail page (`/investors/[id]`) — same feature set as the contact detail page (notes, follow-ups, WhatsApp history, AI summary).
 
-### 5. Bulk Group Management
-- Checkbox selection for assigning or removing contacts from groups in bulk.
-- "Select All" / indeterminate toggle for visible filtered contacts.
-- Group detail sheet with member list search, individual removal, and bulk member removal.
+### 5. Meeting Notes & Follow-ups
+- Chronological meeting-note timeline per contact, with add/edit/delete.
+- Follow-up scheduling with due dates, pending/completed toggling, and overdue indicators.
+- Completing a follow-up automatically logs it as an interaction.
 
-### 6. Investor Tracking (`/investors`)
-- Dedicated pipeline view automatically filtering all contacts tagged as `Investor`.
-- High-level relationship status, latest logged meeting note, and next scheduled follow-up.
-- One-click navigation to detailed investor profiles and direct note/follow-up action modals.
+### 6. WhatsApp Integration (Meta Cloud API, direct — not AiSensy/Wati)
+- Webhook (`/api/whatsapp/webhook`) — GET verification + POST handling for incoming messages and Coexistence-mode echo messages.
+- Broadcast composer — Group/Tag/Manual targeting, drafts, Send Now, calendar/time-based scheduling, scheduled edit/cancel, powered by a shared `broadcast-editor.tsx` for both `/broadcasts/new` and `/broadcasts/[id]`.
+- `sendBroadcastNow` — resolves recipients, normalizes phone numbers (10-digit local ↔ +91-prefixed at send-time only), calls the Meta Graph API, tracks per-contact results.
+- Scheduler dispatch function + protected trigger route — built and verified live; no periodic cron trigger yet (deferred until hosting is chosen).
+- Template management UI — list, create, edit (no Meta template-submission logic yet).
+- WhatsApp History (`components/whatsapp-history.tsx`) — compact inline stats (message count, latest-message preview) always visible; full message list moves into a right-side Sheet behind "View Full History"; shared by both contact and investor detail pages.
+- Coexistence mode on the production number: phone app and Cloud API operate simultaneously with bidirectional message-echo syncing. The number's owner must be physically present with their phone for the QR-code pairing step during setup.
 
-### 7. Investor Details & Interaction / Meeting Notes
-- Comprehensive individual profile route (`/investors/[id]`).
-- Chronological interaction timeline logging meeting notes, conversation summaries, and timestamps.
-- Ability to add, view, and delete meeting records linked to specific investors.
+### 7. AI-Generated WhatsApp Chat Summary
+- Google Gemini (`gemini-3.6-flash`) generates a short, scannable 2-sentence summary of a contact's WhatsApp history, with a "Next: " line surfacing any pending action.
+- Cached on the contacts table (`whatsapp_summary`, `whatsapp_summary_generated_at`) — regenerates only when the user clicks "Generate Summary" / "Refresh Summary", not on every page load.
+- Lives in the same `whatsapp-history.tsx` component, above the "Latest Message" card.
 
-### 8. Follow-up Management
-- Schedule follow-up tasks with designated due dates and custom action notes.
-- Quick status toggling (pending vs. completed) directly from tables and detail views.
-- Dynamic overdue indicators and visual badges highlighting overdue, pending, and completed tasks.
+### 8. Dashboard
+- Greeting banner and four core KPIs (Total Contacts, Active Investors, Pending Follow-ups, Overdue Follow-ups).
+- Analytics section (`components/dashboard-analytics.tsx`, powered by recharts):
+  - Follow-up Trend (created vs. completed-proxy, last 8 weeks)
+  - Tag Distribution donut chart
+  - "Investors Going Quiet" — top 5 Investor-tagged contacts by longest time since last interaction, flagging zero-interaction contacts
+- Upcoming follow-ups widget with instant mark-done, and a recent interaction feed.
 
-### 9. Dashboard
-- Central operational overview displaying four core KPIs:
-  - **Total Contacts**
-  - **Active Investors**
-  - **Pending Follow-ups**
-  - **Overdue Follow-ups**
-- Quick summary widgets for upcoming follow-ups with instant mark-done actions.
-- Recent interaction feed with timestamped meeting logs.
+### 9. Authentication & Protected Routes
+- Supabase Auth (email/password).
+- Route protection via `proxy.ts` (renamed from `middleware.ts`) using the Supabase server client.
+- Server Component (`requireAuth`) and Server Action (`requireActionAuth`) session guards.
+- RLS is enabled but intentionally permissive (single-user design) — tightening is deferred until the app's surface area stabilizes.
 
-### 10. Authentication & Protected Routes
-- Secure email and password authentication powered by Supabase Auth.
-- Next.js Edge Middleware protecting private routes (`/dashboard`, `/contacts`, `/groups`, `/investors`, `/my-profile`).
-- Automatic redirection of unauthenticated users to `/login`, and authenticated users away from `/login`.
-- Server Component session guards (`requireAuth`) and Server Action authorization guards (`requireActionAuth`).
-- User profile page (`/my-profile`) displaying account metadata and one-click session logout.
+### 10. Typography & Visual Polish
+- Headings (h1/h2, including DialogTitle/SheetTitle) render in Playfair Display, matching the CREST logo font. Body text, buttons, inputs, and tables remain on Geist. Non-semantic "headings" (login CardTitle, large metric numbers) are intentionally left on Geist.
 
-### 11. Dynamic Browser Tab Titles
-- Centralized Next.js App Router metadata template (`CREST CRM - %s`).
-- Route-specific dynamic page titles that update automatically on navigation:
-  - `CREST CRM - Login`
-  - `CREST CRM - Dashboard`
-  - `CREST CRM - Contacts`
-  - `CREST CRM - Groups`
-  - `CREST CRM - Investors`
-  - `CREST CRM - Investor Details`
-  - `CREST CRM - My Profile`
-
-### 12. Responsive Mobile & Tablet Experience
-- Fully responsive interface optimized for desktop, tablet, and mobile screens.
-- Collapsible navigation drawer (`AppSidebar`) on mobile and tablet viewports.
-- Touch-friendly action sheets, adapted button layouts, and horizontal overflow protection across all modals.
+### 11. Responsive Design
+- Fully responsive across desktop, tablet, and mobile, with a collapsible sidebar/drawer and touch-friendly Sheets/dialogs.
 
 ---
 
@@ -94,173 +76,123 @@ Phase 1 development is complete. The system provides an end-to-end foundation fo
 
 | Layer | Technology |
 |---|---|
-| **Framework** | [Next.js 16 (App Router)](https://nextjs.org/) |
-| **Language** | [TypeScript 5](https://www.typescriptlang.org/) |
-| **UI Library** | [React 19](https://react.dev/) |
-| **Styling** | [Tailwind CSS v4](https://tailwindcss.com/) with `@tailwindcss/postcss` |
-| **Primitives** | [Base UI (`@base-ui/react`)](https://base-ui.com/) & Shadcn UI pattern |
-| **Icons** | [Lucide React](https://lucide.dev/) |
-| **Database & Auth** | [Supabase](https://supabase.com/) (`@supabase/supabase-js`, `@supabase/ssr`) |
-| **Date Utilities** | [date-fns](https://date-fns.org/) & [react-day-picker](https://daypicker.dev/) |
-| **Animation / Utils** | `class-variance-authority`, `tw-animate-css`, `cn` |
-
----
-
-## Project Structure
-
-```
-investor-crm/
-├── app/                              # Next.js App Router routes & Server Actions
-│   ├── contacts/                     # Contacts list view & contact actions
-│   ├── dashboard/                    # Executive metrics dashboard
-│   ├── groups/                       # Group list view & group actions
-│   ├── investors/                    # Investor tracking view & investor actions
-│   │   └── [id]/                     # Individual investor details & timeline
-│   ├── login/                        # Authentication login page
-│   ├── my-profile/                   # User profile & account details
-│   ├── globals.css                   # Global styles & Tailwind v4 theme variables
-│   ├── layout.tsx                    # Root layout, fonts, providers, metadata template
-│   └── page.tsx                      # Root route (redirects to /dashboard)
-├── components/                       # Shared UI & feature components
-│   ├── ui/                           # Base UI primitives (button, dialog, sheet, input, etc.)
-│   ├── add-contact-dialog.tsx        # New contact creation drawer
-│   ├── add-group-dialog.tsx          # New group creation dialog
-│   ├── app-sidebar.tsx               # Persistent desktop sidebar & mobile drawer
-│   ├── contact-details-dialog.tsx    # Contact details & edit sheet
-│   ├── contacts-table.tsx            # Interactive contacts data table
-│   ├── group-details-dialog.tsx      # Group membership management modal
-│   ├── groups-table.tsx              # Groups overview data table
-│   ├── import-contacts-dialog.tsx    # CSV upload & column mapping wizard
-│   ├── investor-detail.tsx           # Investor profile & interaction timeline
-│   ├── investor-tracking-table.tsx   # Investor pipeline data table
-│   ├── top-nav.tsx                   # Global header bar & navigation
-│   └── toast-provider.tsx            # Global notification toaster
-├── lib/                              # Core utilities & server helpers
-│   ├── auth.ts                       # Server-side auth verification helpers
-│   ├── group-members.ts              # Group relation normalizers
-│   └── utils.ts                      # Class-name merger utility (`cn`)
-├── middleware.ts                     # Next.js Edge Middleware for route protection
-├── src/                              # Supabase client & server initialization
-│   ├── app/login/                    # Client-side login component
-│   └── lib/supabase/                 # SSR & browser Supabase client factories
-├── .env.local                        # Local environment configuration (untracked)
-└── package.json                      # Project manifest & dependencies
-```
+| Framework | Next.js 16.3.4 (App Router, Turbopack) |
+| Language | TypeScript 5 |
+| UI Library | React 19.2.8 |
+| Styling | Tailwind CSS v4, @tailwindcss/postcss |
+| Primitives | Base UI (`@base-ui/react`) & shadcn/ui pattern |
+| Icons | Lucide React |
+| Database & Auth | Supabase (Postgres, free tier) — `@supabase/supabase-js`, `@supabase/ssr` |
+| WhatsApp | Meta WhatsApp Cloud API (direct integration, Coexistence mode) |
+| AI Summaries | Google Gemini API (`gemini-3.6-flash`, free tier) |
+| Charts | recharts |
+| Date Utilities | date-fns, react-day-picker |
+| Runtime | Node.js throughout — no Edge runtime usage anywhere |
 
 ---
 
 ## Database Architecture
 
-The application interfaces with a PostgreSQL database hosted on Supabase comprising the following core tables:
+PostgreSQL via Supabase. Active tables:
 
-### 1. `contacts`
-Stores individual contact records.
-- `id` (UUID, Primary Key)
-- `name` (TEXT, Required)
-- `phone` (TEXT, Required)
-- `email` (TEXT, Optional)
-- `tags` (TEXT[], Array of tag strings)
-- `date_saved` (TIMESTAMPTZ, Phonebook save date)
-- `created_at` (TIMESTAMPTZ, Creation timestamp)
-- `user_id` (UUID, References auth.users)
+- **`contacts`**  
+  `id` (UUID, PK), `name`, `phone`, `email` (optional, required at app level not DB level), `tags` (TEXT[]), `date_saved`, `created_at`, `deleted_at`  
+  `whatsapp_summary` (TEXT, nullable) — cached AI-generated summary  
+  `whatsapp_summary_generated_at` (TIMESTAMPTZ, nullable)
+- **`groups`**  
+  `id` (UUID, PK), `name`, `created_at` — hard-delete, no `deleted_at`
+- **`contact_group_members`**  
+  Junction table: `contact_id`, `group_id`, `deleted_at` (soft-delete, allows reactivation)
+- **`interactions`**  
+  `id`, `contact_id`, `type` (e.g. `'meeting'`), `note`, `created_at`, `deleted_at`
+- **`follow_ups`**  
+  `id`, `contact_id`, `due_date`, `message`, `is_done`, `created_at`, `deleted_at`
+- **`whatsapp_messages`**  
+  `id`, `contact_id`, `direction` (`'in'`/`'out'`, matching a DB check constraint), `message_text`, `media_url`, `sent_at`, `created_at`, `deleted_at`  
+  *No wamid/status/error_code columns yet — delivery-status tracking is a known gap (see below).*
+- **`broadcasts`**  
+  Stores broadcast drafts, scheduled sends, and send results (targeting, status, template reference).
+- **`templates`**  
+  WhatsApp message templates; `body_text` column added this year via migration.
 
-### 2. `groups`
-Stores custom user-defined contact groups.
-- `id` (UUID, Primary Key)
-- `name` (TEXT, Group title)
-- `created_at` (TIMESTAMPTZ)
-- `user_id` (UUID, References auth.users)
+Two legacy unused tables exist (`contact_interactions`, `contact_follow_ups`) — ignore them.
 
-### 3. `contact_groups`
-Junction table managing many-to-many relationships between contacts and groups.
-- `contact_id` (UUID, References `contacts.id` on delete cascade)
-- `group_id` (UUID, References `groups.id` on delete cascade)
-
-### 4. `interactions`
-Logs notes from meetings, phone calls, and conversations.
-- `id` (UUID, Primary Key)
-- `contact_id` (UUID, References `contacts.id` on delete cascade)
-- `type` (TEXT, e.g., `'meeting'`)
-- `note` (TEXT, Note contents)
-- `created_at` (TIMESTAMPTZ)
-- `user_id` (UUID, References auth.users)
-
-### 5. `follow_ups`
-Stores scheduled tasks, action items, and follow-ups.
-- `id` (UUID, Primary Key)
-- `contact_id` (UUID, References `contacts.id` on delete cascade)
-- `due_date` (DATE, Scheduled execution date)
-- `message` (TEXT, Description of follow-up action)
-- `is_done` (BOOLEAN, Completion flag)
-- `created_at` (TIMESTAMPTZ)
-- `user_id` (UUID, References auth.users)
+**Backup:** manual weekly `pg_dump` (Supabase free tier has no automatic backups).
 
 ---
 
-## Authentication & Row-Level Security (RLS)
+## Known Limitations (confirmed, not bugs)
 
-- **Authentication**: Managed via Supabase Auth using email and password credentials.
-- **Session Management**: Cookie-based server sessions via `@supabase/ssr`. Sessions are verified at the Edge layer via `middleware.ts`.
-- **Row-Level Security (RLS)**: PostgreSQL RLS policies must be enabled across all tables (`contacts`, `groups`, `contact_groups`, `interactions`, `follow_ups`) ensuring users can only read, insert, update, or delete records where `auth.uid() = user_id`.
+- **No delivery-status tracking linkage.** `whatsapp_messages` has no `wamid`/`status`/`error_code` columns; `broadcasts` has no per-recipient tracking. The webhook receives real failed status events but can't currently reconcile them to a specific broadcast or contact.
+- **Outbound broadcast sends are not written into `whatsapp_messages` at send time** — only inbound/webhook-sourced messages are logged.
+- **`sendWhatsAppMessage()`'s reported success only reflects Meta's synchronous API acceptance, not actual delivery** — true success/failure is only knowable via the async webhook. Expected Cloud API behavior, not a bug.
+- **WhatsApp Business Account restriction (error 131031).** The account is currently locked pending Meta Business Verification completion — this blocks all outbound sends, including the sandbox test number, so no code-level workaround exists. Resolving this requires completing Business Verification in Meta Business Manager.
+- **`npm run build` occasionally gets skipped mid-session if it conflicts with an active `next dev` server.** Stop the dev server first, or run build manually in a separate terminal.
 
 ---
 
 ## Local Development Setup
 
 ### Prerequisites
-- [Node.js](https://nodejs.org/) (v20 or newer recommended)
-- [npm](https://www.npmjs.com/)
-- A Supabase project with database migrations applied
+- Node.js v20+
+- npm
+- A Supabase project with the schema above applied
 
 ### 1. Clone & Install
 ```bash
-git clone <repository-url>
+git clone https://github.com/crest-capital-management/investor-crm
 cd investor-crm
 npm install
 ```
 
 ### 2. Configure Environment Variables
 Create a `.env.local` file in the project root:
-
 ```env
 NEXT_PUBLIC_SUPABASE_URL=your-supabase-project-url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+WHATSAPP_ACCESS_TOKEN=your-meta-access-token
+WHATSAPP_PHONE_NUMBER_ID=your-phone-number-id
+WHATSAPP_WEBHOOK_VERIFY_TOKEN=your-webhook-verify-token
+WHATSAPP_APP_SECRET=your-meta-app-secret
+GEMINI_API_KEY=your-gemini-api-key
+SCHEDULER_SECRET=your-scheduler-trigger-secret
 ```
-
 > **Note:** Never commit `.env.local` or expose production API keys.
 
 ### 3. Run Development Server
 ```bash
 npm run dev
 ```
-
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
 
 ## Code Quality & Validation
 
-Run the following checks before committing code:
-
+Run before committing (stop the dev server first if it's running, to avoid port conflicts on build):
 ```bash
-# 1. Run ESLint code quality checks
 npm run lint
-
-# 2. Run TypeScript static type check
 npx tsc --noEmit
-
-# 3. Verify clean Git formatting (whitespace, EOF, etc.)
-git diff --check
+npm run build
 ```
 
 ---
 
-## Future Roadmap (Planned Work)
+## Roadmap
 
-> **Important:** The following capabilities are planned for subsequent phases and are **not yet implemented** in Phase 1:
-
-- **Official WhatsApp Business API Integration**: Direct WhatsApp messaging capability from within the CRM.
-- **WhatsApp Broadcasts**: Send templated updates and announcements to segmented contact groups.
-- **Message Scheduling**: Pre-schedule automated follow-up messages and reminders via WhatsApp.
-- **WhatsApp Flows**: Interactive structured forms (e.g., investor interest surveys, onboarding questionnaires) completed natively within WhatsApp chats.
-- **Voice-First Interaction Logging**: AI-assisted voice note capture that automatically transcribes voice memos into structured meeting notes and scheduled follow-ups.
+- ✅ Template management UI
+- ✅ Scheduler dispatch function + protected trigger route (verified live)
+- ✅ AI-generated WhatsApp chat summary (Gemini)
+- ✅ Dashboard analytics (Follow-up Trend, Tag Distribution, Investors Going Quiet)
+- ✅ WhatsApp History Sheet redesign
+- ✅ Headings switched to Playfair Display
+- ⏳ Actual cron/periodic trigger for scheduled broadcasts — deferred until hosting platform is chosen
+- 🚫 Reply-from-CRM — blocked on Meta Business Verification
+- 🚫 Media upload/send — blocked on Meta Business Verification
+- 🚫 Daily 9 AM follow-up reminder — blocked on cron
+- ⏳ RLS tightening — deferred until surface area stabilizes
+- ⏳ Google Contacts CSV import — importer likely already compatible, not yet actually tested
+- 📋 Voice notes — unscoped
+- 📋 Recently Deleted restore — unscoped
+- ❌ Google Meet transcript auto-pull — dropped entirely in favor of the AI chat summary feature above

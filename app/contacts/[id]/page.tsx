@@ -19,7 +19,7 @@ export default async function ContactDetailPage({
   const { supabase } = await requireAuth();
   const { data: contact, error: contactError } = await supabase
     .from("contacts")
-    .select("id, name, phone, email, tags")
+    .select("id, name, phone, email, tags, whatsapp_summary, whatsapp_summary_generated_at")
     .eq("id", id)
     .is("deleted_at", null)
     .maybeSingle();
@@ -61,6 +61,8 @@ export default async function ContactDetailPage({
       followUpsError={followUpsError ? "Follow-ups could not be loaded." : null}
       initialWhatsAppMessages={whatsAppMessagesError ? [] : (whatsappMessages ?? []) as WhatsAppMessage[]}
       whatsAppMessagesError={whatsAppMessagesError ? "WhatsApp messages could not be loaded." : null}
+      initialWhatsAppSummary={contact.whatsapp_summary ?? null}
+      initialWhatsAppSummaryGeneratedAt={contact.whatsapp_summary_generated_at ?? null}
     />
   );
 }

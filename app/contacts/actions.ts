@@ -3,6 +3,7 @@
 import { requireActionAuth } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import type { WhatsAppMessage } from "@/components/whatsapp-history";
+import { generateChatSummary } from "@/lib/gemini";
 
 const DUPLICATE_PHONE_ERROR =
   "This phone number is already associated with another contact.";
@@ -629,4 +630,69 @@ export async function importContacts(rowsRaw: string) {
     duplicates,
     rejected,
   };
+}
+
+export type GenerateWhatsAppSummaryResult =
+  | {
+      success: true;
+      summary: string;
+      generatedAt: string;
+    }
+  | {
+      error: string;
+    };
+
+export async function generateWhatsAppSummary(
+  contactId: string
+): Promise<GenerateWhatsAppSummaryResult> {
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
+  const normalizedContactId = contactId.trim();
+  if (!normalizedContactId) return { error: "The contact could not be found." };
+
+  try {
+    const { data: messages, error: messagesError } = await supabase
+      .from("whatsapp_messages")
+      .select("id, direction, message_text, media_url, sent_at, created_at")
+      .eq("contact_id", normalizedContactId)
+      .is("deleted_at", null)
+      .order("sent_at", { ascending: true });
+
+    if (messagesError) {
+      return { error: "WhatsApp messages could not be loaded." };
+    }
+
+    if (!messages || messages.length === 0) {
+      return { error: "No WhatsApp messages found to summarize." };
+    }
+
+    const summary = await generateChatSummary(messages);
+    const nowIso = new Date().toISOString();
+
+    const { error: updateError } = await supabase
+      .from("contacts")
+      .update({
+        whatsapp_summary: summary,
+        whatsapp_summary_generated_at: nowIso,
+      })
+      .eq("id", normalizedContactId);
+
+    if (updateError) {
+      return { error: "Failed to save the WhatsApp summary." };
+    }
+
+    revalidatePath(`/contacts/${normalizedContactId}`);
+    revalidatePath(`/investors/${normalizedContactId}`);
+
+    return {
+      success: true,
+      summary,
+      generatedAt: nowIso,
+    };
+  } catch (err: unknown) {
+    const errMsg =
+      err instanceof Error ? err.message : "Failed to generate WhatsApp summary.";
+    return { error: errMsg };
+  }
 }
