@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireActionAuth } from "@/lib/auth";
+import { isInvestorTag } from "@/lib/tags";
 
 export type FollowUp = {
   id: string;
@@ -75,7 +76,7 @@ export async function addFollowUp(
   if (contactError || !contact) return { error: "The investor could not be found." };
 
   const isInvestor = Array.isArray(contact.tags) && contact.tags.some(
-    (tag: string) => tag.toLowerCase() === "investor",
+    (tag: string) => isInvestorTag(tag),
   );
   if (!isInvestor) return { error: "Follow-ups are only available for investors." };
 
@@ -116,7 +117,7 @@ export async function markFollowUpAsDone(followUpId: string, contactId: string) 
 
   const isInvestor =
     Array.isArray(contact.tags) &&
-    contact.tags.some((tag: string) => tag.toLowerCase() === "investor");
+    contact.tags.some((tag: string) => isInvestorTag(tag));
   if (!isInvestor) {
     return { error: "Follow-ups are only available for investors." };
   }
@@ -207,7 +208,7 @@ export async function editFollowUp(
 
   const isInvestor =
     Array.isArray(contact.tags) &&
-    contact.tags.some((tag: string) => tag.toLowerCase() === "investor");
+    contact.tags.some((tag: string) => isInvestorTag(tag));
   if (!isInvestor) return { error: "Follow-ups are only available for investors." };
 
   // Verify follow-up exists, belongs to contact, and is pending (is_done === false)
@@ -262,7 +263,7 @@ export async function deleteFollowUp(followUpId: string, contactId: string) {
 
   const isInvestor =
     Array.isArray(contact.tags) &&
-    contact.tags.some((tag: string) => tag.toLowerCase() === "investor");
+    contact.tags.some((tag: string) => isInvestorTag(tag));
   if (!isInvestor) return { error: "Follow-ups are only available for investors." };
 
   // Verify follow-up exists, belongs to contact, and is pending (is_done === false)
@@ -314,7 +315,7 @@ export async function deleteCompletedFollowUp(followUpId: string, contactId: str
 
   const isInvestor =
     Array.isArray(contact.tags) &&
-    contact.tags.some((tag: string) => tag.toLowerCase() === "investor");
+    contact.tags.some((tag: string) => isInvestorTag(tag));
   if (!isInvestor) return { error: "Follow-ups are only available for investors." };
 
   // Verify follow-up exists, belongs to contact, and is completed (is_done === true)

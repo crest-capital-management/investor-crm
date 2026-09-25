@@ -21,6 +21,7 @@ import {
   type TagDistributionPoint,
   type QuietInvestorItem,
 } from "@/components/dashboard-analytics";
+import { TAG_OPTIONS, isInvestorTag } from "@/lib/tags";
 
 export const metadata: Metadata = {
   title: "Dashboard",
@@ -218,9 +219,7 @@ export default async function DashboardPage() {
   for (const contact of (contacts ?? []) as ContactItem[]) {
     const isInvestor = Boolean(
       Array.isArray(contact.tags) &&
-        contact.tags.some(
-          (tag: string) => tag.trim().toLowerCase() === "investor"
-        )
+        contact.tags.some((tag: string) => isInvestorTag(tag))
     );
     if (isInvestor) {
       investorCount++;
@@ -323,20 +322,10 @@ export default async function DashboardPage() {
   }));
 
   // --- Analytics: Widget 2: Tag Distribution ---
-  const STANDARD_TAGS = [
-    "Investor",
-    "Alumni",
-    "Prospect",
-    "Partner",
-    "Advisor",
-  ] as const;
-  const tagCounts: Record<string, number> = {
-    Investor: 0,
-    Alumni: 0,
-    Prospect: 0,
-    Partner: 0,
-    Advisor: 0,
-  };
+  const STANDARD_TAGS = TAG_OPTIONS;
+  const tagCounts: Record<string, number> = Object.fromEntries(
+    TAG_OPTIONS.map((tag) => [tag, 0])
+  );
 
   for (const contact of (contacts ?? []) as ContactItem[]) {
     if (Array.isArray(contact.tags)) {
@@ -376,9 +365,7 @@ export default async function DashboardPage() {
     .filter((contact) =>
       Boolean(
         Array.isArray(contact.tags) &&
-          contact.tags.some(
-            (tag: string) => tag.trim().toLowerCase() === "investor"
-          )
+          contact.tags.some((tag: string) => isInvestorTag(tag))
       )
     )
     .map((investor) => {

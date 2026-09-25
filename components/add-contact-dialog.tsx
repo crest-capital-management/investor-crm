@@ -26,7 +26,8 @@ import { DateSavedPicker } from "@/components/date-saved-picker";
 import { addContact } from "@/app/contacts/actions";
 import { useToast } from "@/components/toast-provider";
 
-export const TAG_OPTIONS = ["Investor", "Alumni", "Prospect", "Partner", "Advisor"];
+import { TAG_OPTIONS } from "@/lib/tags";
+export { TAG_OPTIONS };
 
 function toISODateString(d: Date) {
   const year = d.getFullYear();

@@ -5,6 +5,7 @@ import {
   InvestorTrackingTable,
   type InvestorTrackingRow,
 } from "@/components/investor-tracking-table";
+import { INVESTOR_TAG } from "@/lib/tags";
 
 export const metadata: Metadata = {
   title: "Investors",
@@ -32,7 +33,7 @@ export default async function InvestorsPage({
   let contactsQuery = supabase
     .from("contacts")
     .select("id, name, phone, email, tags, date_saved, contact_groups(groups(id, name))")
-    .contains("tags", ["Investor"])
+    .contains("tags", [INVESTOR_TAG])
     .is("deleted_at", null);
 
   if (search) {

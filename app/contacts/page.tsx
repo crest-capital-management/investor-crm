@@ -6,6 +6,7 @@ import { ContactsTable } from "@/components/contacts-table";
 import { ImportContactsDialog } from "@/components/import-contacts-dialog";
 import { LiveSearchInput } from "@/components/live-search-input";
 import { TagFilter } from "@/components/tag-filter";
+import { isInvestorTag } from "@/lib/tags";
 
 export const metadata: Metadata = {
   title: "Contacts",
@@ -67,7 +68,7 @@ export default async function ContactsPage({
   const totalContacts = contactMetrics?.length ?? 0;
   const investors =
     contactMetrics?.filter((contact) =>
-      contact.tags?.some((tag: string) => tag.toLowerCase() === "investor")
+      contact.tags?.some((tag: string) => isInvestorTag(tag))
     ).length ?? 0;
   const taggedContacts =
     contactMetrics?.filter((contact) => contact.tags?.length).length ?? 0;

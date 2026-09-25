@@ -17,6 +17,7 @@ import {
 } from "recharts";
 import { ArrowUpRight, ArrowUpDown, Clock, Tag as TagIcon, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { TAG_COLORS } from "@/lib/tags";
 
 const emptySubscribe = () => () => {};
 
@@ -190,13 +191,6 @@ export function FollowUpTrendChart({ data }: { data: FollowUpTrendPoint[] }) {
 
 // --- WIDGET 2: Tag Distribution Chart ---
 
-const TAG_COLORS: Record<string, string> = {
-  Investor: "#3b82f6",
-  Prospect: "#8b5cf6",
-  Partner: "#10b981",
-  Alumni: "#f59e0b",
-  Advisor: "#06b6d4",
-};
 
 export function TagDistributionChart({ data }: { data: TagDistributionPoint[] }) {
   const mounted = useIsMounted();

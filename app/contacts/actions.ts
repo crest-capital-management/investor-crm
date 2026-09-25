@@ -4,6 +4,7 @@ import { requireActionAuth } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import type { WhatsAppMessage } from "@/components/whatsapp-history";
 import { generateChatSummary } from "@/lib/gemini";
+import { TAG_OPTIONS } from "@/lib/tags";
 
 const DUPLICATE_PHONE_ERROR =
   "This phone number is already associated with another contact.";
@@ -186,7 +187,7 @@ export async function updateContact(id: string, formData: FormData) {
   return { success: true };
 }
 
-const CONTACT_TAG_OPTIONS = ["Investor", "Alumni", "Prospect", "Partner", "Advisor"];
+const CONTACT_TAG_OPTIONS = TAG_OPTIONS;
 
 export async function addTagToContact(id: string, tag: string) {
   const { supabase, error: authError } = await requireActionAuth();

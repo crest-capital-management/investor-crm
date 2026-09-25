@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth";
 import { InvestorDetail, type WhatsAppMessage } from "@/components/investor-detail";
 import type { MeetingNote } from "@/app/contacts/actions";
 import type { FollowUp } from "@/app/investors/actions";
+import { isInvestorTag } from "@/lib/tags";
 
 export const metadata: Metadata = {
   title: "Investor Details",
@@ -23,7 +24,7 @@ export default async function InvestorDetailPage({
     .is("deleted_at", null)
     .maybeSingle();
 
-  if (contactError || !contact || !contact.tags?.some((tag: string) => tag.toLowerCase() === "investor")) {
+  if (contactError || !contact || !contact.tags?.some((tag: string) => isInvestorTag(tag))) {
     notFound();
   }
 
