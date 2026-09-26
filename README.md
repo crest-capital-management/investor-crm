@@ -137,6 +137,7 @@ Two legacy unused tables exist (`contact_interactions`, `contact_follow_ups`) �
 - Node.js v20+
 - npm
 - A Supabase project with the schema above applied
+- A public Supabase Storage bucket named `whatsapp-media` (created once via the service role key; stores a persistent copy of any file sent through WhatsApp media upload/send, since Meta's own media URLs are short-lived and require authentication)
 
 ### 1. Clone & Install
 ```bash
@@ -157,6 +158,9 @@ WHATSAPP_WEBHOOK_VERIFY_TOKEN=your-webhook-verify-token
 WHATSAPP_APP_SECRET=your-meta-app-secret
 GEMINI_API_KEY=your-gemini-api-key
 SCHEDULER_SECRET=your-scheduler-trigger-secret
+RESEND_API_KEY=your-resend-api-key
+RESEND_FROM_EMAIL=your-verified-sender@yourdomain.com
+REMINDER_EMAIL_TO=you@yourdomain.com
 ```
 > **Note:** Never commit `.env.local` or expose production API keys.
 
@@ -187,12 +191,16 @@ npm run build
 - ✅ Dashboard analytics (Follow-up Trend, Tag Distribution, Investors Going Quiet)
 - ✅ WhatsApp History Sheet redesign
 - ✅ Headings switched to Playfair Display
-- ⏳ Actual cron/periodic trigger for scheduled broadcasts — deferred until hosting platform is chosen
-- 🚫 Reply-from-CRM — blocked on Meta Business Verification
-- 🚫 Media upload/send — blocked on Meta Business Verification
-- 🚫 Daily 9 AM follow-up reminder — blocked on cron
+- ✅ Meta Business Verification — resolved; WhatsApp account unlocked; confirmed working with live test sends via the WhatsApp test number
+- ✅ Daily follow-up reminder — email digest (via Resend) of due/overdue follow-ups; manual "Send test reminder email" button on the dashboard; not yet on an actual daily schedule (see below)
+- ✅ Outbound broadcast messages now logged into `whatsapp_messages` at send time (previously a known gap — fixed)
+- ✅ Reply-from-CRM — free-form WhatsApp reply box in the WhatsApp History panel on contact/investor detail pages (`sendWhatsAppReply` in `app/contacts/actions.ts`); subject to Meta's 24-hour customer window like any WhatsApp business messaging; confirmed working with a live test send
+- ✅ Media upload/send — attach button in the WhatsApp reply composer (images, documents, video, audio up to 16MB); uploads to Meta to send and keeps a copy in a new Supabase Storage bucket (`whatsapp-media`) for display in WhatsApp History; confirmed working with a live test send (real photo, delivered)
+- ✅ AI-suggested follow-ups — "Suggest with AI" button next to the existing manual "Add Follow-up" button (unchanged) on contact/investor detail pages; Gemini reads WhatsApp history + meeting notes and decides whether a follow-up is warranted, drafting a due date + message into the same manual Add Follow-up dialog for review before saving (`suggestFollowUp` in `app/investors/actions.ts`, `generateFollowUpSuggestion` in `lib/gemini.ts`); confirmed working live — correctly said "not needed" for content-free test messages and correctly drafted a real, actionable follow-up from a meeting note
+- ✅ Voice note transcription — "Upload Voice Note" button next to the existing manual "Add Meeting Note" button (unchanged) on contact/investor detail pages; uploads an audio recording to Gemini, which transcribes it into a clean meeting note draft, pre-filled into the same manual Add Meeting Note dialog for review before saving (`transcribeVoiceNote` in `app/contacts/actions.ts`, `transcribeVoiceNoteToMeetingNote` in `lib/gemini.ts`); audio itself is not stored, only the resulting text; confirmed working live — correctly reported when a test recording had no usable speech rather than inventing a note
+- ⏳ Actual cron/periodic trigger for scheduled broadcasts and the daily follow-up reminder — deferred until hosting platform is chosen
+- ⏳ Inbound webhook messages in local dev — requires a public URL (tested successfully via ngrok + Meta's webhook test tool); real inbound messages won't reach the CRM until the Meta app is published (Meta restriction, not a code issue)
 - ⏳ RLS tightening — deferred until surface area stabilizes
 - ⏳ Google Contacts CSV import — importer likely already compatible, not yet actually tested
-- 📋 Voice notes — unscoped
 - 📋 Recently Deleted restore — unscoped
 - ❌ Google Meet transcript auto-pull — dropped entirely in favor of the AI chat summary feature above

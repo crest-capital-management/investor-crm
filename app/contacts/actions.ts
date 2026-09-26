@@ -3,7 +3,14 @@
 import { requireActionAuth } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import type { WhatsAppMessage } from "@/components/whatsapp-history";
-import { generateChatSummary } from "@/lib/gemini";
+import { generateChatSummary, transcribeVoiceNoteToMeetingNote } from "@/lib/gemini";
+import {
+  mimeTypeToWhatsAppMediaType,
+  sendWhatsAppMediaMessage,
+  sendWhatsAppMessage,
+  uploadWhatsAppMedia,
+} from "@/lib/whatsapp";
+import { uploadWhatsAppMediaToStorage } from "@/lib/supabase-storage";
 import { TAG_OPTIONS } from "@/lib/tags";
 
 const DUPLICATE_PHONE_ERROR =
@@ -249,6 +256,61 @@ export async function addMeetingNote(contactId: string, note: string) {
   return { success: true };
 }
 
+const MAX_VOICE_NOTE_BYTES = 15 * 1024 * 1024; // 15MB, leaves headroom for Gemini's base64 inline-data limit
+
+export type TranscribeVoiceNoteResult =
+  | { success: true; transcript: string }
+  | { error: string };
+
+/**
+ * Transcribes an uploaded voice note recording into a meeting note draft
+ * using Gemini's audio understanding. Only returns the drafted text — it is
+ * not saved until the user reviews and confirms it via the normal Add
+ * Meeting Note dialog. The audio file itself is not stored anywhere.
+ */
+export async function transcribeVoiceNote(
+  contactId: string,
+  file: File,
+): Promise<TranscribeVoiceNoteResult> {
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
+  const normalizedContactId = contactId.trim();
+  if (!normalizedContactId) return { error: "The contact could not be found." };
+
+  if (!file || file.size === 0) return { error: "No file selected." };
+  if (file.size > MAX_VOICE_NOTE_BYTES) {
+    return { error: "File is too large. Please choose a recording under 15MB." };
+  }
+  if (!file.type.startsWith("audio/")) {
+    return { error: `Unsupported file type: ${file.type || "unknown"}. Please upload an audio file.` };
+  }
+
+  const { data: contact, error: contactError } = await supabase
+    .from("contacts")
+    .select("id")
+    .eq("id", normalizedContactId)
+    .maybeSingle();
+
+  if (contactError || !contact) return { error: "The contact could not be found." };
+
+  let audioBuffer: Buffer;
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    audioBuffer = Buffer.from(arrayBuffer);
+  } catch {
+    return { error: "Could not read the selected file." };
+  }
+
+  try {
+    const transcript = await transcribeVoiceNoteToMeetingNote(audioBuffer, file.type);
+    return { success: true, transcript };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Failed to transcribe the voice note.";
+    return { error: msg };
+  }
+}
+
 export type MeetingNote = {
   id: string;
   note: string;
@@ -292,6 +354,166 @@ export async function getWhatsAppMessages(contactId: string) {
   if (error) return { error: "WhatsApp messages could not be loaded." };
 
   return { messages: (messages ?? []) as WhatsAppMessage[] };
+}
+
+export type SendWhatsAppReplyResult =
+  | { success: true }
+  | { error: string };
+
+/**
+ * Sends a free-form WhatsApp reply to a contact directly from the CRM and
+ * logs it in whatsapp_messages as an outbound message. Subject to Meta's
+ * 24-hour customer service window: this will fail with a clear error if the
+ * contact hasn't messaged in via WhatsApp recently.
+ */
+export async function sendWhatsAppReply(
+  contactId: string,
+  message: string,
+): Promise<SendWhatsAppReplyResult> {
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
+  const normalizedContactId = contactId.trim();
+  const normalizedMessage = message.trim();
+
+  if (!normalizedContactId) return { error: "The contact could not be found." };
+  if (!normalizedMessage) return { error: "Message cannot be empty." };
+
+  const { data: contact, error: contactError } = await supabase
+    .from("contacts")
+    .select("id, phone")
+    .eq("id", normalizedContactId)
+    .maybeSingle();
+
+  if (contactError || !contact) return { error: "The contact could not be found." };
+
+  try {
+    const response = await sendWhatsAppMessage({
+      to: contact.phone,
+      message: normalizedMessage,
+    });
+
+    if (response.error) {
+      return { error: response.error.message || "WhatsApp could not send this message." };
+    }
+  } catch (err: unknown) {
+    const messageText =
+      err instanceof Error ? err.message : "WhatsApp could not send this message.";
+    return { error: messageText };
+  }
+
+  const { error: insertError } = await supabase.from("whatsapp_messages").insert({
+    contact_id: normalizedContactId,
+    direction: "out",
+    message_text: normalizedMessage,
+    sent_at: new Date().toISOString(),
+  });
+
+  if (insertError) {
+    // Message was sent via Meta but failed to log locally; surface this so
+    // it isn't silently missing from history.
+    return { error: "Message sent, but could not be saved to WhatsApp history." };
+  }
+
+  revalidatePath(`/contacts/${normalizedContactId}`);
+  revalidatePath(`/investors/${normalizedContactId}`);
+
+  return { success: true };
+}
+
+const MAX_WHATSAPP_MEDIA_BYTES = 16 * 1024 * 1024; // 16MB, matches Meta's video/audio limit
+
+export type SendWhatsAppMediaReplyResult =
+  | { success: true }
+  | { error: string };
+
+/**
+ * Sends an image/document/video/audio file to a contact via WhatsApp,
+ * directly from the CRM. Uploads the file to Meta to send it, and keeps a
+ * copy in Supabase Storage so it can be displayed later in WhatsApp History
+ * (Meta's own media URLs are short-lived and require authentication).
+ * Subject to the same 24-hour customer service window as sendWhatsAppReply.
+ */
+export async function sendWhatsAppMediaReply(
+  contactId: string,
+  file: File,
+  caption?: string,
+): Promise<SendWhatsAppMediaReplyResult> {
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
+  const normalizedContactId = contactId.trim();
+  if (!normalizedContactId) return { error: "The contact could not be found." };
+
+  if (!file || file.size === 0) return { error: "No file selected." };
+  if (file.size > MAX_WHATSAPP_MEDIA_BYTES) {
+    return { error: "File is too large. Please choose a file under 16MB." };
+  }
+
+  const mediaType = mimeTypeToWhatsAppMediaType(file.type);
+  if (!mediaType) {
+    return { error: `Unsupported file type: ${file.type || "unknown"}.` };
+  }
+
+  const { data: contact, error: contactError } = await supabase
+    .from("contacts")
+    .select("id, phone")
+    .eq("id", normalizedContactId)
+    .maybeSingle();
+
+  if (contactError || !contact) return { error: "The contact could not be found." };
+
+  let fileBuffer: Buffer;
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    fileBuffer = Buffer.from(arrayBuffer);
+  } catch {
+    return { error: "Could not read the selected file." };
+  }
+
+  let publicMediaUrl: string;
+  try {
+    publicMediaUrl = await uploadWhatsAppMediaToStorage(
+      fileBuffer,
+      file.type,
+      file.name,
+      normalizedContactId,
+    );
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Failed to store the file.";
+    return { error: msg };
+  }
+
+  try {
+    const mediaId = await uploadWhatsAppMedia(fileBuffer, file.type, file.name);
+    await sendWhatsAppMediaMessage({
+      to: contact.phone,
+      mediaId,
+      mediaType,
+      filename: file.name,
+      caption: caption?.trim() || undefined,
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "WhatsApp could not send this file.";
+    return { error: msg };
+  }
+
+  const { error: insertError } = await supabase.from("whatsapp_messages").insert({
+    contact_id: normalizedContactId,
+    direction: "out",
+    message_text: caption?.trim() || null,
+    media_url: publicMediaUrl,
+    sent_at: new Date().toISOString(),
+  });
+
+  if (insertError) {
+    return { error: "File sent, but could not be saved to WhatsApp history." };
+  }
+
+  revalidatePath(`/contacts/${normalizedContactId}`);
+  revalidatePath(`/investors/${normalizedContactId}`);
+
+  return { success: true };
 }
 
 export async function updateMeetingNote(

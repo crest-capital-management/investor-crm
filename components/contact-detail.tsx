@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import {
@@ -11,6 +11,7 @@ import {
   editFollowUp,
   getFollowUps,
   markFollowUpAsDone,
+  suggestFollowUp,
   type FollowUp,
 } from "@/app/investors/actions";
 import {
@@ -18,6 +19,9 @@ import {
   deleteMeetingNote,
   generateWhatsAppSummary,
   getMeetingNotes,
+  sendWhatsAppMediaReply,
+  sendWhatsAppReply,
+  transcribeVoiceNote,
   updateMeetingNote,
   type MeetingNote,
 } from "@/app/contacts/actions";
@@ -44,7 +48,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { CalendarIcon, Copy, ArrowLeft, Check } from "lucide-react";
+import { CalendarIcon, Copy, ArrowLeft, Check, Loader2, Mic, Sparkles } from "lucide-react";
 import {
   WhatsAppHistory,
   type WhatsAppMessage,
@@ -190,17 +194,58 @@ export function ContactDetail({
     }
   }
 
+  const [isSendingReply, setIsSendingReply] = useState(false);
+
+  async function handleSendReply(message: string) {
+    setIsSendingReply(true);
+    try {
+      const result = await sendWhatsAppReply(contact.id, message);
+      if ("error" in result && result.error) {
+        return { error: result.error };
+      }
+      toast("Message sent.");
+      router.refresh();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to send message.";
+      return { error: msg };
+    } finally {
+      setIsSendingReply(false);
+    }
+  }
+
+  const [isSendingMedia, setIsSendingMedia] = useState(false);
+
+  async function handleSendMedia(file: File, caption: string) {
+    setIsSendingMedia(true);
+    try {
+      const result = await sendWhatsAppMediaReply(contact.id, file, caption);
+      if ("error" in result && result.error) {
+        return { error: result.error };
+      }
+      toast("File sent.");
+      router.refresh();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to send file.";
+      return { error: msg };
+    } finally {
+      setIsSendingMedia(false);
+    }
+  }
+
   const [notes, setNotes] = useState(initialNotes);
   const [loadingNotes, setLoadingNotes] = useState(false);
   const [addingMeetingNote, setAddingMeetingNote] = useState(false);
   const [meetingNote, setMeetingNote] = useState("");
   const [savingMeetingNote, setSavingMeetingNote] = useState(false);
+  const [transcribingVoiceNote, setTranscribingVoiceNote] = useState(false);
+  const voiceNoteInputRef = useRef<HTMLInputElement>(null);
   const [followUps, setFollowUps] = useState(initialFollowUps);
   const [loadingFollowUps, setLoadingFollowUps] = useState(false);
   const [addingFollowUp, setAddingFollowUp] = useState(false);
   const [followUpDate, setFollowUpDate] = useState<Date | undefined>(startOfToday());
   const [followUpMessage, setFollowUpMessage] = useState("");
   const [savingFollowUp, setSavingFollowUp] = useState(false);
+  const [suggestingFollowUp, setSuggestingFollowUp] = useState(false);
   const [completingFollowUpId, setCompletingFollowUpId] = useState<string | null>(null);
   const [confirmingCompleteFollowUp, setConfirmingCompleteFollowUp] = useState<FollowUp | null>(null);
 
@@ -421,6 +466,26 @@ export function ContactDetail({
     setFollowUpMessage("");
   }
 
+  async function handleSuggestFollowUp() {
+    setSuggestingFollowUp(true);
+    const result = await suggestFollowUp(contact.id);
+    setSuggestingFollowUp(false);
+
+    if ("error" in result) {
+      toast(result.error, "error");
+      return;
+    }
+    if (!result.needed) {
+      toast("No follow-up needed right now, based on WhatsApp history and meeting notes.");
+      return;
+    }
+
+    setFollowUpDate(new Date(`${result.dueDate}T00:00:00`));
+    setFollowUpMessage(result.message);
+    setAddingFollowUp(true);
+    toast("Follow-up suggestion ready — review and save below.");
+  }
+
   async function handleAddFollowUp(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!followUpDate) {
@@ -452,6 +517,25 @@ export function ContactDetail({
     await refreshFollowUps();
     router.refresh();
     toast("Follow-up saved successfully");
+  }
+
+  async function handleVoiceNoteFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setTranscribingVoiceNote(true);
+    const result = await transcribeVoiceNote(contact.id, file);
+    setTranscribingVoiceNote(false);
+
+    if ("error" in result) {
+      toast(result.error, "error");
+      return;
+    }
+
+    setMeetingNote(result.transcript);
+    setAddingMeetingNote(true);
+    toast("Voice note transcribed — review and save below.");
   }
 
   async function handleAddMeetingNote(event: React.FormEvent<HTMLFormElement>) {
@@ -556,9 +640,32 @@ export function ContactDetail({
               <h2 className="text-base font-semibold">Meeting Notes</h2>
               <p className="mt-1 text-sm text-muted-foreground">Record and review contact conversations.</p>
             </div>
-            <Button type="button" variant="outline" onClick={() => setAddingMeetingNote(true)}>
-              Add Meeting Note
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <input
+                ref={voiceNoteInputRef}
+                type="file"
+                accept="audio/*"
+                className="hidden"
+                onChange={handleVoiceNoteFileChange}
+                disabled={transcribingVoiceNote}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => voiceNoteInputRef.current?.click()}
+                disabled={transcribingVoiceNote}
+              >
+                {transcribingVoiceNote ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Mic className="size-4" />
+                )}
+                {transcribingVoiceNote ? "Transcribing..." : "Upload Voice Note"}
+              </Button>
+              <Button type="button" variant="outline" onClick={() => setAddingMeetingNote(true)}>
+                Add Meeting Note
+              </Button>
+            </div>
           </div>
           <div className="mt-5">
             {notesError ? (
@@ -581,9 +688,24 @@ export function ContactDetail({
               <h2 className="text-base font-semibold">Follow-ups</h2>
               <p className="mt-1 text-sm text-muted-foreground">Keep track of future contact actions.</p>
             </div>
-            <Button type="button" variant="outline" onClick={() => setAddingFollowUp(true)}>
-              Add Follow-up
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleSuggestFollowUp}
+                disabled={suggestingFollowUp}
+              >
+                {suggestingFollowUp ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Sparkles className="size-4" />
+                )}
+                Suggest with AI
+              </Button>
+              <Button type="button" variant="outline" onClick={() => setAddingFollowUp(true)}>
+                Add Follow-up
+              </Button>
+            </div>
           </div>
           <div className="mt-5">
             {followUpsError ? (
@@ -656,6 +778,10 @@ export function ContactDetail({
           onRefreshSummary={handleRefreshSummary}
           isGeneratingSummary={isGeneratingSummary}
           summaryError={summaryError}
+          onSendReply={handleSendReply}
+          isSendingReply={isSendingReply}
+          onSendMedia={handleSendMedia}
+          isSendingMedia={isSendingMedia}
           className="mb-8"
         />
       </div>

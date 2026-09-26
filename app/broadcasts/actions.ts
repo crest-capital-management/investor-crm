@@ -756,6 +756,20 @@ async function dispatchBroadcast(
         to: normalizedPhone,
         message: messageToSend,
       });
+
+      // Log the outbound message so it shows up in WhatsApp History. A
+      // logging failure here doesn't affect the actual send, which already
+      // succeeded, so it's swallowed rather than marking the recipient failed.
+      const { error: logError } = await supabase.from("whatsapp_messages").insert({
+        contact_id: contact.id,
+        direction: "out",
+        message_text: messageToSend,
+        sent_at: new Date().toISOString(),
+      });
+      if (logError) {
+        console.error("Failed to log outbound broadcast message:", logError);
+      }
+
       results.push({
         contactId: contact.id,
         name: contact.name,

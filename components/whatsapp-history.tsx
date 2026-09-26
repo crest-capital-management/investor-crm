@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { ArrowDownLeft, ArrowUpRight, Loader2, RefreshCw, Sparkles } from "lucide-react";
+import { useRef, useState } from "react";
+import { ArrowDownLeft, ArrowUpRight, Loader2, Paperclip, RefreshCw, Send, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Sheet,
   SheetContent,
@@ -31,6 +32,10 @@ export type WhatsAppHistoryProps = {
   onRefreshSummary?: () => void;
   isGeneratingSummary?: boolean;
   summaryError?: string | null;
+  onSendReply?: (message: string) => Promise<{ error?: string } | void>;
+  isSendingReply?: boolean;
+  onSendMedia?: (file: File, caption: string) => Promise<{ error?: string } | void>;
+  isSendingMedia?: boolean;
 };
 
 function formatWhatsAppDate(sentAt: string | null, createdAt: string) {
@@ -59,8 +64,49 @@ export function WhatsAppHistory({
   onRefreshSummary,
   isGeneratingSummary = false,
   summaryError = null,
+  onSendReply,
+  isSendingReply = false,
+  onSendMedia,
+  isSendingMedia = false,
 }: WhatsAppHistoryProps) {
   const [open, setOpen] = useState(false);
+  const [replyText, setReplyText] = useState("");
+  const [replyError, setReplyError] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const isSending = isSendingReply || isSendingMedia;
+
+  async function handleSendReply() {
+    const trimmed = replyText.trim();
+    setReplyError(null);
+
+    if (selectedFile) {
+      if (!onSendMedia) return;
+      const result = await onSendMedia(selectedFile, trimmed);
+      if (result && "error" in result && result.error) {
+        setReplyError(result.error);
+        return;
+      }
+      setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      setReplyText("");
+      return;
+    }
+
+    if (!trimmed || !onSendReply) return;
+    const result = await onSendReply(trimmed);
+    if (result && "error" in result && result.error) {
+      setReplyError(result.error);
+      return;
+    }
+    setReplyText("");
+  }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null;
+    setReplyError(null);
+    setSelectedFile(file);
+  }
 
   const hasMessages = messages.length > 0;
   const lastMessage = hasMessages ? messages[messages.length - 1] : null;
@@ -95,7 +141,7 @@ export function WhatsAppHistory({
             </p>
           </div>
 
-          {hasMessages && (
+          {(hasMessages || onSendReply || onSendMedia) && (
             <Button
               type="button"
               variant="outline"
@@ -103,7 +149,7 @@ export function WhatsAppHistory({
               onClick={() => setOpen(true)}
               className="shrink-0"
             >
-              View Full History
+              {hasMessages ? "View Full History" : "Send WhatsApp Message"}
             </Button>
           )}
         </div>
@@ -235,6 +281,11 @@ export function WhatsAppHistory({
 
           <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">
             <div className="space-y-4">
+              {!hasMessages && (
+                <p className="text-sm text-muted-foreground">
+                  No WhatsApp messages logged yet. You can still send a message below.
+                </p>
+              )}
               {messages.map((message) => {
                 const isInbound =
                   message.direction === "in" ||
@@ -273,22 +324,120 @@ export function WhatsAppHistory({
                         {formatWhatsAppDate(message.sent_at, message.created_at)}
                       </p>
                     </div>
-                    <div className="min-w-0">
-                      {hasText ? (
+                    <div className="min-w-0 space-y-1.5">
+                      {message.media_url && (
+                        /\.(jpe?g|png|gif|webp)$/i.test(message.media_url) ? (
+                          <a href={message.media_url} target="_blank" rel="noreferrer">
+                            <img
+                              src={message.media_url}
+                              alt="WhatsApp media"
+                              className="max-h-64 rounded-md border object-cover"
+                            />
+                          </a>
+                        ) : (
+                          <a
+                            href={message.media_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1.5 text-sm text-primary underline underline-offset-2"
+                          >
+                            <Paperclip className="size-3.5 shrink-0" />
+                            View attachment
+                          </a>
+                        )
+                      )}
+                      {hasText && (
                         <p className="whitespace-pre-wrap text-sm">
                           {message.message_text}
                         </p>
-                      ) : message.media_url ? (
-                        <p className="text-sm italic text-muted-foreground">
-                          [Media message]
-                        </p>
-                      ) : null}
+                      )}
+                      {!hasText && !message.media_url && null}
                     </div>
                   </div>
                 );
               })}
             </div>
           </div>
+
+          {(onSendReply || onSendMedia) && (
+            <div className="border-t px-4 py-3.5 sm:px-6 sm:py-4">
+              <p className="mb-2 text-xs text-muted-foreground">
+                Send a WhatsApp message. This only works if the contact has messaged in
+                the last 24 hours.
+              </p>
+              {replyError && (
+                <p className="mb-2 text-xs text-destructive">{replyError}</p>
+              )}
+              {selectedFile && (
+                <div className="mb-2 flex items-center gap-2 rounded-md border bg-muted/30 px-2.5 py-1.5 text-xs">
+                  <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
+                  <span className="truncate flex-1">{selectedFile.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedFile(null);
+                      if (fileInputRef.current) fileInputRef.current.value = "";
+                    }}
+                    disabled={isSending}
+                    className="shrink-0 text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                </div>
+              )}
+              <div className="flex items-end gap-2">
+                {onSendMedia && (
+                  <>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      className="hidden"
+                      accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
+                      onChange={handleFileChange}
+                      disabled={isSending}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isSending}
+                      className="shrink-0"
+                    >
+                      <Paperclip className="size-4" />
+                    </Button>
+                  </>
+                )}
+                <Textarea
+                  value={replyText}
+                  onChange={(e) => setReplyText(e.target.value)}
+                  placeholder={selectedFile ? "Add a caption (optional)..." : "Type a reply..."}
+                  rows={2}
+                  className="min-h-0 resize-none"
+                  disabled={isSending}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendReply();
+                    }
+                  }}
+                />
+                <Button
+                  type="button"
+                  size="icon"
+                  onClick={handleSendReply}
+                  disabled={isSending || (!selectedFile && !replyText.trim())}
+                  className="shrink-0"
+                >
+                  {isSending ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Send className="size-4" />
+                  )}
+                </Button>
+              </div>
+            </div>
+          )}
         </SheetContent>
       </Sheet>
     </>

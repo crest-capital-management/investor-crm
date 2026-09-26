@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireActionAuth } from "@/lib/auth";
 import { isInvestorTag } from "@/lib/tags";
+import { generateFollowUpSuggestion } from "@/lib/gemini";
 
 export type FollowUp = {
   id: string;
@@ -46,6 +47,83 @@ export async function getFollowUps(contactId: string) {
   if (error) return { error: "Follow-ups could not be loaded." };
 
   return { followUps: (followUps ?? []) as FollowUp[] };
+}
+
+export type SuggestFollowUpResult =
+  | { success: true; needed: true; dueDate: string; message: string }
+  | { success: true; needed: false }
+  | { error: string };
+
+/**
+ * Uses AI (Gemini) to suggest a follow-up for an investor based on their
+ * WhatsApp history and meeting notes. This only returns a suggestion for
+ * the user to review — it does not save anything. The user still confirms
+ * and saves it through the existing addFollowUp flow (the manual Add
+ * Follow-up dialog, pre-filled with this suggestion).
+ */
+export async function suggestFollowUp(
+  contactId: string,
+): Promise<SuggestFollowUpResult> {
+  const { supabase, error: authError } = await requireActionAuth();
+  if (authError || !supabase) return { error: "Unauthorized" };
+
+  const normalizedContactId = contactId.trim();
+  if (!normalizedContactId) return { error: "The investor could not be found." };
+
+  const { data: contact, error: contactError } = await supabase
+    .from("contacts")
+    .select("id, tags")
+    .eq("id", normalizedContactId)
+    .maybeSingle();
+
+  if (contactError || !contact) return { error: "The investor could not be found." };
+
+  const isInvestor =
+    Array.isArray(contact.tags) && contact.tags.some((tag: string) => isInvestorTag(tag));
+  if (!isInvestor) return { error: "Follow-ups are only available for investors." };
+
+  const [{ data: messages, error: messagesError }, { data: notes, error: notesError }] =
+    await Promise.all([
+      supabase
+        .from("whatsapp_messages")
+        .select("direction, message_text, sent_at, created_at")
+        .eq("contact_id", normalizedContactId)
+        .is("deleted_at", null)
+        .order("sent_at", { ascending: true }),
+      supabase
+        .from("interactions")
+        .select("note, created_at")
+        .eq("contact_id", normalizedContactId)
+        .eq("type", "meeting")
+        .is("deleted_at", null)
+        .order("created_at", { ascending: true }),
+    ]);
+
+  if (messagesError || notesError) {
+    return { error: "Could not load WhatsApp history or meeting notes." };
+  }
+
+  try {
+    const suggestion = await generateFollowUpSuggestion(
+      messages ?? [],
+      notes ?? [],
+      todayAsISODate(),
+    );
+
+    if (!suggestion.needed) {
+      return { success: true, needed: false };
+    }
+
+    return {
+      success: true,
+      needed: true,
+      dueDate: suggestion.dueDate,
+      message: suggestion.message,
+    };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Failed to generate a follow-up suggestion.";
+    return { error: msg };
+  }
 }
 
 export async function addFollowUp(

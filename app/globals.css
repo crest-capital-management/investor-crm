@@ -126,9 +126,4 @@
   html {
     @apply font-sans;
   }
-  h1,
-  h2,
-  .font-heading {
-    font-family: var(--font-playfair), 'Playfair Display', Georgia, serif;
-  }
 }

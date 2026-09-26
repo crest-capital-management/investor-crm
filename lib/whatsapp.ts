@@ -130,3 +130,129 @@ export async function sendWhatsAppMessage({
 
   return data;
 }
+
+export type WhatsAppMediaType = "image" | "video" | "audio" | "document";
+
+/**
+ * Maps a browser/file MIME type to the WhatsApp Cloud API media category.
+ * Returns null for unsupported types.
+ */
+export function mimeTypeToWhatsAppMediaType(
+  mimeType: string
+): WhatsAppMediaType | null {
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType.startsWith("video/")) return "video";
+  if (mimeType.startsWith("audio/")) return "audio";
+  if (
+    mimeType === "application/pdf" ||
+    mimeType.startsWith("application/") ||
+    mimeType === "text/plain" ||
+    mimeType === "text/csv"
+  ) {
+    return "document";
+  }
+  return null;
+}
+
+/**
+ * Uploads a file's raw bytes to Meta so it can be referenced by ID in a
+ * subsequent send. Required before sending any media message.
+ */
+export async function uploadWhatsAppMedia(
+  fileBuffer: Buffer,
+  mimeType: string,
+  filename: string
+): Promise<string> {
+  const token = process.env.WHATSAPP_ACCESS_TOKEN;
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+
+  if (!token) throw new Error("WHATSAPP_ACCESS_TOKEN is not configured.");
+  if (!phoneNumberId) throw new Error("WHATSAPP_PHONE_NUMBER_ID is not configured.");
+
+  const form = new FormData();
+  form.append("messaging_product", "whatsapp");
+  form.append("file", new Blob([new Uint8Array(fileBuffer)], { type: mimeType }), filename);
+
+  const url = `https://graph.facebook.com/v25.0/${phoneNumberId}/media`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+
+  const data = await response.json();
+
+  if (!response.ok || data.error) {
+    const errMsg =
+      data.error?.message ||
+      `WhatsApp media upload responded with HTTP status ${response.status}`;
+    throw new Error(errMsg);
+  }
+
+  return data.id as string;
+}
+
+export interface SendWhatsAppMediaMessageParams {
+  to: string;
+  mediaId: string;
+  mediaType: WhatsAppMediaType;
+  filename?: string;
+  caption?: string;
+}
+
+/**
+ * Sends a previously uploaded media file (see uploadWhatsAppMedia) to a
+ * recipient via Meta's WhatsApp Cloud API.
+ */
+export async function sendWhatsAppMediaMessage({
+  to,
+  mediaId,
+  mediaType,
+  filename,
+  caption,
+}: SendWhatsAppMediaMessageParams): Promise<WhatsAppApiResponse> {
+  const token = process.env.WHATSAPP_ACCESS_TOKEN;
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+
+  if (!token) throw new Error("WHATSAPP_ACCESS_TOKEN is not configured.");
+  if (!phoneNumberId) throw new Error("WHATSAPP_PHONE_NUMBER_ID is not configured.");
+
+  const normalizedTo = normalizePhoneForWhatsApp(to);
+  if (!normalizedTo) {
+    throw new Error(`Invalid recipient phone number: "${to}".`);
+  }
+
+  const mediaObject: Record<string, unknown> = { id: mediaId };
+  if (caption && (mediaType === "image" || mediaType === "video" || mediaType === "document")) {
+    mediaObject.caption = caption;
+  }
+  if (filename && mediaType === "document") {
+    mediaObject.filename = filename;
+  }
+
+  const url = `https://graph.facebook.com/v25.0/${phoneNumberId}/messages`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to: normalizedTo,
+      type: mediaType,
+      [mediaType]: mediaObject,
+    }),
+  });
+
+  const data: WhatsAppApiResponse = await response.json();
+
+  if (!response.ok || data.error) {
+    const errMsg =
+      data.error?.message ||
+      `WhatsApp API responded with HTTP status ${response.status}`;
+    throw new Error(errMsg);
+  }
+
+  return data;
+}

@@ -248,7 +248,7 @@ export function TagDistributionChart({ data }: { data: TagDistributionPoint[] })
               </ResponsiveContainer>
             </div>
 
-            <div className="flex flex-1 flex-col justify-center gap-1.5 w-full">
+            <div className="flex min-w-0 flex-1 flex-col justify-center gap-1.5 w-full">
               {data.map((item) => {
                 const color = TAG_COLORS[item.name] || "#94a3b8";
                 const percentage = totalContacts
@@ -257,18 +257,18 @@ export function TagDistributionChart({ data }: { data: TagDistributionPoint[] })
                 return (
                   <div
                     key={item.name}
-                    className="flex items-center justify-between text-xs rounded-md px-2 py-1 hover:bg-muted/40 transition-colors"
+                    className="flex items-center justify-between gap-2 text-xs rounded-md px-2 py-1 hover:bg-muted/40 transition-colors"
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex min-w-[4.5rem] items-center gap-2">
                       <span
                         className="size-2.5 rounded-full shrink-0"
                         style={{ backgroundColor: color }}
                       />
-                      <span className="font-medium text-foreground">
+                      <span className="truncate font-medium text-foreground">
                         {item.name}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2 text-muted-foreground">
+                    <div className="flex shrink-0 items-center gap-2 whitespace-nowrap text-muted-foreground">
                       <span>{item.count}</span>
                       <span className="w-8 text-right text-[11px] opacity-70">
                         {percentage}%

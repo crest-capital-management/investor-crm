@@ -42,7 +42,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { Copy, Plus, Trash2, ExternalLink } from "lucide-react";
+import { Copy, Plus, Trash2, ExternalLink, Mail, Phone, Pencil } from "lucide-react";
 import {
   DateSavedPicker,
   parseISODate,
@@ -64,6 +64,22 @@ export type ContactRow = {
       }>
     | null;
 };
+
+function getInitials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function formatDateSaved(dateSaved: string | null) {
+  if (!dateSaved) return null;
+  return new Date(dateSaved).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
 
 type ContactDetailsDialogProps = {
   contact: ContactRow;
@@ -375,7 +391,7 @@ export function ContactDetailsDialog({
             </form>
           ) : (
             <>
-              <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4 sm:space-y-6 sm:px-6 sm:py-6">
+              <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">
                 <Link
                   href={`/contacts/${currentContact.id}`}
                   className="inline-flex h-9 sm:h-10 w-full items-center justify-center gap-2 rounded-lg border bg-background px-4 text-xs sm:text-sm font-medium hover:bg-muted transition-colors"
@@ -384,61 +400,116 @@ export function ContactDetailsDialog({
                   <ExternalLink className="size-3.5 sm:size-4 text-muted-foreground" />
                 </Link>
 
-                <div className="rounded-lg border bg-background px-3.5 py-3 sm:px-4 sm:py-4">
-                  <div className="flex flex-wrap items-start justify-between gap-2.5 sm:gap-3">
-                    <div className="min-w-0 space-y-1 sm:space-y-2">
-                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Name</p>
-                      <p className="truncate text-base font-medium">{currentContact.name}</p>
+                {/* Profile: identity + contact methods */}
+                <div className="rounded-lg border bg-background p-4 sm:p-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary sm:size-12 sm:text-base">
+                        {getInitials(currentContact.name)}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-base font-semibold sm:text-lg">{currentContact.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatDateSaved(currentContact.date_saved)
+                            ? `Added ${formatDateSaved(currentContact.date_saved)}`
+                            : "Date added not set"}
+                        </p>
+                      </div>
                     </div>
-                    <Button type="button" variant="outline" onClick={beginEdit} className="h-8 px-2.5 text-xs sm:h-9 sm:px-3 sm:text-sm shrink-0">Edit</Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon-sm"
+                      onClick={beginEdit}
+                      className="shrink-0"
+                      aria-label="Edit name"
+                    >
+                      <Pencil className="size-3.5" />
+                    </Button>
                   </div>
-                </div>
-                <div className="rounded-lg border bg-background px-3.5 py-3 sm:px-4 sm:py-4">
-                  <div className="flex flex-wrap items-start justify-between gap-2.5 sm:gap-3">
-                    <div className="min-w-0 space-y-1 sm:space-y-2">
-                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Phone</p>
-                      <p className="truncate">{currentContact.phone}</p>
+
+                  <div className="mt-4 space-y-3 border-t pt-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex min-w-0 items-center gap-2 text-sm">
+                        <Phone className="size-4 shrink-0 text-muted-foreground" />
+                        <span className="truncate">{currentContact.phone}</span>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={copyPhone}
+                        className="shrink-0"
+                        aria-label="Copy phone number"
+                      >
+                        <Copy className="size-3.5" />
+                      </Button>
                     </div>
-                    <Button type="button" variant="outline" onClick={copyPhone} className="h-8 px-2.5 text-xs sm:h-9 sm:px-3 sm:text-sm shrink-0"><Copy className="size-3.5 sm:size-4" />Copy</Button>
-                  </div>
-                </div>
-                <div className="rounded-lg border bg-background px-3.5 py-3 sm:px-4 sm:py-4">
-                  <div className="flex flex-wrap items-start justify-between gap-2.5 sm:gap-3">
-                    <div className="min-w-0 space-y-1 sm:space-y-2">
-                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Email</p>
-                      {currentContact.email ? (
-                        <p className="truncate">{currentContact.email}</p>
-                      ) : (
-                        <p className="text-muted-foreground">No email added</p>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex min-w-0 items-center gap-2 text-sm">
+                        <Mail className="size-4 shrink-0 text-muted-foreground" />
+                        {currentContact.email ? (
+                          <span className="truncate">{currentContact.email}</span>
+                        ) : (
+                          <span className="text-muted-foreground">No email added</span>
+                        )}
+                      </div>
+                      {currentContact.email && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={copyEmail}
+                          className="shrink-0"
+                          aria-label="Copy email"
+                        >
+                          <Copy className="size-3.5" />
+                        </Button>
                       )}
                     </div>
-                    {currentContact.email && (
-                      <Button type="button" variant="outline" onClick={copyEmail} className="h-8 px-2.5 text-xs sm:h-9 sm:px-3 sm:text-sm shrink-0">
-                        <Copy className="size-3.5 sm:size-4" />
-                        Copy
-                      </Button>
-                    )}
                   </div>
                 </div>
-                <div className="rounded-lg border bg-background px-3.5 py-3 sm:px-4 sm:py-4">
-                  <div className="flex flex-wrap items-start justify-between gap-2.5 sm:gap-3">
-                    <div className="min-w-0 space-y-1 sm:space-y-2">
+
+                {/* Organization: tags + groups */}
+                <div className="rounded-lg border bg-background p-4 sm:p-5">
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
                       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Tags</p>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => { setSelectedTagToAdd(""); setAddingTag(true); }}
+                        aria-label="Add tag"
+                      >
+                        <Plus className="size-3.5" />
+                      </Button>
+                    </div>
+                    <div className="mt-2">
                       {currentContact.tags?.length ? (
                         <div className="flex flex-wrap gap-1.5">
                           {currentContact.tags.map((contactTag) => (
                             <span key={contactTag} className="inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">{contactTag}</span>
                           ))}
                         </div>
-                      ) : <span className="text-muted-foreground">—</span>}
+                      ) : <span className="text-sm text-muted-foreground">No tags assigned</span>}
                     </div>
-                    <Button type="button" variant="outline" onClick={() => { setSelectedTagToAdd(""); setAddingTag(true); }} className="h-8 px-2.5 text-xs sm:h-9 sm:px-3 sm:text-sm shrink-0"><Plus className="size-3.5 sm:size-4" />Add Tag</Button>
                   </div>
-                </div>
-                <div className="rounded-lg border bg-background px-3.5 py-3 sm:px-4 sm:py-4">
-                  <div className="flex flex-wrap items-start justify-between gap-2.5 sm:gap-3">
-                    <div className="min-w-0 space-y-1 sm:space-y-2">
+
+                  <div className="mt-4 border-t pt-4">
+                    <div className="flex items-center justify-between gap-2">
                       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Groups</p>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={openAddGroups}
+                        aria-label="Add to group"
+                      >
+                        <Plus className="size-3.5" />
+                      </Button>
+                    </div>
+                    <div className="mt-2">
                       {currentContact.contact_groups?.length ? (
                         <div className="flex flex-wrap gap-1.5">
                           {currentContact.contact_groups.map(({ groups }) => {
@@ -446,27 +517,11 @@ export function ContactDetailsDialog({
                             return <span key={group.id} className="inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">{group.name}</span>;
                           })}
                         </div>
-                      ) : <span className="text-muted-foreground">—</span>}
+                      ) : <span className="text-sm text-muted-foreground">Not in any group</span>}
                     </div>
-                    <Button type="button" variant="outline" onClick={openAddGroups} className="h-8 px-2.5 text-xs sm:h-9 sm:px-3 sm:text-sm shrink-0"><Plus className="size-3.5 sm:size-4" />Add to Group</Button>
                   </div>
                 </div>
-                <div className="rounded-lg border bg-background px-3.5 py-3 sm:px-4 sm:py-4">
-                  <div className="min-w-0 space-y-1 sm:space-y-2">
-                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Date Saved</p>
-                    <p>
-                      {currentContact.date_saved ? (
-                        new Date(currentContact.date_saved).toLocaleDateString("en-IN", {
-                          day: "numeric",
-                          month: "short",
-                          year: "numeric",
-                        })
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </p>
-                  </div>
-                </div>
+
                 {error && (
                   <p className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
                     {error}

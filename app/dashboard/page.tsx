@@ -22,6 +22,7 @@ import {
   type QuietInvestorItem,
 } from "@/components/dashboard-analytics";
 import { TAG_OPTIONS, isInvestorTag } from "@/lib/tags";
+import { SendTestReminderButton } from "@/components/send-test-reminder-button";
 
 export const metadata: Metadata = {
   title: "Dashboard",
@@ -412,6 +413,7 @@ export default async function DashboardPage() {
           >
             View All Investors
           </Link>
+          <SendTestReminderButton />
         </div>
       </div>
 
