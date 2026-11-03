@@ -3,6 +3,13 @@
  * Everything user-supplied goes through query parameters ($1, $2, ...), never into the SQL text.
  */
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** True for a well-formed UUID. Check ids from URLs and forms with this before `$1::uuid`, which errors on anything else. */
+export function isUuid(value: string): boolean {
+  return UUID_PATTERN.test(value);
+}
+
 /** Escapes % _ and \ so a search term is matched literally inside ILIKE. */
 export function escapeLike(term: string): string {
   return term.replace(/[\\%_]/g, "\\$&");

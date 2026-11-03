@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/src/lib/supabase/server";
 import { db } from "@/lib/db";
+import { isUuid } from "@/lib/sql";
 import { isOwnerId } from "@/lib/auth";
 import { createSignedPortfolioUrl } from "@/lib/supabase-storage";
 
@@ -24,10 +25,12 @@ export async function GET(
   // Only the CRM owner gets here (checked above). A malformed id simply finds no update.
   let update: { file_path: string; file_name: string } | null = null;
   try {
-    update = await db.maybeOne<{ file_path: string; file_name: string }>(
-      "select file_path, file_name from portfolio_updates where id::text = $1 and deleted_at is null",
-      [id],
-    );
+    update = isUuid(id)
+      ? await db.maybeOne<{ file_path: string; file_name: string }>(
+          "select file_path, file_name from portfolio_updates where id = $1::uuid and deleted_at is null",
+          [id],
+        )
+      : null;
   } catch {
     update = null;
   }

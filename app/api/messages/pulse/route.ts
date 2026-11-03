@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { requireActionAuth } from "@/lib/auth";
+import { isOwnerId } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { createClient } from "@/src/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -10,8 +11,10 @@ export const dynamic = "force-dynamic";
  * seconds and only reloads the chat lists when the fingerprint changes.
  */
 export async function GET() {
-  const { error } = await requireActionAuth();
-  if (error) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Verified from the session token itself (no call to the auth service), since this runs every few seconds per open tab.
+  const supabase = await createClient();
+  const { data: claimsData } = await supabase.auth.getClaims();
+  if (!isOwnerId(claimsData?.claims?.sub)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
     const row = await db.one<{ fingerprint: string }>(

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireActionAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { isUuid } from "@/lib/sql";
 import { getUnknownConversations } from "@/lib/unknown-numbers";
 
 export async function getUnreadConversationCount(): Promise<number> {
@@ -26,10 +27,10 @@ export async function markConversationRead(contactId: string) {
   if (authError || !supabase) return { error: "Unauthorized" };
 
   const normalizedContactId = contactId.trim();
-  if (!normalizedContactId) return { error: "The contact could not be found." };
+  if (!normalizedContactId || !isUuid(normalizedContactId)) return { error: "The contact could not be found." };
 
   try {
-    await db.execute("update contacts set last_read_at = $1 where id::text = $2", [
+    await db.execute("update contacts set last_read_at = $1 where id = $2::uuid", [
       new Date().toISOString(),
       normalizedContactId,
     ]);

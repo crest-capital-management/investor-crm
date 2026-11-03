@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/src/lib/supabase/server";
 import { db } from "@/lib/db";
+import { isUuid } from "@/lib/sql";
 import { isOwnerId } from "@/lib/auth";
 import { storeInboundWhatsAppMedia } from "@/lib/inbound-media";
 import { metaMediaIdFrom } from "@/lib/media-ref";
@@ -37,10 +38,12 @@ export async function GET(
   // Only the CRM owner gets here (checked above). A malformed id simply finds no message.
   let message: { id: string; media_url: string | null } | null = null;
   try {
-    message = await db.maybeOne<{ id: string; media_url: string | null }>(
-      "select id, media_url from whatsapp_messages where id::text = $1",
-      [id],
-    );
+    message = isUuid(id)
+      ? await db.maybeOne<{ id: string; media_url: string | null }>(
+          "select id, media_url from whatsapp_messages where id = $1::uuid",
+          [id],
+        )
+      : null;
   } catch {
     message = null;
   }
@@ -57,7 +60,7 @@ export async function GET(
 
   try {
     const storedUrl = await storeInboundWhatsAppMedia(mediaId);
-    await db.execute("update whatsapp_messages set media_url = $1 where id::text = $2", [storedUrl, id]);
+    await db.execute("update whatsapp_messages set media_url = $1 where id = $2::uuid", [storedUrl, id]);
     return openStoredUrl(storedUrl);
   } catch {
     return new NextResponse(

@@ -911,7 +911,7 @@ export async function addContactToGroups(contactId: string, groupIds: string[]) 
   if (newGroupIds.length) {
     try {
       await db.execute(
-        "insert into public.contact_groups (contact_id, group_id) select $1, unnest($2::uuid[])",
+        "insert into public.contact_groups (contact_id, group_id) select $1::uuid, unnest($2::uuid[])",
         [contactId, newGroupIds],
       );
     } catch {
