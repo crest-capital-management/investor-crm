@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { PORTFOLIO_UPDATE_COLUMNS, type PortfolioUpdate } from "@/lib/portfolio-types";
 import { PROSPECT_SCORE_COLUMNS, type ProspectScore } from "@/lib/prospect-score-types";
 import { requireAuthFast } from "@/lib/auth";
+import { db, isMissingSchemaError } from "@/lib/db";
 import { getUnreadCountsByContact } from "@/lib/unread";
 import { InvestorDetail, type WhatsAppMessage } from "@/components/investor-detail";
 import type { MeetingNote } from "@/app/contacts/actions";
@@ -19,83 +20,124 @@ export default async function InvestorDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const { supabase } = await requireAuthFast();
-  const { data: contact, error: contactError } = await supabase
-    .from("contacts")
-    .select(
-      "id, name, phone, email, company, tags, date_saved, notes, whatsapp_summary, whatsapp_summary_generated_at, contact_groups(groups(id, name))"
-    )
-    .eq("id", id)
-    .is("deleted_at", null)
-    .maybeSingle();
+  await requireAuthFast();
 
-  if (contactError || !contact || !contact.tags?.some((tag: string) => isInvestorTag(tag))) {
+  type DetailContact = {
+    id: string;
+    name: string;
+    phone: string;
+    email: string | null;
+    company: string | null;
+    tags: string[] | null;
+    date_saved: string | null;
+    notes: string | null;
+    whatsapp_summary: string | null;
+    whatsapp_summary_generated_at: string | null;
+    contact_groups: Array<{ groups: { id: string; name: string } }>;
+  };
+
+  let contact: DetailContact | null;
+  try {
+    contact = await db.maybeOne<DetailContact>(
+      `select c.id, c.name, c.phone, c.email, c.company, c.tags, c.date_saved, c.notes,
+         c.whatsapp_summary, c.whatsapp_summary_generated_at,
+         coalesce((
+           select json_agg(json_build_object('groups', case when g.id is null then null
+                                            else json_build_object('id', g.id, 'name', g.name) end))
+           from public.contact_groups cg
+           left join public.groups g on g.id = cg.group_id
+           where cg.contact_id = c.id
+         ), '[]'::json) as contact_groups
+       from public.contacts c
+       where c.id = $1 and c.deleted_at is null`,
+      [id],
+    );
+  } catch {
+    contact = null;
+  }
+
+  if (!contact || !contact.tags?.some((tag: string) => isInvestorTag(tag))) {
     notFound();
   }
 
-  const { data: notes, error: notesError } = await supabase
-    .from("interactions")
-    .select("id, note, created_at")
-    .eq("contact_id", id)
-    .eq("type", "meeting")
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false });
+  // Each section loads on its own, so one failing section doesn't hide the rest of the page.
+  async function load<T>(run: () => Promise<T>): Promise<{ data: T | null; error: unknown }> {
+    try {
+      return { data: await run(), error: null };
+    } catch (error) {
+      return { data: null, error };
+    }
+  }
 
-  const { data: followUps, error: followUpsError } = await supabase
-    .from("follow_ups")
-    .select("id, due_date, message, is_done, created_at")
-    .eq("contact_id", id)
-    .is("deleted_at", null)
-    .order("is_done", { ascending: true })
-    .order("due_date", { ascending: true })
-    .order("created_at", { ascending: true });
+  const { data: notes, error: notesError } = await load(() =>
+    db.query<MeetingNote>(
+      `select id, note, created_at from public.interactions
+       where contact_id = $1 and type = 'meeting' and deleted_at is null
+       order by created_at desc`,
+      [id],
+    ),
+  );
 
-  const { data: whatsappMessages, error: whatsAppMessagesError } = await supabase
-    .from("whatsapp_messages")
-    .select("*")
-    .eq("contact_id", id)
-    .is("deleted_at", null)
-    .order("sent_at", { ascending: true });
+  const { data: followUps, error: followUpsError } = await load(() =>
+    db.query<FollowUp>(
+      `select id, due_date, message, is_done, created_at from public.follow_ups
+       where contact_id = $1 and deleted_at is null
+       order by is_done asc, due_date asc, created_at asc`,
+      [id],
+    ),
+  );
 
-  const { data: portfolioUpdates, error: portfolioUpdatesError } = await supabase
-    .from("portfolio_updates")
-    .select(PORTFOLIO_UPDATE_COLUMNS)
-    .eq("contact_id", id)
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false });
+  const { data: whatsappMessages, error: whatsAppMessagesError } = await load(() =>
+    db.query<WhatsAppMessage>(
+      `select * from public.whatsapp_messages
+       where contact_id = $1 and deleted_at is null
+       order by sent_at asc`,
+      [id],
+    ),
+  );
+
+  const { data: portfolioUpdates, error: portfolioUpdatesError } = await load(() =>
+    db.query<PortfolioUpdate>(
+      `select ${PORTFOLIO_UPDATE_COLUMNS} from public.portfolio_updates
+       where contact_id = $1 and deleted_at is null
+       order by created_at desc`,
+      [id],
+    ),
+  );
 
   // Read separately so the page still opens before the prospect score migration has been run.
-  const { data: prospectScore, error: prospectScoreError } = await supabase
-    .from("contacts")
-    .select(PROSPECT_SCORE_COLUMNS)
-    .eq("id", id)
-    .maybeSingle();
+  const { data: prospectScore, error: prospectScoreError } = await load(() =>
+    db.maybeOne<ProspectScore>(
+      `select ${PROSPECT_SCORE_COLUMNS} from public.contacts where id = $1`,
+      [id],
+    ),
+  );
 
-  const unreadCounts = await getUnreadCountsByContact(supabase);
+  const unreadCounts = await getUnreadCountsByContact();
 
   return (
     <InvestorDetail
       contact={contact}
-      initialNotes={notesError ? [] : (notes ?? []) as MeetingNote[]}
+      initialNotes={notesError ? [] : (notes ?? [])}
       notesError={notesError ? "Meeting notes could not be loaded." : null}
-      initialFollowUps={followUpsError ? [] : (followUps ?? []) as FollowUp[]}
+      initialFollowUps={followUpsError ? [] : (followUps ?? [])}
       followUpsError={followUpsError ? "Follow-ups could not be loaded." : null}
-      initialWhatsAppMessages={whatsAppMessagesError ? [] : (whatsappMessages ?? []) as WhatsAppMessage[]}
+      initialWhatsAppMessages={whatsAppMessagesError ? [] : (whatsappMessages ?? [])}
       whatsAppMessagesError={whatsAppMessagesError ? "WhatsApp messages could not be loaded." : null}
       initialWhatsAppSummary={contact.whatsapp_summary ?? null}
       initialWhatsAppSummaryGeneratedAt={contact.whatsapp_summary_generated_at ?? null}
-      initialPortfolioUpdates={portfolioUpdatesError ? [] : ((portfolioUpdates ?? []) as PortfolioUpdate[])}
+      initialPortfolioUpdates={portfolioUpdatesError ? [] : (portfolioUpdates ?? [])}
       portfolioUpdatesError={
         portfolioUpdatesError
-          ? portfolioUpdatesError.code === "42P01" || portfolioUpdatesError.code === "PGRST205"
+          ? isMissingSchemaError(portfolioUpdatesError)
             ? "Portfolio updates aren't set up yet. Run the latest Supabase migration (portfolio_updates) first."
             : "Portfolio updates could not be loaded."
           : null
       }
-      initialProspectScore={prospectScoreError || !prospectScore ? undefined : (prospectScore as ProspectScore)}
+      initialProspectScore={prospectScoreError || !prospectScore ? undefined : prospectScore}
       prospectScoreError={
         prospectScoreError
-          ? prospectScoreError.code === "42703"
+          ? isMissingSchemaError(prospectScoreError)
             ? "Prospect score isn't set up yet. Run the latest Supabase migration (prospect score) first."
             : "The prospect score could not be loaded."
           : null

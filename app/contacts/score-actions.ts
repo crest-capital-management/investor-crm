@@ -2,8 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { requireActionAuth } from "@/lib/auth";
+import { db, isMissingSchemaError } from "@/lib/db";
 import type { PortfolioAnalysis } from "@/lib/portfolio-types";
-import { scoreProspect } from "@/lib/prospect-scoring";
+import { scoreProspect, type ScoringInput } from "@/lib/prospect-scoring";
 import {
   MAX_SCORE_REASON_CHARS,
   PROSPECT_SCORE_COLUMNS,
@@ -12,8 +13,8 @@ import {
 
 const MISSING_COLUMN_ERROR = "Prospect score isn't set up yet. Run the latest Supabase migration (prospect score) first.";
 
-function isMissingColumn(error: { code?: string; message?: string } | null) {
-  return !!error && (error.code === "42703" || error.code === "PGRST204" || /ai_score|manual_score/.test(error.message ?? ""));
+function isMissingColumn(error: unknown) {
+  return isMissingSchemaError(error) || /ai_score|manual_score/.test((error as { message?: string } | null)?.message ?? "");
 }
 
 function revalidateContact(contactId: string) {
@@ -31,45 +32,59 @@ export async function suggestProspectScore(
   if (authError || !supabase) return { error: "Unauthorized" };
 
   const id = contactId.trim();
-  const { data: contact, error: contactError } = await supabase
-    .from("contacts")
-    .select("id, name, company, tags, notes, date_saved")
-    .eq("id", id)
-    .is("deleted_at", null)
-    .maybeSingle();
-  if (contactError || !contact) return { error: "The contact could not be found." };
+  let contact: ScoringInput["contact"] | null;
+  try {
+    contact = await db.maybeOne<ScoringInput["contact"]>(
+      `select id, name, company, tags, notes, date_saved from public.contacts where id = $1 and deleted_at is null`,
+      [id],
+    );
+  } catch {
+    contact = null;
+  }
+  if (!contact) return { error: "The contact could not be found." };
 
-  const [messages, notes, followUps, portfolio] = await Promise.all([
-    supabase
-      .from("whatsapp_messages")
-      .select("direction, message_text, sent_at, created_at")
-      .eq("contact_id", id)
-      .is("deleted_at", null)
-      .order("sent_at", { ascending: true }),
-    supabase
-      .from("interactions")
-      .select("note, created_at")
-      .eq("contact_id", id)
-      .eq("type", "meeting")
-      .is("deleted_at", null)
-      .order("created_at", { ascending: true }),
-    supabase
-      .from("follow_ups")
-      .select("due_date, message, is_done")
-      .eq("contact_id", id)
-      .is("deleted_at", null),
-    supabase
-      .from("portfolio_updates")
-      .select("analysis")
-      .eq("contact_id", id)
-      .eq("analysis_status", "done")
-      .is("deleted_at", null)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-  ]);
-  if (messages.error || notes.error || followUps.error) {
+  let messages: ScoringInput["messages"];
+  let notes: ScoringInput["meetingNotes"];
+  let followUps: ScoringInput["followUps"];
+  try {
+    [messages, notes, followUps] = await Promise.all([
+      db.query<ScoringInput["messages"][number]>(
+        `select direction, message_text, sent_at, created_at
+           from public.whatsapp_messages
+          where contact_id = $1 and deleted_at is null
+          order by sent_at asc`,
+        [id],
+      ),
+      db.query<ScoringInput["meetingNotes"][number]>(
+        `select note, created_at
+           from public.interactions
+          where contact_id = $1 and type = 'meeting' and deleted_at is null
+          order by created_at asc`,
+        [id],
+      ),
+      db.query<ScoringInput["followUps"][number]>(
+        `select due_date, message, is_done
+           from public.follow_ups
+          where contact_id = $1 and deleted_at is null`,
+        [id],
+      ),
+    ]);
+  } catch {
     return { error: "Could not load the contact's messages, notes or follow-ups." };
+  }
+
+  // The table may not exist yet; the score works without portfolio data.
+  let portfolio: PortfolioAnalysis | null = null;
+  try {
+    const row = await db.maybeOne<{ analysis: PortfolioAnalysis | null }>(
+      `select analysis from public.portfolio_updates
+        where contact_id = $1 and analysis_status = 'done' and deleted_at is null
+        order by created_at desc limit 1`,
+      [id],
+    );
+    portfolio = row?.analysis ?? null;
+  } catch {
+    portfolio = null;
   }
 
   let result: { score: number; reason: string };
@@ -77,26 +92,30 @@ export async function suggestProspectScore(
     result = await scoreProspect({
       todayIsoDate: new Date().toISOString().slice(0, 10),
       contact,
-      messages: messages.data ?? [],
-      meetingNotes: notes.data ?? [],
-      followUps: followUps.data ?? [],
-      // The table may not exist yet; the score works without portfolio data.
-      portfolio: portfolio.error ? null : ((portfolio.data?.analysis as PortfolioAnalysis | null) ?? null),
+      messages,
+      meetingNotes: notes,
+      followUps,
+      portfolio,
     });
   } catch (err: unknown) {
     return { error: err instanceof Error ? err.message : "The score could not be generated." };
   }
 
-  const { data: saved, error: saveError } = await supabase
-    .from("contacts")
-    .update({ ai_score: result.score, ai_score_reason: result.reason, ai_scored_at: new Date().toISOString() })
-    .eq("id", id)
-    .select(PROSPECT_SCORE_COLUMNS)
-    .single();
-  if (saveError || !saved) return { error: isMissingColumn(saveError) ? MISSING_COLUMN_ERROR : "The score could not be saved." };
+  let saved: ProspectScore;
+  try {
+    saved = await db.one<ProspectScore>(
+      `update public.contacts
+          set ai_score = $2, ai_score_reason = $3, ai_scored_at = $4
+        where id = $1
+        returning ${PROSPECT_SCORE_COLUMNS}`,
+      [id, result.score, result.reason, new Date().toISOString()],
+    );
+  } catch (error) {
+    return { error: isMissingColumn(error) ? MISSING_COLUMN_ERROR : "The score could not be saved." };
+  }
 
   revalidateContact(id);
-  return { score: saved as ProspectScore };
+  return { score: saved };
 }
 
 /** Saves the owner's own score and reason, which takes precedence over the AI suggestion. */
@@ -115,17 +134,21 @@ export async function setManualScore(
   }
 
   const id = contactId.trim();
-  const { data: saved, error } = await supabase
-    .from("contacts")
-    .update({ manual_score: score, manual_score_reason: cleanReason || null, manual_scored_at: new Date().toISOString() })
-    .eq("id", id)
-    .is("deleted_at", null)
-    .select(PROSPECT_SCORE_COLUMNS)
-    .single();
-  if (error || !saved) return { error: isMissingColumn(error) ? MISSING_COLUMN_ERROR : "The score could not be saved." };
+  let saved: ProspectScore;
+  try {
+    saved = await db.one<ProspectScore>(
+      `update public.contacts
+          set manual_score = $2, manual_score_reason = $3, manual_scored_at = $4
+        where id = $1 and deleted_at is null
+        returning ${PROSPECT_SCORE_COLUMNS}`,
+      [id, score, cleanReason || null, new Date().toISOString()],
+    );
+  } catch (error) {
+    return { error: isMissingColumn(error) ? MISSING_COLUMN_ERROR : "The score could not be saved." };
+  }
 
   revalidateContact(id);
-  return { score: saved as ProspectScore };
+  return { score: saved };
 }
 
 /** Removes the owner's override so the AI suggestion applies again. */
@@ -136,15 +159,19 @@ export async function clearManualScore(
   if (authError || !supabase) return { error: "Unauthorized" };
 
   const id = contactId.trim();
-  const { data: saved, error } = await supabase
-    .from("contacts")
-    .update({ manual_score: null, manual_score_reason: null, manual_scored_at: null })
-    .eq("id", id)
-    .is("deleted_at", null)
-    .select(PROSPECT_SCORE_COLUMNS)
-    .single();
-  if (error || !saved) return { error: isMissingColumn(error) ? MISSING_COLUMN_ERROR : "The override could not be removed." };
+  let saved: ProspectScore;
+  try {
+    saved = await db.one<ProspectScore>(
+      `update public.contacts
+          set manual_score = null, manual_score_reason = null, manual_scored_at = null
+        where id = $1 and deleted_at is null
+        returning ${PROSPECT_SCORE_COLUMNS}`,
+      [id],
+    );
+  } catch (error) {
+    return { error: isMissingColumn(error) ? MISSING_COLUMN_ERROR : "The override could not be removed." };
+  }
 
   revalidateContact(id);
-  return { score: saved as ProspectScore };
+  return { score: saved };
 }

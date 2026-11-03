@@ -1,7 +1,8 @@
 "use server";
 
 import { requireActionAuth } from "@/lib/auth";
-import { draftMessage } from "@/lib/message-drafting";
+import { db } from "@/lib/db";
+import { draftMessage, type DraftInput } from "@/lib/message-drafting";
 import { isReplyWindowOpen } from "@/lib/reply-window";
 
 /**
@@ -16,36 +17,46 @@ export async function generatePersonalisedMessage(
   if (authError || !supabase) return { error: "Unauthorized" };
 
   const id = contactId.trim();
-  const { data: contact, error: contactError } = await supabase
-    .from("contacts")
-    .select("id, name, company, tags, notes")
-    .eq("id", id)
-    .is("deleted_at", null)
-    .maybeSingle();
-  if (contactError || !contact) return { error: "The contact could not be found." };
+  let contact: DraftInput["contact"] | null;
+  try {
+    contact = await db.maybeOne<DraftInput["contact"]>(
+      `select id, name, company, tags, notes from public.contacts where id = $1 and deleted_at is null`,
+      [id],
+    );
+  } catch {
+    contact = null;
+  }
+  if (!contact) return { error: "The contact could not be found." };
 
-  const [messages, notes, followUps, windowOpen] = await Promise.all([
-    supabase
-      .from("whatsapp_messages")
-      .select("direction, message_text, sent_at, created_at")
-      .eq("contact_id", id)
-      .is("deleted_at", null)
-      .order("sent_at", { ascending: true }),
-    supabase
-      .from("interactions")
-      .select("note, created_at")
-      .eq("contact_id", id)
-      .eq("type", "meeting")
-      .is("deleted_at", null)
-      .order("created_at", { ascending: true }),
-    supabase
-      .from("follow_ups")
-      .select("due_date, message, is_done")
-      .eq("contact_id", id)
-      .is("deleted_at", null),
-    isReplyWindowOpen(supabase, id),
-  ]);
-  if (messages.error || notes.error || followUps.error) {
+  let messages: DraftInput["messages"];
+  let notes: DraftInput["meetingNotes"];
+  let followUps: DraftInput["followUps"];
+  let windowOpen: boolean;
+  try {
+    [messages, notes, followUps, windowOpen] = await Promise.all([
+      db.query<DraftInput["messages"][number]>(
+        `select direction, message_text, sent_at, created_at
+           from public.whatsapp_messages
+          where contact_id = $1 and deleted_at is null
+          order by sent_at asc`,
+        [id],
+      ),
+      db.query<DraftInput["meetingNotes"][number]>(
+        `select note, created_at
+           from public.interactions
+          where contact_id = $1 and type = 'meeting' and deleted_at is null
+          order by created_at asc`,
+        [id],
+      ),
+      db.query<DraftInput["followUps"][number]>(
+        `select due_date, message, is_done
+           from public.follow_ups
+          where contact_id = $1 and deleted_at is null`,
+        [id],
+      ),
+      isReplyWindowOpen(id),
+    ]);
+  } catch {
     return { error: "Could not load the contact's messages, notes or follow-ups." };
   }
 
@@ -53,9 +64,9 @@ export async function generatePersonalisedMessage(
     const message = await draftMessage({
       todayIsoDate: new Date().toISOString().slice(0, 10),
       contact,
-      messages: messages.data ?? [],
-      meetingNotes: notes.data ?? [],
-      followUps: followUps.data ?? [],
+      messages,
+      meetingNotes: notes,
+      followUps,
     });
     return { message, windowOpen };
   } catch (err: unknown) {

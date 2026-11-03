@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { db } from "@/lib/db";
 import { sendWhatsAppMediaMessage } from "@/lib/whatsapp";
 import { insertOutboundMessage } from "@/lib/message-status";
 
@@ -34,7 +34,6 @@ const BUTTON_AUTO_REPLIES: {
  * above. Never throws: a failure here must not break message storage.
  */
 export async function sendButtonAutoReply(
-  supabase: SupabaseClient,
   args: {
     buttonTitle: string | null;
     /** ID of the message the button was tapped on (Meta's `context.id`). */
@@ -51,12 +50,15 @@ export async function sendButtonAutoReply(
 
   // Only for our approved template: the tapped message must be one we sent.
   if (!args.repliedToId) return;
-  const { data: original } = await supabase
-    .from("whatsapp_messages")
-    .select("message_text")
-    .eq("wamid", args.repliedToId)
-    .eq("direction", "out")
-    .maybeSingle();
+  let original: { message_text: string | null } | null = null;
+  try {
+    original = await db.maybeOne<{ message_text: string | null }>(
+      "select message_text from whatsapp_messages where wamid = $1 and direction = 'out' limit 1",
+      [args.repliedToId],
+    );
+  } catch {
+    return;
+  }
   if (!original?.message_text?.includes(rule.templateTextIncludes)) return;
 
   try {
@@ -71,7 +73,6 @@ export async function sendButtonAutoReply(
     // Keep it in the chat history only when the sender is a saved contact.
     if (args.contactId) {
       await insertOutboundMessage(
-        supabase,
         {
           contact_id: args.contactId,
           message_text: rule.caption,

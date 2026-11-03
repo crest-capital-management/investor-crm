@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireActionAuth } from "@/lib/auth";
+import { db } from "@/lib/db";
 import { generateFollowUpSuggestion } from "@/lib/gemini";
 
 export type FollowUp = {
@@ -27,6 +28,31 @@ function todayAsISODate() {
   return new Date().toISOString().slice(0, 10);
 }
 
+/** The contact row the follow-up actions check for (null when it doesn't exist or the lookup failed). */
+async function findContact(contactId: string) {
+  try {
+    return await db.maybeOne<{ id: string; tags: string[] | null }>(
+      `select id, tags from public.contacts where id = $1`,
+      [contactId],
+    );
+  } catch {
+    return null;
+  }
+}
+
+type FollowUpCheck = { id: string; contact_id: string | null; message: string | null; is_done: boolean | null };
+
+async function findFollowUp(followUpId: string) {
+  try {
+    return await db.maybeOne<FollowUpCheck>(
+      `select id, contact_id, message, is_done from public.follow_ups where id = $1`,
+      [followUpId],
+    );
+  } catch {
+    return null;
+  }
+}
+
 export async function getFollowUps(contactId: string) {
   const { supabase, error: authError } = await requireActionAuth();
   if (authError || !supabase) return { error: "Unauthorized" };
@@ -34,18 +60,20 @@ export async function getFollowUps(contactId: string) {
   const normalizedContactId = contactId.trim();
   if (!normalizedContactId) return { error: "The contact could not be found." };
 
-  const { data: followUps, error } = await supabase
-    .from("follow_ups")
-    .select("id, due_date, message, is_done, created_at")
-    .eq("contact_id", normalizedContactId)
-    .is("deleted_at", null)
-    .order("is_done", { ascending: true })
-    .order("due_date", { ascending: true })
-    .order("created_at", { ascending: true });
+  let followUps: FollowUp[];
+  try {
+    followUps = await db.query<FollowUp>(
+      `select id, due_date, message, is_done, created_at
+       from public.follow_ups
+       where contact_id = $1 and deleted_at is null
+       order by is_done asc, due_date asc, created_at asc`,
+      [normalizedContactId],
+    );
+  } catch {
+    return { error: "Follow-ups could not be loaded." };
+  }
 
-  if (error) return { error: "Follow-ups could not be loaded." };
-
-  return { followUps: (followUps ?? []) as FollowUp[] };
+  return { followUps };
 }
 
 export type SuggestFollowUpResult =
@@ -69,39 +97,38 @@ export async function suggestFollowUp(
   const normalizedContactId = contactId.trim();
   if (!normalizedContactId) return { error: "The contact could not be found." };
 
-  const { data: contact, error: contactError } = await supabase
-    .from("contacts")
-    .select("id, tags")
-    .eq("id", normalizedContactId)
-    .maybeSingle();
+  const contact = await findContact(normalizedContactId);
+  if (!contact) return { error: "The contact could not be found." };
 
-  if (contactError || !contact) return { error: "The contact could not be found." };
-
-  const [{ data: messages, error: messagesError }, { data: notes, error: notesError }] =
-    await Promise.all([
-      supabase
-        .from("whatsapp_messages")
-        .select("direction, message_text, sent_at, created_at")
-        .eq("contact_id", normalizedContactId)
-        .is("deleted_at", null)
-        .order("sent_at", { ascending: true }),
-      supabase
-        .from("interactions")
-        .select("note, created_at")
-        .eq("contact_id", normalizedContactId)
-        .eq("type", "meeting")
-        .is("deleted_at", null)
-        .order("created_at", { ascending: true }),
+  type MessageRow = { direction: string; message_text: string | null; sent_at: string; created_at: string };
+  type NoteRow = { note: string; created_at: string };
+  let messages: MessageRow[];
+  let notes: NoteRow[];
+  try {
+    [messages, notes] = await Promise.all([
+      db.query<MessageRow>(
+        `select direction, message_text, sent_at, created_at
+         from public.whatsapp_messages
+         where contact_id = $1 and deleted_at is null
+         order by sent_at asc`,
+        [normalizedContactId],
+      ),
+      db.query<NoteRow>(
+        `select note, created_at
+         from public.interactions
+         where contact_id = $1 and type = 'meeting' and deleted_at is null
+         order by created_at asc`,
+        [normalizedContactId],
+      ),
     ]);
-
-  if (messagesError || notesError) {
+  } catch {
     return { error: "Could not load WhatsApp history or meeting notes." };
   }
 
   try {
     const suggestion = await generateFollowUpSuggestion(
-      messages ?? [],
-      notes ?? [],
+      messages,
+      notes,
       todayAsISODate(),
     );
 
@@ -140,22 +167,17 @@ export async function addFollowUp(
   }
   if (!normalizedMessage) return { error: "Follow-up message is required." };
 
-  const { data: contact, error: contactError } = await supabase
-    .from("contacts")
-    .select("id, tags")
-    .eq("id", normalizedContactId)
-    .maybeSingle();
+  const contact = await findContact(normalizedContactId);
+  if (!contact) return { error: "The contact could not be found." };
 
-  if (contactError || !contact) return { error: "The contact could not be found." };
-
-  const { error } = await supabase.from("follow_ups").insert({
-    contact_id: normalizedContactId,
-    due_date: normalizedDueDate,
-    message: normalizedMessage,
-    is_done: false,
-  });
-
-  if (error) return { error: "The follow-up could not be saved." };
+  try {
+    await db.execute(
+      `insert into public.follow_ups (contact_id, due_date, message, is_done) values ($1, $2, $3, false)`,
+      [normalizedContactId, normalizedDueDate, normalizedMessage],
+    );
+  } catch {
+    return { error: "The follow-up could not be saved." };
+  }
 
   revalidatePath("/investors");
   revalidatePath(`/investors/${normalizedContactId}`);
@@ -173,27 +195,12 @@ export async function markFollowUpAsDone(followUpId: string, contactId: string) 
   if (!normalizedFollowUpId) return { error: "Invalid follow-up ID." };
   if (!normalizedContactId) return { error: "The contact could not be found." };
 
-  // 1. Verify contact exists and is an investor
-  const { data: contact, error: contactError } = await supabase
-    .from("contacts")
-    .select("id, tags")
-    .eq("id", normalizedContactId)
-    .maybeSingle();
-
-  if (contactError || !contact) {
-    return { error: "The contact could not be found." };
-  }
+  const contact = await findContact(normalizedContactId);
+  if (!contact) return { error: "The contact could not be found." };
 
   // 2. Verify follow-up exists, belongs to contact, and is not already done
-  const { data: followUp, error: followUpError } = await supabase
-    .from("follow_ups")
-    .select("id, contact_id, message, is_done")
-    .eq("id", normalizedFollowUpId)
-    .maybeSingle();
-
-  if (followUpError || !followUp) {
-    return { error: "Follow-up not found." };
-  }
+  const followUp = await findFollowUp(normalizedFollowUpId);
+  if (!followUp) return { error: "Follow-up not found." };
 
   if (followUp.contact_id !== normalizedContactId) {
     return { error: "Follow-up does not belong to this investor." };
@@ -204,33 +211,26 @@ export async function markFollowUpAsDone(followUpId: string, contactId: string) 
   }
 
   // 3. Insert interaction record representing the completed follow-up
-  const { data: interaction, error: interactionError } = await supabase
-    .from("interactions")
-    .insert({
-      contact_id: normalizedContactId,
-      type: "follow_up",
-      note: followUp.message,
-    })
-    .select("id")
-    .single();
-
-  if (interactionError || !interaction) {
-    return { error: "Could not record the follow-up interaction." };
+  // The interaction and the "done" flag are saved together, so an orphaned interaction is never left behind.
+  let recorded = false;
+  try {
+    recorded = await db.tx(async (tx) => {
+      await tx.execute(
+        `insert into public.interactions (contact_id, type, note) values ($1, 'follow_up', $2)`,
+        [normalizedContactId, followUp.message],
+      );
+      // Conditional on is_done = false to avoid a race with another completion.
+      const updated = await tx.execute(
+        `update public.follow_ups set is_done = true where id = $1 and is_done = false`,
+        [normalizedFollowUpId],
+      );
+      if (updated === 0) throw new Error("Follow-up was already completed.");
+      return true;
+    });
+  } catch {
+    recorded = false;
   }
-
-  // 4. Update the follow-up to done (conditional on is_done=false to avoid race condition)
-  const { data: updatedFollowUps, error: updateError } = await supabase
-    .from("follow_ups")
-    .update({ is_done: true })
-    .eq("id", normalizedFollowUpId)
-    .eq("is_done", false)
-    .select("id");
-
-  if (updateError || !updatedFollowUps || updatedFollowUps.length === 0) {
-    // Compensating rollback: delete created interaction to prevent orphaned interaction
-    await supabase.from("interactions").delete().eq("id", interaction.id);
-    return { error: "Failed to mark follow-up as done." };
-  }
+  if (!recorded) return { error: "Failed to mark follow-up as done." };
 
   revalidatePath("/investors");
   revalidatePath(`/investors/${normalizedContactId}`);
@@ -260,23 +260,12 @@ export async function editFollowUp(
   }
   if (!normalizedMessage) return { error: "Follow-up message is required." };
 
-  // Verify contact exists and is an investor
-  const { data: contact, error: contactError } = await supabase
-    .from("contacts")
-    .select("id, tags")
-    .eq("id", normalizedContactId)
-    .maybeSingle();
-
-  if (contactError || !contact) return { error: "The contact could not be found." };
+  const contact = await findContact(normalizedContactId);
+  if (!contact) return { error: "The contact could not be found." };
 
   // Verify follow-up exists, belongs to contact, and is pending (is_done === false)
-  const { data: followUp, error: followUpError } = await supabase
-    .from("follow_ups")
-    .select("id, contact_id, is_done")
-    .eq("id", normalizedFollowUpId)
-    .maybeSingle();
-
-  if (followUpError || !followUp) return { error: "Follow-up not found." };
+  const followUp = await findFollowUp(normalizedFollowUpId);
+  if (!followUp) return { error: "Follow-up not found." };
   if (followUp.contact_id !== normalizedContactId) {
     return { error: "Follow-up does not belong to this investor." };
   }
@@ -284,16 +273,14 @@ export async function editFollowUp(
     return { error: "Completed follow-ups cannot be edited." };
   }
 
-  const { error: updateError } = await supabase
-    .from("follow_ups")
-    .update({
-      due_date: normalizedDueDate,
-      message: normalizedMessage,
-    })
-    .eq("id", normalizedFollowUpId)
-    .eq("is_done", false);
-
-  if (updateError) return { error: "The follow-up could not be updated." };
+  try {
+    await db.execute(
+      `update public.follow_ups set due_date = $1, message = $2 where id = $3 and is_done = false`,
+      [normalizedDueDate, normalizedMessage, normalizedFollowUpId],
+    );
+  } catch {
+    return { error: "The follow-up could not be updated." };
+  }
 
   revalidatePath("/investors");
   revalidatePath(`/investors/${normalizedContactId}`);
@@ -311,23 +298,12 @@ export async function deleteFollowUp(followUpId: string, contactId: string) {
   if (!normalizedFollowUpId) return { error: "Invalid follow-up ID." };
   if (!normalizedContactId) return { error: "The contact could not be found." };
 
-  // Verify contact exists and is an investor
-  const { data: contact, error: contactError } = await supabase
-    .from("contacts")
-    .select("id, tags")
-    .eq("id", normalizedContactId)
-    .maybeSingle();
-
-  if (contactError || !contact) return { error: "The contact could not be found." };
+  const contact = await findContact(normalizedContactId);
+  if (!contact) return { error: "The contact could not be found." };
 
   // Verify follow-up exists, belongs to contact, and is pending (is_done === false)
-  const { data: followUp, error: followUpError } = await supabase
-    .from("follow_ups")
-    .select("id, contact_id, is_done")
-    .eq("id", normalizedFollowUpId)
-    .maybeSingle();
-
-  if (followUpError || !followUp) return { error: "Follow-up not found." };
+  const followUp = await findFollowUp(normalizedFollowUpId);
+  if (!followUp) return { error: "Follow-up not found." };
   if (followUp.contact_id !== normalizedContactId) {
     return { error: "Follow-up does not belong to this investor." };
   }
@@ -335,13 +311,14 @@ export async function deleteFollowUp(followUpId: string, contactId: string) {
     return { error: "This follow-up is completed and must be deleted using the completed follow-up deletion flow." };
   }
 
-  const { error: deleteError } = await supabase
-    .from("follow_ups")
-    .update({ deleted_at: new Date().toISOString() })
-    .eq("id", normalizedFollowUpId)
-    .eq("is_done", false);
-
-  if (deleteError) return { error: "The follow-up could not be deleted." };
+  try {
+    await db.execute(
+      `update public.follow_ups set deleted_at = $1 where id = $2 and is_done = false`,
+      [new Date().toISOString(), normalizedFollowUpId],
+    );
+  } catch {
+    return { error: "The follow-up could not be deleted." };
+  }
 
   revalidatePath("/investors");
   revalidatePath(`/investors/${normalizedContactId}`);
@@ -359,23 +336,12 @@ export async function deleteCompletedFollowUp(followUpId: string, contactId: str
   if (!normalizedFollowUpId) return { error: "Invalid follow-up ID." };
   if (!normalizedContactId) return { error: "The contact could not be found." };
 
-  // Verify contact exists and is an investor
-  const { data: contact, error: contactError } = await supabase
-    .from("contacts")
-    .select("id, tags")
-    .eq("id", normalizedContactId)
-    .maybeSingle();
-
-  if (contactError || !contact) return { error: "The contact could not be found." };
+  const contact = await findContact(normalizedContactId);
+  if (!contact) return { error: "The contact could not be found." };
 
   // Verify follow-up exists, belongs to contact, and is completed (is_done === true)
-  const { data: followUp, error: followUpError } = await supabase
-    .from("follow_ups")
-    .select("id, contact_id, is_done")
-    .eq("id", normalizedFollowUpId)
-    .maybeSingle();
-
-  if (followUpError || !followUp) return { error: "Follow-up not found." };
+  const followUp = await findFollowUp(normalizedFollowUpId);
+  if (!followUp) return { error: "Follow-up not found." };
   if (followUp.contact_id !== normalizedContactId) {
     return { error: "Follow-up does not belong to this investor." };
   }
@@ -386,13 +352,14 @@ export async function deleteCompletedFollowUp(followUpId: string, contactId: str
   // Delete only the completed follow-up row. Historical interaction is preserved
   // because the schema does not link follow_up_id to interaction_id, preventing accidental
   // deletion of other follow_up interactions with identical messages.
-  const { error: deleteError } = await supabase
-    .from("follow_ups")
-    .update({ deleted_at: new Date().toISOString() })
-    .eq("id", normalizedFollowUpId)
-    .eq("is_done", true);
-
-  if (deleteError) return { error: "The completed follow-up could not be deleted." };
+  try {
+    await db.execute(
+      `update public.follow_ups set deleted_at = $1 where id = $2 and is_done = true`,
+      [new Date().toISOString(), normalizedFollowUpId],
+    );
+  } catch {
+    return { error: "The completed follow-up could not be deleted." };
+  }
 
   revalidatePath("/investors");
   revalidatePath(`/investors/${normalizedContactId}`);

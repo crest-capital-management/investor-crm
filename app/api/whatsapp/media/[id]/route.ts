@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/src/lib/supabase/server";
+import { db } from "@/lib/db";
+import { isOwnerId } from "@/lib/auth";
 import { storeInboundWhatsAppMedia } from "@/lib/inbound-media";
 import { metaMediaIdFrom } from "@/lib/media-ref";
 import { createSignedMediaUrl, mediaStoragePathFromUrl } from "@/lib/supabase-storage";
@@ -28,18 +30,22 @@ export async function GET(
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) {
+  if (!user || !isOwnerId(user.id)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Row-level security limits this to the CRM owner's data.
-  const { data: message } = await supabase
-    .from("whatsapp_messages")
-    .select("id, media_url")
-    .eq("id", id)
-    .maybeSingle();
+  // Only the CRM owner gets here (checked above). A malformed id simply finds no message.
+  let message: { id: string; media_url: string | null } | null = null;
+  try {
+    message = await db.maybeOne<{ id: string; media_url: string | null }>(
+      "select id, media_url from whatsapp_messages where id::text = $1",
+      [id],
+    );
+  } catch {
+    message = null;
+  }
 
-  const mediaUrl = message?.media_url as string | null | undefined;
+  const mediaUrl = message?.media_url;
   if (!mediaUrl) {
     return new NextResponse("This message has no attachment.", { status: 404 });
   }
@@ -51,7 +57,7 @@ export async function GET(
 
   try {
     const storedUrl = await storeInboundWhatsAppMedia(mediaId);
-    await supabase.from("whatsapp_messages").update({ media_url: storedUrl }).eq("id", id);
+    await db.execute("update whatsapp_messages set media_url = $1 where id::text = $2", [storedUrl, id]);
     return openStoredUrl(storedUrl);
   } catch {
     return new NextResponse(

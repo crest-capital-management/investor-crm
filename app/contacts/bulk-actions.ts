@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { requireActionAuth } from "@/lib/auth";
-import { fetchAllPages } from "@/lib/supabase-pagination";
+import { db, isMissingSchemaError } from "@/lib/db";
 import { PROTECTED_TAGS, TAG_OPTIONS } from "@/lib/tags";
 import { parseTagCell } from "@/lib/tag-match";
 import { normalizeToLocalPhone } from "@/lib/whatsapp";
@@ -14,8 +14,10 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIGRATION_HINT =
   "The latest database update hasn't been run yet. Run 20261016000000_company_and_bulk_updates.sql in the Supabase SQL Editor, then try again.";
 
-function isMissingFunction(message: string | undefined) {
-  return Boolean(message && /could not find the function|bulk_(change_contact_tags|update_contacts)|company/i.test(message));
+function isMissingFunction(error: unknown) {
+  const { code, message } = (error ?? {}) as { code?: string; message?: string };
+  // 42883 = the SQL function doesn't exist yet.
+  return code === "42883" || isMissingSchemaError(error) || Boolean(message && /bulk_(change_contact_tags|update_contacts)|company/i.test(message));
 }
 
 // ================= Bulk tag change =================
@@ -44,22 +46,22 @@ export async function bulkChangeTags(
 
   let updated = 0;
   for (let i = 0; i < contactIds.length; i += CHUNK) {
-    const { data, error } = await supabase.rpc("bulk_change_contact_tags", {
-      p_ids: contactIds.slice(i, i + CHUNK),
-      p_mode: mode,
-      p_tag: normalizedTag,
-    });
-    if (error) {
-      console.error("[bulkChangeTags] failed:", error.message);
+    try {
+      const row = await db.one<{ n: number | null }>(
+        "select public.bulk_change_contact_tags($1::uuid[], $2, $3) as n",
+        [contactIds.slice(i, i + CHUNK), mode, normalizedTag],
+      );
+      updated += Number(row.n ?? 0);
+    } catch (error) {
+      console.error("[bulkChangeTags] failed:", error instanceof Error ? error.message : error);
       return {
-        error: isMissingFunction(error.message)
+        error: isMissingFunction(error)
           ? MIGRATION_HINT
           : updated > 0
           ? `Stopped part-way: ${updated} contacts were changed before an error. Please try again for the rest.`
           : "The tags could not be changed. Please try again.",
       };
     }
-    updated += Number(data ?? 0);
   }
 
   revalidatePath("/contacts");
@@ -135,23 +137,19 @@ function isValidDate(value: string) {
 }
 
 async function planUpdate(
-  supabase: NonNullable<Awaited<ReturnType<typeof requireActionAuth>>["supabase"]>,
   rows: ContactUpdateRow[],
   tagMode: TagUpdateMode,
 ): Promise<{ preview: ContactUpdatePreview; items: UpdateItem[] } | { error: string }> {
   let existing: ExistingContact[];
   try {
-    existing = await fetchAllPages<ExistingContact>((from, to) =>
-      supabase
-        .from("contacts")
-        .select("id, name, phone, email, company, notes, date_saved, tags")
-        .is("deleted_at", null)
-        .order("id", { ascending: true })
-        .range(from, to) as unknown as PromiseLike<{ data: ExistingContact[] | null; error: { message: string } | null }>,
+    existing = await db.query<ExistingContact>(
+      `select id, name, phone, email, company, notes, date_saved, tags
+         from public.contacts
+        where deleted_at is null
+        order by id asc`,
     );
   } catch (err) {
-    const message = err instanceof Error ? err.message : "";
-    return { error: isMissingFunction(message) ? MIGRATION_HINT : "The contacts could not be loaded." };
+    return { error: isMissingFunction(err) ? MIGRATION_HINT : "The contacts could not be loaded." };
   }
 
   const byPhone = new Map<string, ExistingContact>();
@@ -289,7 +287,7 @@ export async function previewContactUpdate(
   if (!Array.isArray(rows) || rows.length === 0) return { error: "The file has no rows." };
   if (rows.length > 20000) return { error: "That file is too large. Please split it into smaller files." };
 
-  const plan = await planUpdate(supabase, rows, tagMode === "replace" ? "replace" : "add");
+  const plan = await planUpdate(rows, tagMode === "replace" ? "replace" : "add");
   if ("error" in plan) return plan;
   return { preview: plan.preview };
 }
@@ -304,23 +302,26 @@ export async function applyContactUpdate(
   if (!Array.isArray(rows) || rows.length === 0) return { error: "The file has no rows." };
   if (rows.length > 20000) return { error: "That file is too large. Please split it into smaller files." };
 
-  const plan = await planUpdate(supabase, rows, tagMode === "replace" ? "replace" : "add");
+  const plan = await planUpdate(rows, tagMode === "replace" ? "replace" : "add");
   if ("error" in plan) return plan;
 
   let updated = 0;
   for (let i = 0; i < plan.items.length; i += CHUNK) {
-    const { data, error } = await supabase.rpc("bulk_update_contacts", { p_rows: plan.items.slice(i, i + CHUNK) });
-    if (error) {
-      console.error("[applyContactUpdate] failed:", error.message);
+    try {
+      const row = await db.one<{ n: number | null }>("select public.bulk_update_contacts($1::jsonb) as n", [
+        JSON.stringify(plan.items.slice(i, i + CHUNK)),
+      ]);
+      updated += Number(row.n ?? 0);
+    } catch (error) {
+      console.error("[applyContactUpdate] failed:", error instanceof Error ? error.message : error);
       return {
-        error: isMissingFunction(error.message)
+        error: isMissingFunction(error)
           ? MIGRATION_HINT
           : updated > 0
           ? `Stopped part-way: ${updated} contacts were updated before an error. Upload the file again; contacts already updated will show as unchanged.`
           : "The contacts could not be updated. Please try again.",
       };
     }
-    updated += Number(data ?? 0);
   }
 
   revalidatePath("/contacts");

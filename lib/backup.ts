@@ -1,8 +1,8 @@
 import { gzipSync } from "node:zlib";
-import type { SupabaseClient } from "@supabase/supabase-js";
-import { fetchAllPages } from "@/lib/supabase-pagination";
+import { db } from "@/lib/db";
+import { createServiceRoleClient } from "@/lib/supabase-service";
 
-// Each table is paged in a stable order so no rows are skipped or repeated.
+// Each table is read in a stable order.
 const BACKUP_TABLES: Array<{ table: string; orderBy: string[]; optional?: boolean }> = [
   { table: "contacts", orderBy: ["id"] },
   { table: "groups", orderBy: ["id"] },
@@ -27,17 +27,12 @@ export interface CrmBackup {
 }
 
 /** Every CRM table, including soft-deleted rows. Throws if a required table fails. */
-export async function buildCrmBackup(supabase: SupabaseClient): Promise<CrmBackup> {
+export async function buildCrmBackup(): Promise<CrmBackup> {
   const data: Record<string, unknown[]> = {};
   for (const { table, orderBy, optional } of BACKUP_TABLES) {
     try {
-      data[table] = await fetchAllPages<Record<string, unknown>>((from, to) => {
-        let query = supabase.from(table).select("*");
-        for (const column of orderBy) {
-          query = query.order(column, { ascending: true });
-        }
-        return query.range(from, to);
-      });
+      // Table and column names come from the fixed list above, never from user input.
+      data[table] = await db.query(`select * from public.${table} order by ${orderBy.join(", ")}`);
     } catch (err) {
       if (!optional) throw err;
     }
@@ -54,12 +49,13 @@ export async function buildCrmBackup(supabase: SupabaseClient): Promise<CrmBacku
  * (created on first use) and deletes backups older than the retention period.
  * Needs the service-role client.
  */
-export async function saveDailyBackup(supabase: SupabaseClient): Promise<{
+export async function saveDailyBackup(): Promise<{
   path: string;
   bytes: number;
   counts: Record<string, number>;
   removed: number;
 }> {
+  const supabase = createServiceRoleClient();
   // Private bucket: backups hold all CRM data, so never public.
   const { data: bucket } = await supabase.storage.getBucket(BACKUP_BUCKET);
   if (!bucket) {
@@ -71,7 +67,7 @@ export async function saveDailyBackup(supabase: SupabaseClient): Promise<{
     throw new Error('The "backups" storage bucket is public. Make it private in Supabase first.');
   }
 
-  const backup = await buildCrmBackup(supabase);
+  const backup = await buildCrmBackup();
   const compressed = gzipSync(Buffer.from(JSON.stringify(backup)));
   const path = `crest-crm-backup-${backup.exportedAt.slice(0, 10)}.json.gz`;
 

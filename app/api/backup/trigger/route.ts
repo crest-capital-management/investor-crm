@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { safeEqual } from "@/lib/secure-compare";
-import { createServiceRoleClient } from "@/lib/supabase-service";
 import { saveDailyBackup } from "@/lib/backup";
 
 /** Nightly backup, called by netlify/functions/daily-backup.mts. */
@@ -18,7 +17,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await saveDailyBackup(createServiceRoleClient());
+    const result = await saveDailyBackup();
     return NextResponse.json({ success: true, ...result });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Backup failed";

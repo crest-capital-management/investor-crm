@@ -75,10 +75,10 @@ function formatDateTime(dateStr: string | null | undefined) {
 }
 
 export default async function MyProfilePage() {
-  const { user, supabase } = await requireAuth();
+  const { user } = await requireAuth();
 
   const profile = extractProfileDetails(user);
-  const settings = await getAppSettings(supabase);
+  const settings = await getAppSettings();
 
   return (
     <div className="flex min-h-0 flex-col p-4 sm:p-6 lg:p-8">

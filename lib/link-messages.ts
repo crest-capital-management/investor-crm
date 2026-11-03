@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { db } from "@/lib/db";
 import { normalizeToLocalPhone } from "@/lib/whatsapp";
 
 /**
@@ -7,7 +7,6 @@ import { normalizeToLocalPhone } from "@/lib/whatsapp";
  * Never throws: a failure here must not break adding or importing contacts.
  */
 export async function linkUnmatchedMessages(
-  supabase: SupabaseClient,
   contacts: Array<{ id: string; phone: string | null }>,
 ): Promise<void> {
   try {
@@ -19,19 +18,16 @@ export async function linkUnmatchedMessages(
     const phones = [...idByPhone.keys()];
 
     for (let i = 0; i < phones.length; i += 200) {
-      const { data, error } = await supabase
-        .from("whatsapp_messages")
-        .select("phone")
-        .is("contact_id", null)
-        .in("phone", phones.slice(i, i + 200));
-      if (error || !data) continue;
+      const data = await db.query<{ phone: string }>(
+        "select phone from whatsapp_messages where contact_id is null and phone = any($1::text[])",
+        [phones.slice(i, i + 200)],
+      );
 
-      for (const phone of new Set(data.map((row) => row.phone as string))) {
-        await supabase
-          .from("whatsapp_messages")
-          .update({ contact_id: idByPhone.get(phone) })
-          .is("contact_id", null)
-          .eq("phone", phone);
+      for (const phone of new Set(data.map((row) => row.phone))) {
+        await db.execute(
+          "update whatsapp_messages set contact_id = $1 where contact_id is null and phone = $2",
+          [idByPhone.get(phone), phone],
+        );
       }
     }
   } catch (err) {

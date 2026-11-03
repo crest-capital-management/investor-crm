@@ -19,11 +19,14 @@ types.setTypeParser(types.builtins.INT8, (value) => Number(value));
 types.setTypeParser(types.builtins.NUMERIC, (value) => Number(value));
 
 function createPool(): Pool {
-  const raw = process.env.DATABASE_URL;
-  if (!raw) throw new Error("DATABASE_URL is not configured.");
+  const raw = process.env.AZURE_CONNECTION_STRING ?? process.env.DATABASE_URL;
+  if (!raw) throw new Error("AZURE_CONNECTION_STRING is not configured.");
+
+  // Accept driver-style schemes such as "postgresql+asyncpg://" (pg only needs "postgresql://").
+  const normalised = raw.trim().replace(/^postgres(?:ql)?(?:\+\w+)?:\/\//i, "postgresql://");
 
   // The ssl setting below decides the encryption, so drop sslmode from the URL to avoid two sources of truth.
-  const url = new URL(raw);
+  const url = new URL(normalised);
   const sslMode = url.searchParams.get("sslmode");
   url.searchParams.delete("sslmode");
   const isLocal = ["localhost", "127.0.0.1", "::1"].includes(url.hostname);

@@ -1,12 +1,10 @@
 import { revalidatePath } from "next/cache";
-import type { SupabaseClient } from "@supabase/supabase-js";
-import { createServiceRoleClient } from "@/lib/supabase-service";
+import { db } from "@/lib/db";
 import {
   normalizePhoneForWhatsApp,
   sendWhatsAppMessage,
   sendWhatsAppTemplateMessage,
 } from "@/lib/whatsapp";
-import { fetchAllPages } from "@/lib/supabase-pagination";
 import { insertOutboundMessage } from "@/lib/message-status";
 
 export interface BroadcastSendResult {
@@ -37,30 +35,22 @@ const REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
  * delivers free-form text to them; to anyone else it is silently dropped.
  * Returns null if the lookup fails, so sending isn't blocked by a CRM error.
  */
-async function contactsWithOpenReplyWindow(
-  supabase: SupabaseClient,
-  contactIds: string[],
-): Promise<Set<string> | null> {
+async function contactsWithOpenReplyWindow(contactIds: string[]): Promise<Set<string> | null> {
   const since = new Date(Date.now() - REPLY_WINDOW_MS).toISOString();
-  const open = new Set<string>();
   try {
-    for (let i = 0; i < contactIds.length; i += 200) {
-      const rows = await fetchAllPages<{ contact_id: string }>((from, to) =>
-        supabase
-          .from("whatsapp_messages")
-          .select("contact_id")
-          .in("contact_id", contactIds.slice(i, i + 200))
-          .eq("direction", "in")
-          .is("deleted_at", null)
-          .gte("sent_at", since)
-          .range(from, to)
-      );
-      for (const row of rows) open.add(row.contact_id);
-    }
+    const rows = await db.query<{ contact_id: string }>(
+      `select distinct contact_id
+         from whatsapp_messages
+        where contact_id = any($1::uuid[])
+          and direction = 'in'
+          and deleted_at is null
+          and sent_at >= $2`,
+      [contactIds, since],
+    );
+    return new Set(rows.map((row) => row.contact_id));
   } catch {
     return null;
   }
-  return open;
 }
 
 type SupportedContactField = "first_name" | "name" | "phone" | "email";
@@ -294,17 +284,28 @@ interface PreparedBroadcast {
 
 /** Loads a broadcast and checks its template and variable mappings. */
 async function prepareBroadcast(
-  supabase: SupabaseClient,
   broadcastId: string
 ): Promise<{ prepared?: PreparedBroadcast; error?: string }> {
-  const { data: broadcast, error: fetchError } = await supabase
-    .from("broadcasts")
-    .select("id, message_text, target_type, target_ids, template_id, variable_mappings")
-    .eq("id", broadcastId)
-    .is("deleted_at", null)
-    .maybeSingle();
+  let broadcast: {
+    id: string;
+    message_text: string;
+    target_type: string;
+    target_ids: string[] | null;
+    template_id: string | null;
+    variable_mappings: unknown;
+  } | null;
+  try {
+    broadcast = await db.maybeOne(
+      `select id, message_text, target_type, target_ids, template_id, variable_mappings
+         from broadcasts
+        where id = $1 and deleted_at is null`,
+      [broadcastId],
+    );
+  } catch {
+    broadcast = null;
+  }
 
-  if (fetchError || !broadcast) {
+  if (!broadcast) {
     return { error: "Broadcast not found." };
   }
 
@@ -313,14 +314,26 @@ async function prepareBroadcast(
   let metaTemplate: PreparedBroadcast["metaTemplate"] = null;
 
   if (broadcast.template_id) {
-    const { data: tmpl, error: tmplError } = await supabase
-      .from("templates")
-      .select("id, name, language, body_text, meta_template_id, approved_at")
-      .eq("id", broadcast.template_id)
-      .is("deleted_at", null)
-      .maybeSingle();
+    let tmpl: {
+      id: string;
+      name: string;
+      language: string;
+      body_text: string | null;
+      meta_template_id: string | null;
+      approved_at: string | null;
+    } | null;
+    try {
+      tmpl = await db.maybeOne(
+        `select id, name, language, body_text, meta_template_id, approved_at
+           from templates
+          where id = $1 and deleted_at is null`,
+        [broadcast.template_id],
+      );
+    } catch {
+      tmpl = null;
+    }
 
-    if (tmplError || !tmpl || !tmpl.body_text) {
+    if (!tmpl || !tmpl.body_text) {
       return { error: "Referenced template not found or is inactive." };
     }
 
@@ -356,52 +369,42 @@ async function prepareBroadcast(
 }
 
 /** The contacts a broadcast targets (group members, tagged or hand-picked). */
-async function resolveTargetContacts(
-  supabase: SupabaseClient,
-  prepared: PreparedBroadcast
-): Promise<TargetContact[]> {
+async function resolveTargetContacts(prepared: PreparedBroadcast): Promise<TargetContact[]> {
   if (prepared.targetType === "manual") {
-    return fetchAllPages<TargetContact>((from, to) =>
-      supabase
-        .from("contacts")
-        .select("id, name, phone, email")
-        .in("id", prepared.targetIds)
-        .is("deleted_at", null)
-        .range(from, to)
+    return db.query<TargetContact>(
+      `select id, name, phone, email
+         from contacts
+        where id = any($1::uuid[]) and deleted_at is null`,
+      [prepared.targetIds],
     );
   }
 
   if (prepared.targetType === "group") {
-    const relations = await fetchAllPages<{ contact_id: string; contacts: unknown }>((from, to) =>
-      supabase
-        .from("contact_groups")
-        .select("contact_id, contacts(id, name, phone, email, deleted_at)")
-        .in("group_id", prepared.targetIds)
-        .range(from, to)
+    // A contact in several of the groups is listed once.
+    return db.query<TargetContact>(
+      `select distinct on (c.id) c.id, c.name, c.phone, c.email
+         from contact_groups cg
+         join contacts c on c.id = cg.contact_id
+        where cg.group_id = any($1::uuid[]) and c.deleted_at is null
+        order by c.id`,
+      [prepared.targetIds],
     );
-    const contactMap = new Map<string, TargetContact>();
-    for (const rel of relations) {
-      const c = rel.contacts as (TargetContact & { deleted_at: string | null }) | null;
-      if (c && !c.deleted_at && !contactMap.has(c.id)) {
-        contactMap.set(c.id, { id: c.id, name: c.name, phone: c.phone, email: c.email ?? null });
-      }
-    }
-    return Array.from(contactMap.values());
   }
 
   if (prepared.targetType === "tag") {
-    return fetchAllPages<TargetContact>((from, to) =>
-      supabase
-        .from("contacts")
-        .select("id, name, phone, email")
-        .overlaps("tags", prepared.targetIds)
-        .is("deleted_at", null)
-        .range(from, to)
+    return db.query<TargetContact>(
+      `select id, name, phone, email
+         from contacts
+        where tags && $1::text[] and deleted_at is null`,
+      [prepared.targetIds],
     );
   }
 
   return [];
 }
+
+/** Recipients couldn't be recorded while starting a broadcast. */
+class PrepareRecipientsError extends Error {}
 
 /**
  * Starts sending a broadcast: checks it, moves it from `fromStatus` to
@@ -409,16 +412,15 @@ async function resolveTargetContacts(
  * every recipient as pending. Messages are then sent by processBroadcast.
  */
 export async function startBroadcast(
-  supabase: SupabaseClient,
   broadcastId: string,
   fromStatus: "draft" | "scheduled"
 ): Promise<{ error?: string }> {
-  const { prepared, error } = await prepareBroadcast(supabase, broadcastId);
+  const { prepared, error } = await prepareBroadcast(broadcastId);
   if (!prepared) return { error: error ?? "Broadcast not found." };
 
   let contacts: TargetContact[];
   try {
-    contacts = await resolveTargetContacts(supabase, prepared);
+    contacts = await resolveTargetContacts(prepared);
   } catch {
     return { error: "Failed to resolve recipient contacts." };
   }
@@ -426,36 +428,51 @@ export async function startBroadcast(
     return { error: "No active recipient contacts found for this target." };
   }
 
-  const { data: claimed, error: claimError } = await supabase
-    .from("broadcasts")
-    .update({ status: "sending" })
-    .eq("id", broadcastId)
-    .eq("status", fromStatus)
-    .select("id");
-  if (claimError) {
-    return { error: claimError.message || "Could not start the broadcast." };
-  }
-  if (!claimed || claimed.length === 0) {
-    return { error: "This broadcast is already being sent or has been sent." };
-  }
+  // The status change and the recipients are saved together: if the recipients
+  // can't be recorded nothing has been sent, and the broadcast stays as it was.
+  let alreadyStarted = false;
+  try {
+    await db.tx(async (tx) => {
+      const claimed = await tx.query<{ id: string }>(
+        `update broadcasts set status = 'sending'
+          where id = $1 and status = $2
+          returning id`,
+        [broadcastId, fromStatus],
+      );
+      if (claimed.length === 0) {
+        alreadyStarted = true;
+        return;
+      }
 
-  for (let i = 0; i < contacts.length; i += 500) {
-    const rows = contacts.slice(i, i + 500).map((c) => ({
-      broadcast_id: broadcastId,
-      contact_id: c.id,
-      name: c.name,
-      phone: c.phone,
-      email: c.email ?? null,
-    }));
-    const { error: insertError } = await supabase
-      .from("broadcast_recipients")
-      .upsert(rows, { onConflict: "broadcast_id,contact_id", ignoreDuplicates: true });
-    if (insertError) {
-      // Nothing has been sent yet: undo, so the broadcast can be tried again.
-      await supabase.from("broadcast_recipients").delete().eq("broadcast_id", broadcastId);
-      await supabase.from("broadcasts").update({ status: fromStatus }).eq("id", broadcastId);
-      return { error: `Could not prepare the recipients: ${insertError.message}` };
+      for (let i = 0; i < contacts.length; i += 500) {
+        const rows = contacts.slice(i, i + 500).map((c) => ({
+          contact_id: c.id,
+          name: c.name,
+          phone: c.phone,
+          email: c.email ?? null,
+        }));
+        try {
+          await tx.execute(
+            `insert into broadcast_recipients (broadcast_id, contact_id, name, phone, email)
+             select $1::uuid, x.contact_id, x.name, x.phone, x.email
+               from jsonb_to_recordset($2::jsonb)
+                    as x(contact_id uuid, name text, phone text, email text)
+             on conflict (broadcast_id, contact_id) do nothing`,
+            [broadcastId, JSON.stringify(rows)],
+          );
+        } catch (err: unknown) {
+          throw new PrepareRecipientsError(err instanceof Error ? err.message : "");
+        }
+      }
+    });
+  } catch (err: unknown) {
+    if (err instanceof PrepareRecipientsError) {
+      return { error: `Could not prepare the recipients: ${err.message}` };
     }
+    return { error: (err instanceof Error && err.message) || "Could not start the broadcast." };
+  }
+  if (alreadyStarted) {
+    return { error: "This broadcast is already being sent or has been sent." };
   }
 
   revalidatePath("/broadcasts");
@@ -464,7 +481,6 @@ export async function startBroadcast(
 
 /** Sends to one recipient and records the outcome on its row. */
 async function sendToRecipient(
-  supabase: SupabaseClient,
   prepared: PreparedBroadcast,
   recipient: RecipientRow,
   openWindowIds: Set<string> | null
@@ -474,21 +490,32 @@ async function sendToRecipient(
     error: string | null = null,
     wamid?: string
   ) => {
-    const fields = {
-      status,
-      error,
-      sent_at: status === "sent" ? new Date().toISOString() : null,
-    };
-    const result = await supabase
-      .from("broadcast_recipients")
-      .update(wamid ? { ...fields, wamid } : fields)
-      .eq("id", recipient.id);
-    // Until the add_wamid_to_broadcast_recipients migration is run, the column
-    // doesn't exist; record the outcome without it rather than losing it.
-    if (result.error && wamid && /wamid/i.test(result.error.message)) {
-      return supabase.from("broadcast_recipients").update(fields).eq("id", recipient.id);
+    const sentAt = status === "sent" ? new Date().toISOString() : null;
+    try {
+      if (wamid) {
+        try {
+          await db.execute(
+            `update broadcast_recipients
+                set status = $2, error = $3, sent_at = $4, wamid = $5
+              where id = $1`,
+            [recipient.id, status, error, sentAt, wamid],
+          );
+          return;
+        } catch (err: unknown) {
+          // Until the add_wamid_to_broadcast_recipients migration is run, the column
+          // doesn't exist; record the outcome without it rather than losing it.
+          if (!(err instanceof Error && /wamid/i.test(err.message))) throw err;
+        }
+      }
+      await db.execute(
+        `update broadcast_recipients
+            set status = $2, error = $3, sent_at = $4
+          where id = $1`,
+        [recipient.id, status, error, sentAt],
+      );
+    } catch (err: unknown) {
+      console.error("[broadcast] Could not record the outcome for a recipient:", err);
     }
-    return result;
   };
 
   // Plain text only reaches contacts inside their 24-hour reply window.
@@ -548,7 +575,6 @@ async function sendToRecipient(
   // a logging failure doesn't count against the recipient.
   if (recipient.contact_id) {
     const { error: logError } = await insertOutboundMessage(
-      supabase,
       { contact_id: recipient.contact_id, message_text: messageToSend },
       wamid,
     );
@@ -558,29 +584,21 @@ async function sendToRecipient(
   }
 }
 
-async function countRecipients(
-  supabase: SupabaseClient,
-  broadcastId: string,
-  status: string
-): Promise<number> {
-  const { count } = await supabase
-    .from("broadcast_recipients")
-    .select("id", { count: "exact", head: true })
-    .eq("broadcast_id", broadcastId)
-    .eq("status", status);
-  return count ?? 0;
-}
-
 /** Current counts; marks the broadcast sent (with its summary) once all are done. */
-async function finalizeIfDone(
-  supabase: SupabaseClient,
-  broadcastId: string
-): Promise<BroadcastProgress> {
-  const [pending, sending, sent, skipped, failed] = await Promise.all(
-    ["pending", "sending", "sent", "skipped", "failed"].map((status) =>
-      countRecipients(supabase, broadcastId, status)
-    )
+async function finalizeIfDone(broadcastId: string): Promise<BroadcastProgress> {
+  const countRows = await db.query<{ status: string; n: number }>(
+    `select status, count(*)::int as n
+       from broadcast_recipients
+      where broadcast_id = $1
+      group by status`,
+    [broadcastId],
   );
+  const countOf = (status: string) => countRows.find((r) => r.status === status)?.n ?? 0;
+  const pending = countOf("pending");
+  const sending = countOf("sending");
+  const sent = countOf("sent");
+  const skipped = countOf("skipped");
+  const failed = countOf("failed");
   const remaining = pending + sending;
   const progress: BroadcastProgress = {
     total: remaining + sent + skipped + failed,
@@ -592,21 +610,21 @@ async function finalizeIfDone(
   };
   if (!progress.done) return progress;
 
-  const [{ data: skippedRows }, { data: failedRows }] = await Promise.all([
-    supabase
-      .from("broadcast_recipients")
-      .select("name")
-      .eq("broadcast_id", broadcastId)
-      .eq("status", "skipped")
-      .order("name")
-      .limit(100),
-    supabase
-      .from("broadcast_recipients")
-      .select("name, error")
-      .eq("broadcast_id", broadcastId)
-      .eq("status", "failed")
-      .order("name")
-      .limit(100),
+  const [skippedRows, failedRows] = await Promise.all([
+    db.query<{ name: string | null }>(
+      `select name from broadcast_recipients
+        where broadcast_id = $1 and status = 'skipped'
+        order by name
+        limit 100`,
+      [broadcastId],
+    ),
+    db.query<{ name: string | null; error: string | null }>(
+      `select name, error from broadcast_recipients
+        where broadcast_id = $1 and status = 'failed'
+        order by name
+        limit 100`,
+      [broadcastId],
+    ),
   ]);
 
   const summary: BroadcastSendSummary = {
@@ -614,18 +632,19 @@ async function finalizeIfDone(
     sent,
     skipped,
     failed,
-    skipped_names: (skippedRows ?? []).map((r) => r.name ?? "Unknown"),
-    failures: (failedRows ?? []).map((r) => ({
+    skipped_names: skippedRows.map((r) => r.name ?? "Unknown"),
+    failures: failedRows.map((r) => ({
       name: r.name ?? "Unknown",
       error: r.error ?? "Unknown error",
     })),
   };
 
-  await supabase
-    .from("broadcasts")
-    .update({ status: "sent", sent_at: new Date().toISOString(), send_summary: summary })
-    .eq("id", broadcastId)
-    .eq("status", "sending");
+  await db.execute(
+    `update broadcasts
+        set status = 'sent', sent_at = $2, send_summary = $3::jsonb
+      where id = $1 and status = 'sending'`,
+    [broadcastId, new Date().toISOString(), JSON.stringify(summary)],
+  );
 
   revalidatePath("/broadcasts");
   revalidatePath(`/broadcasts/${broadcastId}`);
@@ -638,7 +657,6 @@ async function finalizeIfDone(
  * places at once: each recipient is claimed by exactly one caller.
  */
 export async function processBroadcast(
-  supabase: SupabaseClient,
   broadcastId: string,
   budgetMs: number
 ): Promise<BroadcastProgress> {
@@ -646,43 +664,45 @@ export async function processBroadcast(
 
   // A recipient left "sending" by a run that was cut off may or may not have
   // received the message; never resend, record it as failed instead.
-  await supabase
-    .from("broadcast_recipients")
-    .update({
-      status: "failed",
-      error: "Interrupted while sending; it may or may not have been delivered.",
-    })
-    .eq("broadcast_id", broadcastId)
-    .eq("status", "sending")
-    .lt("claimed_at", new Date(Date.now() - STALE_SENDING_MS).toISOString());
+  await db.execute(
+    `update broadcast_recipients
+        set status = 'failed',
+            error = 'Interrupted while sending; it may or may not have been delivered.'
+      where broadcast_id = $1 and status = 'sending' and claimed_at < $2`,
+    [broadcastId, new Date(Date.now() - STALE_SENDING_MS).toISOString()],
+  );
 
-  const { prepared, error } = await prepareBroadcast(supabase, broadcastId);
+  const { prepared, error } = await prepareBroadcast(broadcastId);
   if (!prepared) {
     // E.g. its template was deleted mid-send: the rest can't be sent.
-    await supabase
-      .from("broadcast_recipients")
-      .update({ status: "failed", error: error ?? "Broadcast could not be sent." })
-      .eq("broadcast_id", broadcastId)
-      .eq("status", "pending");
-    return finalizeIfDone(supabase, broadcastId);
+    await db.execute(
+      `update broadcast_recipients
+          set status = 'failed', error = $2
+        where broadcast_id = $1 and status = 'pending'`,
+      [broadcastId, error ?? "Broadcast could not be sent."],
+    );
+    return finalizeIfDone(broadcastId);
   }
 
   while (Date.now() < deadline) {
-    const { data: batch, error: claimError } = await supabase.rpc("claim_broadcast_recipients", {
-      p_broadcast_id: broadcastId,
-      p_limit: BATCH_SIZE,
-    });
-    if (claimError) {
-      console.error("[broadcast] Could not claim recipients:", claimError.message);
+    let recipients: RecipientRow[];
+    try {
+      recipients = await db.query<RecipientRow>(
+        "select * from public.claim_broadcast_recipients($1::uuid, $2::int)",
+        [broadcastId, BATCH_SIZE],
+      );
+    } catch (claimError: unknown) {
+      console.error(
+        "[broadcast] Could not claim recipients:",
+        claimError instanceof Error ? claimError.message : claimError,
+      );
       break;
     }
-    const recipients = (batch ?? []) as RecipientRow[];
     if (recipients.length === 0) break;
 
     const openWindowIds = prepared.metaTemplate
       ? null
       : await contactsWithOpenReplyWindow(
-          supabase,
           recipients.map((r) => r.contact_id).filter((id): id is string => Boolean(id))
         );
 
@@ -690,40 +710,40 @@ export async function processBroadcast(
       await Promise.all(
         recipients
           .slice(i, i + CONCURRENCY)
-          .map((r) => sendToRecipient(supabase, prepared, r, openWindowIds))
+          .map((r) => sendToRecipient(prepared, r, openWindowIds))
       );
     }
   }
 
-  return finalizeIfDone(supabase, broadcastId);
+  return finalizeIfDone(broadcastId);
 }
 
 /** Starts a draft broadcast (if not already started) and sends as much as fits in one request. */
-export async function sendBroadcastBatch(
-  supabase: SupabaseClient,
-  broadcastId: string
-): Promise<SendBroadcastResult> {
+export async function sendBroadcastBatch(broadcastId: string): Promise<SendBroadcastResult> {
   if (!broadcastId) return { error: "Broadcast ID is required." };
 
-  const { data: broadcast } = await supabase
-    .from("broadcasts")
-    .select("status")
-    .eq("id", broadcastId)
-    .is("deleted_at", null)
-    .maybeSingle();
-  if (!broadcast) return { error: "Broadcast not found." };
-  if (broadcast.status === "sent") return { error: "This broadcast has already been sent." };
-  if (broadcast.status === "scheduled") {
-    return { error: "This broadcast is scheduled. Edit it to send it now instead." };
-  }
+  try {
+    const broadcast = await db.maybeOne<{ status: string }>(
+      "select status from broadcasts where id = $1 and deleted_at is null",
+      [broadcastId],
+    );
+    if (!broadcast) return { error: "Broadcast not found." };
+    if (broadcast.status === "sent") return { error: "This broadcast has already been sent." };
+    if (broadcast.status === "scheduled") {
+      return { error: "This broadcast is scheduled. Edit it to send it now instead." };
+    }
 
-  if (broadcast.status === "draft") {
-    const started = await startBroadcast(supabase, broadcastId, "draft");
-    if (started.error) return { error: started.error };
-  }
+    if (broadcast.status === "draft") {
+      const started = await startBroadcast(broadcastId, "draft");
+      if (started.error) return { error: started.error };
+    }
 
-  const progress = await processBroadcast(supabase, broadcastId, SEND_NOW_BUDGET_MS);
-  return { success: true, ...progress };
+    const progress = await processBroadcast(broadcastId, SEND_NOW_BUDGET_MS);
+    return { success: true, ...progress };
+  } catch (err: unknown) {
+    console.error("[broadcast] Send failed:", err);
+    return { error: "Could not send the broadcast." };
+  }
 }
 
 /**
@@ -733,46 +753,53 @@ export async function sendBroadcastBatch(
  * delivered), are left alone so nobody gets the message twice.
  */
 export async function retryFailedBroadcastRecipients(
-  supabase: SupabaseClient,
   broadcastId: string
 ): Promise<SendBroadcastResult> {
   if (!broadcastId) return { error: "Broadcast ID is required." };
 
-  const { data: broadcast } = await supabase
-    .from("broadcasts")
-    .select("status")
-    .eq("id", broadcastId)
-    .is("deleted_at", null)
-    .maybeSingle();
-  if (!broadcast) return { error: "Broadcast not found." };
+  try {
+    const broadcast = await db.maybeOne<{ status: string }>(
+      "select status from broadcasts where id = $1 and deleted_at is null",
+      [broadcastId],
+    );
+    if (!broadcast) return { error: "Broadcast not found." };
 
-  if (broadcast.status === "sent") {
-    const { data: requeued, error: requeueError } = await supabase
-      .from("broadcast_recipients")
-      .update({ status: "pending", error: null, claimed_at: null, sent_at: null })
-      .eq("broadcast_id", broadcastId)
-      .eq("status", "failed")
-      .not("error", "ilike", "Invalid phone%")
-      .not("error", "ilike", "Interrupted%")
-      .select("id");
-    if (requeueError) return { error: "Could not prepare the retry." };
-    if (!requeued || requeued.length === 0) {
-      return {
-        error:
-          "Nothing can be retried: the failed recipients have an invalid number, or their message may already have been delivered.",
-      };
+    if (broadcast.status === "sent") {
+      let requeued: { id: string }[];
+      try {
+        requeued = await db.query<{ id: string }>(
+          `update broadcast_recipients
+              set status = 'pending', error = null, claimed_at = null, sent_at = null
+            where broadcast_id = $1
+              and status = 'failed'
+              and error not ilike 'Invalid phone%'
+              and error not ilike 'Interrupted%'
+            returning id`,
+          [broadcastId],
+        );
+      } catch {
+        return { error: "Could not prepare the retry." };
+      }
+      if (requeued.length === 0) {
+        return {
+          error:
+            "Nothing can be retried: the failed recipients have an invalid number, or their message may already have been delivered.",
+        };
+      }
+      await db.execute(
+        "update broadcasts set status = 'sending' where id = $1 and status = 'sent'",
+        [broadcastId],
+      );
+    } else if (broadcast.status !== "sending") {
+      return { error: "Only a broadcast that has been sent can be retried." };
     }
-    await supabase
-      .from("broadcasts")
-      .update({ status: "sending" })
-      .eq("id", broadcastId)
-      .eq("status", "sent");
-  } else if (broadcast.status !== "sending") {
-    return { error: "Only a broadcast that has been sent can be retried." };
-  }
 
-  const progress = await processBroadcast(supabase, broadcastId, SEND_NOW_BUDGET_MS);
-  return { success: true, ...progress };
+    const progress = await processBroadcast(broadcastId, SEND_NOW_BUDGET_MS);
+    return { success: true, ...progress };
+  } catch (err: unknown) {
+    console.error("[broadcast] Retry failed:", err);
+    return { error: "Could not retry the broadcast." };
+  }
 }
 
 export interface ProcessedBroadcastResult {
@@ -798,29 +825,28 @@ export interface DispatchDueBroadcastsSummary {
  * come, then continues every broadcast that is still sending.
  */
 export async function dispatchDueBroadcasts(): Promise<DispatchDueBroadcastsSummary> {
-  const supabase = createServiceRoleClient();
   const runDeadline = Date.now() + SCHEDULER_BUDGET_MS;
   const results: ProcessedBroadcastResult[] = [];
 
-  const { data: dueBroadcasts, error: fetchError } = await supabase
-    .from("broadcasts")
-    .select("id")
-    .eq("status", "scheduled")
-    .lte("scheduled_for", new Date().toISOString())
-    .is("deleted_at", null)
-    .order("scheduled_for", { ascending: true });
-
-  if (fetchError) {
+  let dueBroadcasts: { id: string }[];
+  try {
+    dueBroadcasts = await db.query<{ id: string }>(
+      `select id from broadcasts
+        where status = 'scheduled' and scheduled_for <= $1 and deleted_at is null
+        order by scheduled_for asc`,
+      [new Date().toISOString()],
+    );
+  } catch (fetchError: unknown) {
     return {
       success: false,
-      error: fetchError.message || "Failed to fetch due broadcasts",
+      error: (fetchError instanceof Error && fetchError.message) || "Failed to fetch due broadcasts",
       processedCount: 0,
       results: [],
     };
   }
 
-  for (const broadcast of dueBroadcasts ?? []) {
-    const started = await startBroadcast(supabase, broadcast.id, "scheduled");
+  for (const broadcast of dueBroadcasts) {
+    const started = await startBroadcast(broadcast.id, "scheduled");
     // Errors here happen before anything is sent; the broadcast stays
     // "scheduled" and a later run tries again.
     if (started.error) {
@@ -828,18 +854,20 @@ export async function dispatchDueBroadcasts(): Promise<DispatchDueBroadcastsSumm
     }
   }
 
-  const { data: sending } = await supabase
-    .from("broadcasts")
-    .select("id")
-    .eq("status", "sending")
-    .is("deleted_at", null)
-    .order("created_at", { ascending: true });
+  // A failed lookup here is treated as "nothing is sending".
+  const sending = await db
+    .query<{ id: string }>(
+      `select id from broadcasts
+        where status = 'sending' and deleted_at is null
+        order by created_at asc`,
+    )
+    .catch(() => [] as { id: string }[]);
 
-  for (const broadcast of sending ?? []) {
+  for (const broadcast of sending) {
     const budget = runDeadline - Date.now();
     if (budget <= DEADLINE_MARGIN_MS) break;
     try {
-      const progress = await processBroadcast(supabase, broadcast.id, budget);
+      const progress = await processBroadcast(broadcast.id, budget);
       results.push({
         broadcastId: broadcast.id,
         success: true,

@@ -58,7 +58,7 @@ export async function backUpNow(): Promise<{ success?: boolean; error?: string }
   const { error: authError } = await requireOwnerAction();
   if (authError) return { error: "Unauthorized" };
   try {
-    await saveDailyBackup(createServiceRoleClient());
+    await saveDailyBackup();
     return { success: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Backup failed." };

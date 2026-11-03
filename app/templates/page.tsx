@@ -6,7 +6,9 @@ import { PaginationControls } from "@/components/pagination-controls";
 import { TemplatesTable } from "@/components/templates-table";
 import { SyncMetaTemplatesButton } from "@/components/sync-meta-templates-button";
 import { Button } from "@/components/ui/button";
-import { getPageRange, getTotalPages, parsePage } from "@/lib/pagination";
+import { db } from "@/lib/db";
+import { PAGE_SIZE, getTotalPages, parsePage } from "@/lib/pagination";
+import { pageClause } from "@/lib/sql";
 
 export const metadata: Metadata = {
   title: "Templates",
@@ -18,29 +20,29 @@ export default async function TemplatesPage({
   searchParams: Promise<{ page?: string }>;
 }) {
   const requestedPage = parsePage((await searchParams).page);
-  const { supabase } = await requireAuthFast();
+  await requireAuthFast();
 
-  const { count, error: countError } = await supabase
-    .from("templates")
-    .select("id", { count: "exact", head: true })
-    .is("deleted_at", null);
+  let totalCount: number;
+  let page: number;
+  let templates: TemplateData[];
+  try {
+    const { count } = await db.one<{ count: number }>(
+      `select count(*)::int as count from public.templates where deleted_at is null`,
+    );
+    totalCount = count;
+    // Clamp so a stale or hand-typed ?page=999 shows the last page instead of erroring.
+    page = Math.min(requestedPage, getTotalPages(totalCount));
 
-  const totalCount = count ?? 0;
-  // Clamp so a stale or hand-typed ?page=999 shows the last page instead of erroring.
-  const page = Math.min(requestedPage, getTotalPages(totalCount));
-  const { from, to } = getPageRange(page);
-
-  const { data: templatesResult, error } = countError
-    ? { data: null, error: countError }
-    : await supabase
-        .from("templates")
-        .select("id, name, meta_template_id, variables, category, body_text, approved_at, created_at")
-        .is("deleted_at", null)
-        .order("created_at", { ascending: false })
-        .order("id", { ascending: true })
-        .range(from, to);
-
-  if (error) {
+    const params: unknown[] = [];
+    templates = await db.query<TemplateData>(
+      `select id, name, meta_template_id, variables, category, body_text, approved_at, created_at
+       from public.templates
+       where deleted_at is null
+       order by created_at desc, id asc
+       ${pageClause(params, page, PAGE_SIZE)}`,
+      params,
+    );
+  } catch {
     return (
       <div className="p-4 sm:p-6 lg:p-8">
         <h1 className="text-2xl font-semibold">Templates</h1>
@@ -48,8 +50,6 @@ export default async function TemplatesPage({
       </div>
     );
   }
-
-  const templates = (templatesResult ?? []) as TemplateData[];
 
   return (
     <div className="flex min-h-0 flex-col p-4 sm:p-6 lg:p-8">

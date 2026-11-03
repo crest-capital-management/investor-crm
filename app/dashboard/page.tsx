@@ -23,7 +23,7 @@ import {
 } from "@/components/dashboard-analytics";
 import { TAG_OPTIONS, isInvestorTag } from "@/lib/tags";
 import { SendTestReminderButton } from "@/components/send-test-reminder-button";
-import { fetchAllPages } from "@/lib/supabase-pagination";
+import { db } from "@/lib/db";
 
 export const metadata: Metadata = {
   title: "Dashboard",
@@ -135,7 +135,7 @@ function formatBannerDate(d: Date): string {
 }
 
 export default async function DashboardPage() {
-  const { supabase, user } = await requireAuth();
+  const { user } = await requireAuth();
   const now = new Date();
   const displayName = getUserDisplayName(user);
   const greeting = getGreeting(displayName, now);
@@ -170,85 +170,54 @@ export default async function DashboardPage() {
       completedTrend,
       allInteractions,
     ] = await Promise.all([
-      fetchAllPages<ContactItem>((from, to) =>
-        supabase.from("contacts").select("id, name, tags").is("deleted_at", null).range(from, to)
-      ),
+      db.query<ContactItem>(`select id, name, tags from public.contacts where deleted_at is null`),
       // Only the first 8 of each are shown, so fetch just those.
-      supabase
-        .from("follow_ups")
-        .select("id, contact_id, due_date, message, is_done, created_at")
-        .eq("is_done", false)
-        .is("deleted_at", null)
-        .order("due_date", { ascending: true })
-        .limit(8)
-        .then(({ data, error }) => {
-          if (error) throw new Error(error.message);
-          return (data ?? []) as FollowUpRecord[];
-        }),
-      supabase
-        .from("interactions")
-        .select("id, contact_id, type, note, created_at")
-        .is("deleted_at", null)
-        .order("created_at", { ascending: false })
-        .limit(8)
-        .then(({ data, error }) => {
-          if (error) throw new Error(error.message);
-          return (data ?? []) as InteractionRecord[];
-        }),
-      fetchAllPages<{ id: string; created_at: string }>((from, to) =>
-        supabase
-          .from("follow_ups")
-          .select("id, created_at")
-          .is("deleted_at", null)
-          .gte("created_at", eightWeeksAgoIso)
-          .range(from, to)
+      db.query<FollowUpRecord>(
+        `select id, contact_id, due_date, message, is_done, created_at
+         from public.follow_ups
+         where is_done = false and deleted_at is null
+         order by due_date asc
+         limit 8`,
       ),
-      fetchAllPages<{ id: string; created_at: string }>((from, to) =>
-        supabase
-          .from("interactions")
-          .select("id, created_at")
-          .eq("type", "follow_up")
-          .is("deleted_at", null)
-          .gte("created_at", eightWeeksAgoIso)
-          .range(from, to)
+      db.query<InteractionRecord>(
+        `select id, contact_id, type, note, created_at
+         from public.interactions
+         where deleted_at is null
+         order by created_at desc
+         limit 8`,
       ),
-      fetchAllPages<{ contact_id: string; created_at: string }>((from, to) =>
-        supabase
-          .from("interactions")
-          .select("contact_id, created_at")
-          .is("deleted_at", null)
-          .order("created_at", { ascending: false })
-          .range(from, to)
+      db.query<{ id: string; created_at: string }>(
+        `select id, created_at from public.follow_ups
+         where deleted_at is null and created_at >= $1`,
+        [eightWeeksAgoIso],
+      ),
+      db.query<{ id: string; created_at: string }>(
+        `select id, created_at from public.interactions
+         where type = 'follow_up' and deleted_at is null and created_at >= $1`,
+        [eightWeeksAgoIso],
+      ),
+      // Only each contact's latest interaction is used, so let the database pick it.
+      db.query<{ contact_id: string; created_at: string }>(
+        `select contact_id, max(created_at) as created_at
+         from public.interactions
+         where deleted_at is null and contact_id is not null
+         group by contact_id`,
       ),
     ]);
 
-    const [pendingCountResult, overdueCountResult, recentInteractionsCountResult] =
-      await Promise.all([
-        supabase
-          .from("follow_ups")
-          .select("id", { count: "exact", head: true })
-          .eq("is_done", false)
-          .is("deleted_at", null),
-        supabase
-          .from("follow_ups")
-          .select("id", { count: "exact", head: true })
-          .eq("is_done", false)
-          .is("deleted_at", null)
-          .lt("due_date", todayStr),
-        supabase
-          .from("interactions")
-          .select("id", { count: "exact", head: true })
-          .is("deleted_at", null)
-          .gte("created_at", thirtyDaysAgoIso),
-      ]);
+    const counts = await db.one<{ pending: number; overdue: number; recent: number }>(
+      `select
+         (select count(*)::int from public.follow_ups where is_done = false and deleted_at is null) as pending,
+         (select count(*)::int from public.follow_ups
+            where is_done = false and deleted_at is null and due_date < $1::date) as overdue,
+         (select count(*)::int from public.interactions
+            where deleted_at is null and created_at >= $2::timestamptz) as recent`,
+      [todayStr, thirtyDaysAgoIso],
+    );
 
-    if (pendingCountResult.error) throw new Error(pendingCountResult.error.message);
-    if (overdueCountResult.error) throw new Error(overdueCountResult.error.message);
-    if (recentInteractionsCountResult.error) throw new Error(recentInteractionsCountResult.error.message);
-
-    pendingCount = pendingCountResult.count ?? 0;
-    overdueCount = overdueCountResult.count ?? 0;
-    recentInteractionsCount = recentInteractionsCountResult.count ?? 0;
+    pendingCount = counts.pending;
+    overdueCount = counts.overdue;
+    recentInteractionsCount = counts.recent;
   } catch (err) {
     dashboardError = err instanceof Error ? err.message : "Dashboard data could not be loaded.";
   }

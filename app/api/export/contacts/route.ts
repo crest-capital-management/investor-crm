@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 
 import { createClient } from "@/src/lib/supabase/server";
-import { fetchAllPages } from "@/lib/supabase-pagination";
+import { db } from "@/lib/db";
+import { isOwnerId } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -18,12 +19,16 @@ type ContactExportRow = {
   contact_groups: Array<{ groups: { name: string } | Array<{ name: string }> | null }> | null;
 };
 
-const COLUMNS = "id, name, phone, email, company, tags, notes, date_saved, contact_groups(groups(name))";
+// Same shape PostgREST gave for contact_groups(groups(name)): [{ groups: { name } }].
+const COLUMNS = `c.id, c.name, c.phone, c.email, c.company, c.tags, c.notes, c.date_saved,
+  coalesce(
+    (select json_agg(json_build_object('groups', json_build_object('name', g.name)))
+       from contact_groups cg join groups g on g.id = cg.group_id
+      where cg.contact_id = c.id),
+    '[]'::json
+  ) as contact_groups`;
 const HEADER = ["Name", "Phone", "Email", "Company", "Tags", "Groups", "Notes", "Date Saved"];
-const ID_CHUNK = 150;
 const MAX_IDS = 20000;
-
-type Supabase = Awaited<ReturnType<typeof createClient>>;
 
 // Quotes the value for CSV and neutralises spreadsheet formulas (a cell that
 // starts with = + - @ would otherwise be executed when opened in Excel).
@@ -54,30 +59,19 @@ function toCells(contact: ContactExportRow): string[] {
 }
 
 /** All active contacts (A to Z), or just the given ones in the order given. */
-async function loadContacts(supabase: Supabase, ids: string[] | null): Promise<ContactExportRow[]> {
+async function loadContacts(ids: string[] | null): Promise<ContactExportRow[]> {
   if (!ids) {
-    return fetchAllPages<ContactExportRow>((from, to) =>
-      supabase
-        .from("contacts")
-        .select(COLUMNS)
-        .is("deleted_at", null)
-        .order("name", { ascending: true })
-        .order("id", { ascending: true })
-        .range(from, to)
-        .then((result) => ({ data: result.data as unknown as ContactExportRow[] | null, error: result.error }))
+    return db.query<ContactExportRow>(
+      `select ${COLUMNS} from contacts c where c.deleted_at is null order by c.name asc, c.id asc`,
     );
   }
 
+  const rows = await db.query<ContactExportRow>(
+    `select ${COLUMNS} from contacts c where c.id = any($1::uuid[]) and c.deleted_at is null`,
+    [ids],
+  );
   const byId = new Map<string, ContactExportRow>();
-  for (let i = 0; i < ids.length; i += ID_CHUNK) {
-    const { data, error } = await supabase
-      .from("contacts")
-      .select(COLUMNS)
-      .in("id", ids.slice(i, i + ID_CHUNK))
-      .is("deleted_at", null);
-    if (error) throw new Error(error.message);
-    for (const row of (data ?? []) as unknown as ContactExportRow[]) byId.set(row.id, row);
-  }
+  for (const row of rows) byId.set(row.id, row);
   return ids.map((id) => byId.get(id)).filter((row): row is ContactExportRow => Boolean(row));
 }
 
@@ -110,10 +104,10 @@ async function buildXlsx(contacts: ContactExportRow[]): Promise<Buffer> {
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 
-async function respond(supabase: Supabase, ids: string[] | null, format: "csv" | "xlsx", label: string) {
+async function respond(ids: string[] | null, format: "csv" | "xlsx", label: string) {
   let contacts: ContactExportRow[];
   try {
-    contacts = await loadContacts(supabase, ids);
+    contacts = await loadContacts(ids);
   } catch {
     return NextResponse.json({ error: "Contacts could not be exported." }, { status: 500 });
   }
@@ -140,8 +134,8 @@ export async function GET() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  return respond(supabase, null, "csv", "");
+  if (!user || !isOwnerId(user.id)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  return respond(null, "csv", "");
 }
 
 /**
@@ -154,7 +148,7 @@ export async function POST(request: Request) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!user || !isOwnerId(user.id)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   let body: { ids?: unknown; format?: unknown; label?: unknown };
   try {
@@ -174,5 +168,5 @@ export async function POST(request: Request) {
     if (ids.length > MAX_IDS) return NextResponse.json({ error: "Too many contacts selected." }, { status: 400 });
   }
   const label = body.label === "selected" ? "selected-" : body.label === "filtered" ? "filtered-" : "";
-  return respond(supabase, ids, format, label);
+  return respond(ids, format, label);
 }

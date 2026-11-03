@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { sendButtonAutoReply } from "@/lib/auto-reply";
 import crypto from "crypto";
-import { createServiceRoleClient } from "@/lib/supabase-service";
+import { db, isMissingSchemaError, isUniqueViolation } from "@/lib/db";
 import { safeEqual } from "@/lib/secure-compare";
 import { storeInboundWhatsAppMedia } from "@/lib/inbound-media";
 import { applyDeliveryStatus, describeDeliveryError } from "@/lib/message-status";
@@ -367,7 +367,7 @@ async function processStatusUpdate(statusUpdate: MetaStatusUpdate) {
         firstError.error_data?.details,
       )
     : null;
-  await applyDeliveryStatus(createServiceRoleClient(), messageId, status, errorText, reportedAt);
+  await applyDeliveryStatus(messageId, status, errorText, reportedAt);
   return {
     success: true,
     messageId,
@@ -401,11 +401,7 @@ async function processSingleMessage({
     return;
   }
 
-  // The webhook has no signed-in user, so it needs the server-only service
-  // client. With the public anon key, row-level security hides every contact
-  // (so no message could be matched to one) and would have to be loosened for
-  // anyone on the internet to read the chat history.
-  const supabase = createServiceRoleClient();
+  // The webhook has no signed-in user; it talks to the database directly.
 
   // Extract message content & media info safely without assuming text
   let messageText: string | null = null;
@@ -473,47 +469,41 @@ async function processSingleMessage({
     );
 
     if (candidates.length > 0) {
-      const orFilter = candidates.map((p) => `phone.eq.${p}`).join(",");
-      const { data: contacts, error: contactLookupError } = await supabase
-        .from("contacts")
-        .select("id, phone")
-        .is("deleted_at", null)
-        .or(orFilter)
-        .limit(1);
-
-      if (!contactLookupError && contacts && contacts.length > 0) {
-        contactId = contacts[0].id;
+      try {
+        const contact = await db.maybeOne<{ id: string }>(
+          "select id from contacts where deleted_at is null and phone = any($1::text[]) limit 1",
+          [candidates],
+        );
+        if (contact) contactId = contact.id;
+      } catch {
+        // A failed lookup leaves the message unlinked, as before.
       }
     }
   }
 
   // Database-level deduplication. WhatsApp gives every message a unique ID, so
   // that is the check. Only a message without an ID falls back to comparing content.
-  if (messageId) {
-    const { data: sameId, error: sameIdError } = await supabase
-      .from("whatsapp_messages")
-      .select("id")
-      .eq("wamid", messageId)
-      .limit(1);
-    if (!sameIdError && sameId && sameId.length > 0) {
-      return; // already saved
+  try {
+    if (messageId) {
+      const sameId = await db.maybeOne<{ id: string }>(
+        "select id from whatsapp_messages where wamid = $1 limit 1",
+        [messageId],
+      );
+      if (sameId) return; // already saved
+    } else {
+      const existing = await db.maybeOne<{ id: string }>(
+        `select id from whatsapp_messages
+          where direction = $1 and sent_at = $2::timestamptz and deleted_at is null
+            and contact_id is not distinct from $3::uuid
+            and message_text is not distinct from $4::text
+            and media_url is not distinct from $5::text
+          limit 1`,
+        [direction, sentAt, contactId, messageText, mediaUrl],
+      );
+      if (existing) return; // already saved
     }
-  } else {
-    let dupeQuery = supabase
-      .from("whatsapp_messages")
-      .select("id")
-      .eq("direction", direction)
-      .eq("sent_at", sentAt)
-      .is("deleted_at", null);
-
-    dupeQuery = contactId ? dupeQuery.eq("contact_id", contactId) : dupeQuery.is("contact_id", null);
-    dupeQuery = messageText !== null ? dupeQuery.eq("message_text", messageText) : dupeQuery.is("message_text", null);
-    dupeQuery = mediaUrl !== null ? dupeQuery.eq("media_url", mediaUrl) : dupeQuery.is("media_url", null);
-
-    const { data: existingRecords, error: dupeError } = await dupeQuery.limit(1);
-    if (!dupeError && existingRecords && existingRecords.length > 0) {
-      return; // already saved
-    }
+  } catch {
+    // A failed duplicate check falls through to the insert, as before.
   }
 
   // Insert into whatsapp_messages. The number is kept so a message from an
@@ -530,12 +520,27 @@ async function processSingleMessage({
     wamid: messageId ?? null,
   };
   let current: Record<string, unknown> = row;
-  let { error: insertError } = await supabase.from("whatsapp_messages").insert(current);
+  let insertError: unknown = null;
+  const insertCurrent = async () => {
+    // Column names come from the fixed row object above, never from user input.
+    const columns = Object.keys(current);
+    try {
+      await db.execute(
+        `insert into whatsapp_messages (${columns.join(", ")}) values (${columns.map((_, i) => `$${i + 1}`).join(", ")})`,
+        columns.map((column) => current[column]),
+      );
+      insertError = null;
+    } catch (err) {
+      insertError = err;
+    }
+  };
+  await insertCurrent();
 
   // Until the later migrations are applied, some columns may not exist; drop
   // only the missing one rather than losing the message.
-  for (let attempt = 0; attempt < 4 && insertError && insertError.code !== "23505"; attempt++) {
-    const message = insertError.message;
+  for (let attempt = 0; attempt < 4 && insertError && !isUniqueViolation(insertError); attempt++) {
+    if (!isMissingSchemaError(insertError)) break;
+    const message = (insertError as Error).message ?? "";
     const missing = ["wamid", "profile_name", "phone"].find(
       (column) => column in current && new RegExp(column, "i").test(message),
     );
@@ -543,25 +548,26 @@ async function processSingleMessage({
     const { [missing]: dropped, ...rest } = current;
     void dropped;
     current = rest;
-    ({ error: insertError } = await supabase.from("whatsapp_messages").insert(current));
+    await insertCurrent();
   }
 
   // A second copy of the same message lost the race to the first: nothing to do.
-  if (insertError?.code === "23505") return;
+  if (isUniqueViolation(insertError)) return;
 
   if (insertError) {
+    const insertMessage = (insertError as Error).message;
     console.error(
       "[WhatsApp Webhook] Failed to insert message row:",
-      insertError.message,
+      insertMessage,
     );
     // Forget the ID so Meta's retry is processed rather than treated as a repeat.
     if (messageId) processedMessageIds.delete(messageId);
-    throw new RetryableWebhookError(insertError.message);
+    throw new RetryableWebhookError(insertMessage);
   }
 
   // Template quick-reply buttons (e.g. "Send details first") get a file back.
   if (direction === "in" && type === "button") {
     const repliedToId = (msgData.context as { id?: string } | undefined)?.id;
-    await sendButtonAutoReply(supabase, { buttonTitle: messageText, repliedToId, phone, contactId });
+    await sendButtonAutoReply({ buttonTitle: messageText, repliedToId, phone, contactId });
   }
 }

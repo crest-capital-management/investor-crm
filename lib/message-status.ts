@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { db, isMissingSchemaError, isUniqueViolation } from "@/lib/db";
 
 /** Delivery states in order; a message never moves backwards. */
 const STATUS_RANK: Record<string, number> = { sent: 1, delivered: 2, read: 3, failed: 4 };
@@ -63,7 +63,6 @@ export type SavedMessage = {
 };
 
 export async function insertOutboundMessage(
-  supabase: SupabaseClient,
   row: {
     contact_id: string;
     message_text: string | null;
@@ -81,19 +80,36 @@ export async function insertOutboundMessage(
   };
 
   if (wamid) {
-    const withStatus = await supabase
-      .from("whatsapp_messages")
-      .insert({ ...base, wamid, status: "sent", status_at: base.sent_at })
-      .select(SAVED_COLUMNS)
-      .single();
-    if (!withStatus.error) return { error: null, message: withStatus.data as unknown as SavedMessage };
-    // The webhook already saved this message (an echo arrived first): nothing to add.
-    if (withStatus.error.code === "23505") return { error: null };
-    if (!/wamid|status/i.test(withStatus.error.message)) return { error: withStatus.error };
+    try {
+      const message = await db.one<SavedMessage>(
+        `insert into whatsapp_messages (contact_id, direction, message_text, media_url, sent_at, wamid, status, status_at)
+         values ($1, $2, $3, $4, $5, $6, 'sent', $5)
+         returning ${SAVED_COLUMNS}`,
+        [base.contact_id, base.direction, base.message_text, base.media_url, base.sent_at, wamid],
+      );
+      return { error: null, message };
+    } catch (err) {
+      // The webhook already saved this message (an echo arrived first): nothing to add.
+      if (isUniqueViolation(err)) return { error: null };
+      if (!isMissingSchemaError(err)) return { error: { message: errorMessage(err) } };
+    }
   }
 
-  const { data, error } = await supabase.from("whatsapp_messages").insert(base).select(SAVED_COLUMNS).single();
-  return { error, message: error ? undefined : (data as unknown as SavedMessage) };
+  try {
+    const message = await db.one<SavedMessage>(
+      `insert into whatsapp_messages (contact_id, direction, message_text, media_url, sent_at)
+       values ($1, $2, $3, $4, $5)
+       returning ${SAVED_COLUMNS}`,
+      [base.contact_id, base.direction, base.message_text, base.media_url, base.sent_at],
+    );
+    return { error: null, message };
+  } catch (err) {
+    return { error: { message: errorMessage(err) } };
+  }
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : "Database error.";
 }
 
 /**
@@ -102,7 +118,6 @@ export async function insertOutboundMessage(
  * Returns false if no such message exists (yet).
  */
 export async function applyDeliveryStatus(
-  supabase: SupabaseClient,
   wamid: string,
   status: string,
   errorText: string | null,
@@ -110,12 +125,16 @@ export async function applyDeliveryStatus(
 ): Promise<boolean> {
   if (!isKnownStatus(status)) return false;
 
-  const { data: message, error: findError } = await supabase
-    .from("whatsapp_messages")
-    .select("id, status")
-    .eq("wamid", wamid)
-    .maybeSingle();
-  if (findError || !message) return false;
+  let message: { id: string; status: string | null } | null;
+  try {
+    message = await db.maybeOne<{ id: string; status: string | null }>(
+      "select id, status from whatsapp_messages where wamid = $1 limit 1",
+      [wamid],
+    );
+  } catch {
+    return false;
+  }
+  if (!message) return false;
 
   const current = message.status as string | null;
   if (current && STATUS_RANK[current] >= STATUS_RANK[status] && current !== "failed") {
@@ -124,13 +143,13 @@ export async function applyDeliveryStatus(
   // A failure is final: it can't be overwritten by a later "sent"/"delivered" echo.
   if (current === "failed") return true;
 
-  await supabase
-    .from("whatsapp_messages")
-    .update({
-      status,
-      status_error: status === "failed" ? errorText : null,
-      status_at: at,
-    })
-    .eq("id", message.id);
+  try {
+    await db.execute(
+      "update whatsapp_messages set status = $1, status_error = $2, status_at = $3 where id = $4",
+      [status, status === "failed" ? errorText : null, at, message.id],
+    );
+  } catch {
+    // As before, a failed update doesn't change the result.
+  }
   return true;
 }

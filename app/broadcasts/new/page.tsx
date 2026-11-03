@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { requireAuthFast } from "@/lib/auth";
-import { fetchAllPages } from "@/lib/supabase-pagination";
+import { db } from "@/lib/db";
 import { BroadcastEditor } from "@/components/broadcast-editor";
 import type {
   GroupOption,
@@ -15,33 +15,25 @@ export const metadata: Metadata = {
 };
 
 export default async function NewBroadcastPage() {
-  const { supabase } = await requireAuthFast();
+  await requireAuthFast();
 
-  const [groupsResult, contactsResult, templatesResult] = await Promise.all([
-    supabase
-      .from("groups")
-      .select("id, name")
-      .order("name", { ascending: true }),
-    // Supabase returns at most 1000 rows per request, so page through to get every contact.
-    fetchAllPages<ContactOption>((from, to) =>
-      supabase
-        .from("contacts")
-        .select("id, name, phone")
-        .is("deleted_at", null)
-        .order("name", { ascending: true })
-        .order("id", { ascending: true })
-        .range(from, to)
-    ),
-    supabase
-      .from("templates")
-      .select("id, name, category, body_text, variables, approved_at, meta_template_id")
-      .is("deleted_at", null)
-      .order("name", { ascending: true }),
+  // A failed lookup leaves that picker empty, as before.
+  const [groups, contacts, templates] = await Promise.all([
+    db.query<GroupOption>("select id, name from groups order by name asc").catch(() => []),
+    db
+      .query<ContactOption>(
+        "select id, name, phone from contacts where deleted_at is null order by name asc, id asc",
+      )
+      .catch(() => []),
+    db
+      .query<TemplateOption>(
+        `select id, name, category, body_text, variables, approved_at, meta_template_id
+           from templates
+          where deleted_at is null
+          order by name asc`,
+      )
+      .catch(() => []),
   ]);
-
-  const groups = (groupsResult.data ?? []) as GroupOption[];
-  const contacts = contactsResult;
-  const templates = (templatesResult.data ?? []) as TemplateOption[];
 
   return (
     <div className="flex min-h-0 flex-col p-4 sm:p-6 lg:p-8">

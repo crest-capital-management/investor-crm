@@ -1,4 +1,4 @@
-import { createServiceRoleClient } from "@/lib/supabase-service";
+import { db } from "@/lib/db";
 import { sendEmail } from "@/lib/resend";
 import { getAppSettings } from "@/lib/settings";
 import { getUnknownConversations } from "@/lib/unknown-numbers";
@@ -178,9 +178,8 @@ export async function runReminderDispatch({
 }: {
   ignoreEnabledSwitch: boolean;
 }): Promise<DispatchFollowUpRemindersSummary> {
-  const supabase = createServiceRoleClient();
   const today = todayAsISODate();
-  const settings = await getAppSettings(supabase);
+  const settings = await getAppSettings();
 
   if (!settings.reminderEmailEnabled && !ignoreEnabledSwitch) {
     return {
@@ -192,19 +191,43 @@ export async function runReminderDispatch({
     };
   }
 
+  type FollowUpQueryRow = {
+    id: string;
+    due_date: string;
+    message: string;
+    contact_id: string;
+    contact_name: string | null;
+  };
+  type UnreadQueryRow = {
+    contact_id: string;
+    unread_count: number;
+    last_message_at: string;
+    last_message_text: string | null;
+    last_media_url: string | null;
+  };
+
   const [followUpsResult, unreadResult] = await Promise.all([
     settings.reminderIncludeFollowUps
-      ? supabase
-          .from("follow_ups")
-          .select("id, due_date, message, contact_id, contacts(name)")
-          .eq("is_done", false)
-          .is("deleted_at", null)
-          .lte("due_date", today)
-          .order("due_date", { ascending: true })
-      : Promise.resolve({ data: [], error: null }),
+      ? db
+          .query<FollowUpQueryRow>(
+            `select f.id, f.due_date, f.message, f.contact_id, c.name as contact_name
+               from follow_ups f
+               left join contacts c on c.id = f.contact_id
+              where f.is_done = false and f.deleted_at is null and f.due_date <= $1
+              order by f.due_date asc`,
+            [today],
+          )
+          .then((data) => ({ data, error: null as string | null }))
+          .catch((err: unknown) => ({
+            data: [] as FollowUpQueryRow[],
+            error: (err instanceof Error && err.message) || "Failed to fetch due follow-ups.",
+          }))
+      : Promise.resolve({ data: [] as FollowUpQueryRow[], error: null as string | null }),
     settings.reminderIncludeUnread
-      ? supabase.rpc("unread_conversations")
-      : Promise.resolve({ data: [], error: null }),
+      ? db
+          .query<UnreadQueryRow>("select * from public.unread_conversations()")
+          .catch(() => [] as UnreadQueryRow[])
+      : Promise.resolve([] as UnreadQueryRow[]),
   ]);
 
   if (followUpsResult.error) {
@@ -213,49 +236,35 @@ export async function runReminderDispatch({
       dueCount: 0,
       unreadCount: 0,
       emailed: false,
-      error: followUpsResult.error.message || "Failed to fetch due follow-ups.",
+      error: followUpsResult.error,
     };
   }
 
-  const followUps: DueFollowUpRow[] = (followUpsResult.data ?? []).map((row) => {
-    const contact = row.contacts as unknown as { name: string } | { name: string }[] | null;
-    const contactName = Array.isArray(contact) ? contact[0]?.name : contact?.name;
-    return {
-      id: row.id,
-      due_date: row.due_date,
-      message: row.message,
-      contact_id: row.contact_id,
-      contact_name: contactName || "Unknown investor",
-    };
-  });
+  const followUps: DueFollowUpRow[] = followUpsResult.data.map((row) => ({
+    id: row.id,
+    due_date: row.due_date,
+    message: row.message,
+    contact_id: row.contact_id,
+    contact_name: row.contact_name || "Unknown investor",
+  }));
 
   // If the unread_conversations() migration has not been applied, or the
   // lookup fails, still send the follow-up digest rather than nothing.
-  const unreadRaw = (unreadResult.error ? [] : unreadResult.data ?? []) as Array<{
-    contact_id: string;
-    unread_count: number;
-    last_message_at: string;
-    last_message_text: string | null;
-    last_media_url: string | null;
-  }>;
+  const unreadRaw = unreadResult;
 
   const unread: UnreadMessageRow[] = [];
   if (unreadRaw.length > 0) {
     const contactInfo = new Map<string, { name: string; phone: string }>();
-    for (let i = 0; i < unreadRaw.length; i += 100) {
-      const { data: contacts } = await supabase
-        .from("contacts")
-        .select("id, name, phone")
-        .in(
-          "id",
-          unreadRaw.slice(i, i + 100).map((row) => row.contact_id),
-        );
-      for (const contact of contacts ?? []) {
-        contactInfo.set(contact.id as string, {
-          name: contact.name as string,
-          phone: contact.phone as string,
-        });
+    try {
+      const contacts = await db.query<{ id: string; name: string; phone: string }>(
+        "select id, name, phone from contacts where id = any($1::uuid[])",
+        [unreadRaw.map((row) => row.contact_id)],
+      );
+      for (const contact of contacts) {
+        contactInfo.set(contact.id, { name: contact.name, phone: contact.phone });
       }
+    } catch {
+      // Like before, a failed lookup just leaves these rows out.
     }
 
     for (const row of unreadRaw) {
@@ -275,7 +284,7 @@ export async function runReminderDispatch({
 
   // Numbers that messaged but aren't saved as contacts are listed too.
   if (settings.reminderIncludeUnread) {
-    for (const conversation of await getUnknownConversations(supabase)) {
+    for (const conversation of await getUnknownConversations()) {
       unread.push({
         contact_id: "",
         contact_name: conversation.profileName
