@@ -38,8 +38,8 @@ export async function preparePortfolioUpload(
   filename: string,
   size: number,
 ): Promise<{ path: string; token: string } | { error: string }> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   if (!size) return { error: "No file selected." };
   if (size > MAX_PORTFOLIO_FILE_BYTES) return { error: "File is too large. Please choose a file under 15MB." };
@@ -64,8 +64,8 @@ export async function createPortfolioUpdate(
   mimeType: string,
   size: number,
 ): Promise<{ id: string } | { error: string }> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const id = contactId.trim();
   if (!path.startsWith(`${id}/`) || path.includes("..")) return { error: "That file isn't available for this contact." };
@@ -89,8 +89,8 @@ export async function createPortfolioUpdateFromText(
   text: string,
   title: string,
 ): Promise<{ id: string } | { error: string }> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const id = contactId.trim();
   const body = text.trim();
@@ -131,8 +131,8 @@ export async function createPortfolioUpdateFromText(
 export async function analyzePortfolioUpdateById(
   updateId: string,
 ): Promise<{ update: PortfolioUpdate } | { error: string }> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   type UpdateRow = { id: string; contact_id: string; file_path: string; file_name: string; mime_type: string | null; created_at: string };
   let row: UpdateRow | null;
@@ -206,8 +206,8 @@ function asOfDate(value: string | null): string | null {
 }
 
 export async function deletePortfolioUpdate(updateId: string): Promise<{ success: true } | { error: string }> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   try {
     await db.execute("update public.portfolio_updates set deleted_at = $2 where id = $1", [updateId, new Date().toISOString()]);
@@ -221,8 +221,8 @@ export async function deletePortfolioUpdate(updateId: string): Promise<{ success
 export async function listPortfolioUpdates(
   contactId: string,
 ): Promise<{ updates: PortfolioUpdate[] } | { error: string }> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   try {
     const updates = await db.query<PortfolioUpdate>(

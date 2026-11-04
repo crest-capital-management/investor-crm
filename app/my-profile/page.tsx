@@ -1,9 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import type { User } from "@supabase/supabase-js";
 import {
   User as UserIcon,
-  CheckCircle2,
   ShieldCheck,
   Building2,
   LayoutDashboard,
@@ -16,7 +14,7 @@ import {
 } from "lucide-react";
 import { LogoutButton } from "@/components/logout-button";
 import { SettingsPanel } from "@/components/settings-panel";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, type CrmUser } from "@/lib/auth";
 import { getAppSettings } from "@/lib/settings";
 
 export const metadata: Metadata = {
@@ -30,23 +28,21 @@ type ProfileData = {
   email: string;
   displayName: string;
   initials: string;
-  isEmailVerified: boolean;
   createdAt: string | null;
   lastSignInAt: string | null;
 };
 
-function extractProfileDetails(user: User): ProfileData {
+function extractProfileDetails(user: CrmUser): ProfileData {
   const displayName = getUserDisplayName(user);
   const initials = getUserInitials(displayName);
 
   return {
     id: user.id,
-    email: user.email ?? "",
+    email: user.email,
     displayName,
     initials,
-    isEmailVerified: Boolean(user.email_confirmed_at),
-    createdAt: user.created_at ?? null,
-    lastSignInAt: user.last_sign_in_at ?? null,
+    createdAt: user.created_at,
+    lastSignInAt: user.last_login_at,
   };
 }
 
@@ -111,13 +107,6 @@ export default async function MyProfilePage() {
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                   Active
                 </span>
-
-                {profile.isEmailVerified && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2.5 py-0.5 text-xs font-medium text-blue-600 dark:text-blue-400">
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                    Email Verified
-                  </span>
-                )}
               </div>
             </div>
           </div>

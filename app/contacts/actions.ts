@@ -64,8 +64,8 @@ function isValidEmail(value: string) {
 }
 
 export async function addContact(formData: FormData) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const name = formData.get("name") as string;
   const phone = normalizePhone(String(formData.get("phone") ?? ""));
@@ -132,8 +132,8 @@ export async function addContact(formData: FormData) {
 }
 
 export async function updateContact(id: string, formData: FormData) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const name = String(formData.get("name") ?? "").trim();
   const phone = normalizePhone(String(formData.get("phone") ?? ""));
@@ -251,8 +251,8 @@ async function contactExists(id: string): Promise<boolean> {
 }
 
 export async function addTagToContact(id: string, tag: string) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const normalizedTag = tag.trim();
   if (!id.trim()) return { error: "The contact could not be found." };
@@ -279,8 +279,8 @@ export async function addTagToContact(id: string, tag: string) {
 
 /** Removes one tag from a contact; its other tags are kept. */
 export async function removeTagFromContact(id: string, tag: string) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const normalizedTag = tag.trim();
   if (!id.trim() || !normalizedTag) return { error: "The contact could not be found." };
@@ -306,8 +306,8 @@ export async function removeTagFromContact(id: string, tag: string) {
 }
 
 export async function addMeetingNote(contactId: string, note: string) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const normalizedContactId = contactId.trim();
   const normalizedNote = note.trim();
@@ -347,8 +347,8 @@ export async function transcribeVoiceNote(
   contactId: string,
   file: File,
 ): Promise<TranscribeVoiceNoteResult> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const normalizedContactId = contactId.trim();
   if (!normalizedContactId) return { error: "The contact could not be found." };
@@ -387,8 +387,8 @@ export type MeetingNote = {
 };
 
 export async function getMeetingNotes(contactId: string) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const normalizedContactId = contactId.trim();
   if (!normalizedContactId) return { error: "The contact could not be found." };
@@ -423,8 +423,8 @@ export async function sendWhatsAppReply(
   contactId: string,
   message: string,
 ): Promise<SendWhatsAppReplyResult> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const normalizedContactId = contactId.trim();
   const normalizedMessage = message.trim();
@@ -481,8 +481,8 @@ export async function sendWhatsAppTemplateToContact(
   templateId: string,
   params: string[],
 ): Promise<SendWhatsAppReplyResult> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const contact = await attempt(() =>
     db.maybeOne<{ id: string; phone: string }>(
@@ -572,8 +572,8 @@ const MIME_BY_EXTENSION: Record<string, string> = {
  * otherwise an approved template is needed.
  */
 export async function resendFailedWhatsAppMessage(messageId: string): Promise<SendWhatsAppReplyResult> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   type OriginalRow = {
     id: string;
@@ -667,8 +667,8 @@ export async function prepareWhatsAppMediaUpload(
   mimeType: string,
   size: number,
 ): Promise<{ path: string; token: string } | { error: string }> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const normalizedContactId = contactId.trim();
   if (!normalizedContactId) return { error: "The contact could not be found." };
@@ -704,8 +704,8 @@ export async function sendWhatsAppMediaFromStorage(
   filename: string,
   caption?: string,
 ): Promise<SendWhatsAppMediaReplyResult> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const normalizedContactId = contactId.trim();
   if (!normalizedContactId) return { error: "The contact could not be found." };
@@ -772,8 +772,8 @@ export async function updateMeetingNote(
   contactId: string,
   note: string,
 ) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const normalizedNoteId = noteId.trim();
   const normalizedContactId = contactId.trim();
@@ -817,8 +817,8 @@ export async function updateMeetingNote(
 }
 
 export async function deleteMeetingNote(noteId: string, contactId: string) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const normalizedNoteId = noteId.trim();
   const normalizedContactId = contactId.trim();
@@ -863,8 +863,8 @@ export async function deleteMeetingNote(noteId: string, contactId: string) {
 export type ContactGroupOption = { id: string; name: string };
 
 export async function getContactGroupOptions(contactId: string) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   if (!contactId.trim()) return { error: "The contact could not be found." };
 
@@ -884,8 +884,8 @@ export async function getContactGroupOptions(contactId: string) {
 }
 
 export async function addContactToGroups(contactId: string, groupIds: string[]) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const normalizedGroupIds = [...new Set(groupIds.filter((id) => typeof id === "string" && id.trim()))];
   if (!contactId.trim()) return { error: "The contact could not be found." };
@@ -943,8 +943,8 @@ export async function addContactToGroups(contactId: string, groupIds: string[]) 
 }
 
 export async function deleteContact(id: string) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   try {
     await db.execute("update public.contacts set deleted_at = $2 where id = $1", [id, new Date().toISOString()]);
@@ -957,8 +957,8 @@ export async function deleteContact(id: string) {
 }
 
 export async function deleteContacts(ids: string[]) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const contactIds = [...new Set(ids.filter(Boolean))];
 
@@ -1054,8 +1054,8 @@ export type ImportContactsResult =
 const IMPORT_INSERT_BATCH_SIZE = 300;
 
 export async function importContacts(rowsRaw: string): Promise<ImportContactsResult> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   let rows: ImportContactRow[];
 
@@ -1225,8 +1225,8 @@ export type GenerateWhatsAppSummaryResult =
 export async function generateWhatsAppSummary(
   contactId: string
 ): Promise<GenerateWhatsAppSummaryResult> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const normalizedContactId = contactId.trim();
   if (!normalizedContactId) return { error: "The contact could not be found." };

@@ -1,6 +1,7 @@
+import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
+import { authOptions } from "@/lib/auth-options";
 import { db } from "@/lib/db";
-import { createClient } from "@/src/lib/supabase/server";
 
 /**
  * The CRM has a single owner. Row-level security used to enforce that inside
@@ -17,40 +18,50 @@ export function isOwnerId(userId: string | null | undefined): boolean {
   return Boolean(userId) && userId!.toLowerCase() === ownerId;
 }
 
+export type CrmUser = {
+  id: string;
+  email: string;
+  name: string | null;
+  created_at: string;
+  last_login_at: string | null;
+};
+
 /**
- * Ensures the user is authenticated for Server Components (pages).
- * If unauthenticated, immediately redirects to /login.
+ * The signed-in owner's id, or null. The session is a signed cookie checked on
+ * this server (no database or network call), so it is cheap enough for API
+ * routes that are polled every few seconds.
  */
-export async function requireAuth() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-
-  if (error || !user || !isOwnerId(user.id)) {
-    redirect("/login");
-  }
-
-  return { supabase, db, user };
+export async function getOwnerSessionId(): Promise<string | null> {
+  const session = await getServerSession(authOptions);
+  const id = session?.user?.id;
+  return id && isOwnerId(id) ? id : null;
 }
 
 /**
- * Faster version of requireAuth for pages that only need the database.
- * It checks the signed-in session on the server itself (the token's signature
- * and expiry) instead of asking the Supabase auth service over the network on
- * every page load, which saves a round trip per request. Pages that show
- * account details use requireAuth instead.
+ * Ensures the owner is signed in for Server Components (pages) and returns
+ * their account. If not, immediately redirects to /login.
+ */
+export async function requireAuth() {
+  const id = await getOwnerSessionId();
+  const user = id
+    ? await db.maybeOne<CrmUser>(
+        "select id, email, name, created_at, last_login_at from public.crm_users where id = $1",
+        [id],
+      )
+    : null;
+  if (!user) redirect("/login");
+
+  return { db, user };
+}
+
+/**
+ * Faster version of requireAuth for pages that only need the database: it
+ * checks the session cookie but does not load the account.
  */
 export async function requireAuthFast() {
-  const supabase = await createClient();
-  const { data, error } = await supabase.auth.getClaims();
+  if (!(await getOwnerSessionId())) redirect("/login");
 
-  if (error || !data?.claims || !isOwnerId(data.claims.sub)) {
-    redirect("/login");
-  }
-
-  return { supabase, db };
+  return { db };
 }
 
 /**
@@ -66,15 +77,8 @@ export async function requireOwnerAction() {
  * If not, returns an Unauthorized error response instead of redirecting.
  */
 export async function requireActionAuth() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
+  const id = await getOwnerSessionId();
+  if (!id) return { db: null, userId: null, error: "Unauthorized" as const };
 
-  if (error || !user || !isOwnerId(user.id)) {
-    return { supabase: null, db: null, user: null, error: "Unauthorized" as const };
-  }
-
-  return { supabase, db, user, error: null };
+  return { db, userId: id, error: null };
 }

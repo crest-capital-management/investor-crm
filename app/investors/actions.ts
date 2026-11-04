@@ -54,8 +54,8 @@ async function findFollowUp(followUpId: string) {
 }
 
 export async function getFollowUps(contactId: string) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const normalizedContactId = contactId.trim();
   if (!normalizedContactId) return { error: "The contact could not be found." };
@@ -91,8 +91,8 @@ export type SuggestFollowUpResult =
 export async function suggestFollowUp(
   contactId: string,
 ): Promise<SuggestFollowUpResult> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const normalizedContactId = contactId.trim();
   if (!normalizedContactId) return { error: "The contact could not be found." };
@@ -153,8 +153,8 @@ export async function addFollowUp(
   dueDate: string,
   message: string,
 ) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const normalizedContactId = contactId.trim();
   const normalizedDueDate = dueDate.trim();
@@ -186,8 +186,8 @@ export async function addFollowUp(
 }
 
 export async function markFollowUpAsDone(followUpId: string, contactId: string) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const normalizedFollowUpId = followUpId.trim();
   const normalizedContactId = contactId.trim();
@@ -244,8 +244,8 @@ export async function editFollowUp(
   dueDate: string,
   message: string,
 ) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const normalizedFollowUpId = followUpId.trim();
   const normalizedContactId = contactId.trim();
@@ -289,8 +289,8 @@ export async function editFollowUp(
 }
 
 export async function deleteFollowUp(followUpId: string, contactId: string) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const normalizedFollowUpId = followUpId.trim();
   const normalizedContactId = contactId.trim();
@@ -327,8 +327,8 @@ export async function deleteFollowUp(followUpId: string, contactId: string) {
 }
 
 export async function deleteCompletedFollowUp(followUpId: string, contactId: string) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const normalizedFollowUpId = followUpId.trim();
   const normalizedContactId = contactId.trim();

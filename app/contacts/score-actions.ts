@@ -28,8 +28,8 @@ function revalidateContact(contactId: string) {
 export async function suggestProspectScore(
   contactId: string,
 ): Promise<{ score: ProspectScore } | { error: string }> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const id = contactId.trim();
   let contact: ScoringInput["contact"] | null;
@@ -124,8 +124,8 @@ export async function setManualScore(
   score: number,
   reason: string,
 ): Promise<{ score: ProspectScore } | { error: string }> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   if (!Number.isInteger(score) || score < 1 || score > 5) return { error: "Choose a score from 1 to 5." };
   const cleanReason = reason.trim();
@@ -155,8 +155,8 @@ export async function setManualScore(
 export async function clearManualScore(
   contactId: string,
 ): Promise<{ score: ProspectScore } | { error: string }> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const id = contactId.trim();
   let saved: ProspectScore;

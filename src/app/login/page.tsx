@@ -3,16 +3,15 @@
 import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { signIn } from "next-auth/react";
 import { ArrowRight, Eye, EyeOff, Lock, Mail, Shield } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { createClient } from "@/src/lib/supabase/client";
 
 export default function LoginPage() {
   const router = useRouter();
-  const supabase = createClient();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -24,10 +23,15 @@ export default function LoginPage() {
     setError(null);
     setIsLoading(true);
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+    const result = await signIn("credentials", { email, password, redirect: false });
 
-    if (signInError) {
-      setError(signInError.message);
+    if (!result?.ok || result.error) {
+      // "CredentialsSignin" is a wrong email or password; anything else is a message from the server.
+      setError(
+        !result?.error || result.error === "CredentialsSignin"
+          ? "Invalid email or password."
+          : result.error,
+      );
       setIsLoading(false);
       return;
     }

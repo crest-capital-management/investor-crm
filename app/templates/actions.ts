@@ -74,8 +74,8 @@ function validateTemplateInput(data: {
 }
 
 export async function createTemplate(data: CreateTemplateInput) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) {
+  const { error: authError } = await requireActionAuth();
+  if (authError) {
     return { error: "Unauthorized" };
   }
 
@@ -106,8 +106,8 @@ export async function createTemplate(data: CreateTemplateInput) {
 }
 
 export async function updateTemplate(id: string, data: UpdateTemplateInput) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) {
+  const { error: authError } = await requireActionAuth();
+  if (authError) {
     return { error: "Unauthorized" };
   }
 
@@ -165,8 +165,8 @@ export async function updateTemplate(id: string, data: UpdateTemplateInput) {
 }
 
 export async function deleteTemplate(id: string) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) {
+  const { error: authError } = await requireActionAuth();
+  if (authError) {
     return { error: "Unauthorized" };
   }
 
@@ -231,8 +231,8 @@ export interface SyncMetaTemplatesResult {
  * refreshes text, category and approval status.
  */
 export async function syncMetaTemplates(): Promise<SyncMetaTemplatesResult> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) {
+  const { error: authError } = await requireActionAuth();
+  if (authError) {
     return { error: "Unauthorized" };
   }
 
@@ -370,8 +370,8 @@ export interface ChatTemplate {
  * aren't approved yet are left out.
  */
 export async function getChatTemplates(): Promise<ChatTemplate[]> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return [];
+  const { error: authError } = await requireActionAuth();
+  if (authError) return [];
 
   type ChatTemplateRow = {
     id: string;
