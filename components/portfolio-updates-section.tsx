@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/components/toast-provider";
 import { toIndianGrouping } from "@/lib/indian-numbers";
-import { createClient as createBrowserSupabase } from "@/src/lib/supabase/client";
+import { uploadToSignedUrl } from "@/lib/upload-to-storage";
 import {
   analyzePortfolioUpdateById,
   createPortfolioUpdate,
@@ -258,10 +258,7 @@ export function PortfolioUpdatesSection({
         return;
       }
       // The file goes straight to storage, not through the web server.
-      const { error: uploadError } = await createBrowserSupabase()
-        .storage.from("portfolio-updates")
-        .uploadToSignedUrl(prepared.path, prepared.token, file, { contentType: file.type || undefined });
-      if (uploadError) {
+      if (!(await uploadToSignedUrl(prepared.uploadUrl, file))) {
         toast("The file could not be uploaded. Please try again.", "error");
         return;
       }

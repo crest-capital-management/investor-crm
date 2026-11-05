@@ -58,7 +58,7 @@ import { ProspectScoreSection } from "@/components/prospect-score-section";
 import { MessageDraftSection } from "@/components/message-draft-section";
 import { EMPTY_PROSPECT_SCORE, type ProspectScore } from "@/lib/prospect-score-types";
 import type { PortfolioUpdate } from "@/lib/portfolio-types";
-import { createClient as createBrowserSupabase } from "@/src/lib/supabase/client";
+import { uploadToSignedUrl } from "@/lib/upload-to-storage";
 import { MESSAGES_CHANGED_EVENT } from "@/lib/unread-events";
 import {
   WhatsAppHistory,
@@ -271,10 +271,9 @@ export function ContactDetail({
       if ("error" in prepared) return { error: prepared.error };
 
       // The file goes straight to storage, not through the web server.
-      const { error: uploadError } = await createBrowserSupabase()
-        .storage.from("whatsapp-media")
-        .uploadToSignedUrl(prepared.path, prepared.token, file, { contentType: file.type });
-      if (uploadError) return { error: "The file could not be uploaded. Please try again." };
+      if (!(await uploadToSignedUrl(prepared.uploadUrl, file))) {
+        return { error: "The file could not be uploaded. Please try again." };
+      }
 
       const result = await sendWhatsAppMediaFromStorage(contact.id, prepared.path, file.type, file.name, caption);
       if ("error" in result && result.error) {

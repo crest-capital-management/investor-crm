@@ -18,7 +18,7 @@ import {
   downloadStoredMedia,
   mediaStoragePathFromUrl,
   mediaUrlForPath,
-} from "@/lib/supabase-storage";
+} from "@/lib/storage";
 import { param } from "@/lib/sql";
 import { TAG_OPTIONS } from "@/lib/tags";
 import { parseTagCell } from "@/lib/tag-match";
@@ -666,7 +666,7 @@ export async function prepareWhatsAppMediaUpload(
   filename: string,
   mimeType: string,
   size: number,
-): Promise<{ path: string; token: string } | { error: string }> {
+): Promise<{ path: string; uploadUrl: string } | { error: string }> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
 

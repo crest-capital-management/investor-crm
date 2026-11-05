@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { isUuid } from "@/lib/sql";
 import { getOwnerSessionId } from "@/lib/auth";
-import { createSignedPortfolioUrl } from "@/lib/supabase-storage";
+import { createSignedPortfolioUrl } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
 

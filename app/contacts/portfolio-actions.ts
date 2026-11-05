@@ -14,7 +14,7 @@ import {
   downloadPortfolioFile,
   removePortfolioFile,
   uploadPortfolioFile,
-} from "@/lib/supabase-storage";
+} from "@/lib/storage";
 
 const MAX_PASTED_CHARS = 100_000;
 const MISSING_TABLE_ERROR =
@@ -37,7 +37,7 @@ export async function preparePortfolioUpload(
   contactId: string,
   filename: string,
   size: number,
-): Promise<{ path: string; token: string } | { error: string }> {
+): Promise<{ path: string; uploadUrl: string } | { error: string }> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
 

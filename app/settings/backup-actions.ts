@@ -1,8 +1,8 @@
 "use server";
 
 import { requireOwnerAction } from "@/lib/auth";
-import { BACKUP_BUCKET, saveDailyBackup } from "@/lib/backup";
-import { createServiceRoleClient } from "@/lib/supabase-service";
+import { saveDailyBackup } from "@/lib/backup";
+import { createBackupDownloadUrl, listBackupFiles } from "@/lib/storage";
 
 export interface StoredBackup {
   name: string;
@@ -11,29 +11,31 @@ export interface StoredBackup {
   bytes: number;
 }
 
-// The backups bucket is private, so reading it uses the service client, but
-// only after the signed-in owner is confirmed (requireOwnerAction).
+// The backups container is private, so it is read with the storage account's
+// own key, but only after the signed-in owner is confirmed (requireOwnerAction).
 
 /** Saved daily backups, newest first. */
 export async function listStoredBackups(): Promise<{ backups?: StoredBackup[]; error?: string }> {
   const { error: authError } = await requireOwnerAction();
   if (authError) return { error: "Unauthorized" };
 
-  const { data, error } = await createServiceRoleClient()
-    .storage.from(BACKUP_BUCKET)
-    .list("", { limit: 100, sortBy: { column: "name", order: "desc" } });
-  if (error) {
-    // The bucket is created by the first backup.
-    return /not found/i.test(error.message) ? { backups: [] } : { error: error.message };
+  let files;
+  try {
+    // Empty until the first backup creates the container.
+    files = await listBackupFiles();
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list the backups." };
   }
 
   return {
-    backups: (data ?? [])
+    backups: files
       .filter((file) => /\d{4}-\d{2}-\d{2}/.test(file.name))
+      .sort((a, b) => b.name.localeCompare(a.name))
+      .slice(0, 100)
       .map((file) => ({
         name: file.name,
         date: file.name.match(/(\d{4}-\d{2}-\d{2})/)![1],
-        bytes: Number(file.metadata?.size ?? 0),
+        bytes: file.bytes,
       })),
   };
 }
@@ -46,11 +48,11 @@ export async function getBackupDownloadUrl(name: string): Promise<{ url?: string
     return { error: "Unknown backup." };
   }
 
-  const { data, error } = await createServiceRoleClient()
-    .storage.from(BACKUP_BUCKET)
-    .createSignedUrl(name, 60, { download: name });
-  if (error || !data) return { error: error?.message ?? "Could not create the download link." };
-  return { url: data.signedUrl };
+  try {
+    return { url: await createBackupDownloadUrl(name, 60) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not create the download link." };
+  }
 }
 
 /** Takes a backup now (same as the nightly one). */

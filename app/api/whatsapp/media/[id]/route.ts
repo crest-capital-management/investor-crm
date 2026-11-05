@@ -4,7 +4,7 @@ import { isUuid } from "@/lib/sql";
 import { getOwnerSessionId } from "@/lib/auth";
 import { storeInboundWhatsAppMedia } from "@/lib/inbound-media";
 import { metaMediaIdFrom } from "@/lib/media-ref";
-import { createSignedMediaUrl, mediaStoragePathFromUrl } from "@/lib/supabase-storage";
+import { createSignedMediaUrl, mediaStoragePathFromUrl } from "@/lib/storage";
 
 /** Our own stored file: a short-lived signed link. Anything else: the address as saved. */
 async function openStoredUrl(mediaUrl: string) {
