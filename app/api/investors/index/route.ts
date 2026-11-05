@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { createClient } from "@/src/lib/supabase/server";
 import { db } from "@/lib/db";
-import { isOwnerId } from "@/lib/auth";
+import { getOwnerSessionId } from "@/lib/auth";
 import { INVESTOR_TAGS } from "@/lib/tags";
 
 export const dynamic = "force-dynamic";
@@ -18,11 +17,7 @@ type Row = Record<string, unknown>;
  * Only the CRM owner can call it.
  */
 export async function GET() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user || !isOwnerId(user.id)) {
+  if (!(await getOwnerSessionId())) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

@@ -54,8 +54,8 @@ async function groupExists(groupId: string) {
 }
 
 export async function addGroup(name: string, contactIds: string[]) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const trimmedName = String(name ?? "").trim();
   const validationError = validateName(trimmedName);
@@ -109,8 +109,8 @@ export async function addGroup(name: string, contactIds: string[]) {
 }
 
 export async function updateGroup(id: string, formData: FormData) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const name = String(formData.get("name") ?? "").trim();
   const validationError = validateName(name);
@@ -132,8 +132,8 @@ export async function updateGroup(id: string, formData: FormData) {
 }
 
 export async function deleteGroup(id: string) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   try {
     await db.tx(async (tx) => {
@@ -150,8 +150,8 @@ export async function deleteGroup(id: string) {
 }
 
 export async function removeContactFromGroup(groupId: string, contactId: string) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   if (!groupId.trim() || !contactId.trim()) {
     return { error: "The group membership could not be found." };
@@ -200,8 +200,8 @@ export async function removeContactFromGroup(groupId: string, contactId: string)
 }
 
 export async function removeContactsFromGroup(groupId: string, contactIds: string[]) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const normalizedContactIds = [
     ...new Set(contactIds.filter((id) => typeof id === "string" && id.trim())),
@@ -264,8 +264,8 @@ export async function removeContactsFromGroup(groupId: string, contactIds: strin
 }
 
 export async function deleteGroups(ids: string[]) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const groupIds = [
     ...new Set(ids.filter((id) => typeof id === "string" && id.trim())),
@@ -308,8 +308,8 @@ export type GroupContactOption = {
 };
 
 export async function getGroupContactOptions(groupId: string, search = "") {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   if (!groupId.trim()) return { error: "The group could not be found." };
 
@@ -360,8 +360,8 @@ const NEW_GROUP_CONTACT_LIMIT = 100;
  * than loading every contact, which keeps the sheet fast with thousands of rows.
  */
 export async function searchContactsForNewGroup(search = "") {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const trimmedSearch = search.trim();
 
@@ -389,8 +389,8 @@ export async function searchContactsForNewGroup(search = "") {
 }
 
 export async function addContactsToGroup(groupId: string, contactIds: string[]) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const normalizedContactIds = [
     ...new Set(contactIds.filter((id) => typeof id === "string" && id.trim())),

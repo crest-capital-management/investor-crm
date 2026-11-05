@@ -7,8 +7,8 @@ import { isUuid } from "@/lib/sql";
 import { getUnknownConversations } from "@/lib/unknown-numbers";
 
 export async function getUnreadConversationCount(): Promise<number> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return 0;
+  const { error: authError } = await requireActionAuth();
+  if (authError) return 0;
 
   const [count, unknown] = await Promise.all([
     db
@@ -23,8 +23,8 @@ export async function getUnreadConversationCount(): Promise<number> {
 }
 
 export async function markConversationRead(contactId: string) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const normalizedContactId = contactId.trim();
   if (!normalizedContactId || !isUuid(normalizedContactId)) return { error: "The contact could not be found." };
@@ -43,8 +43,8 @@ export async function markConversationRead(contactId: string) {
 }
 
 export async function markAllConversationsRead() {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   let contactIds: string[];
   try {

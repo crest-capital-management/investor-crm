@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/src/lib/supabase/server";
 import { db } from "@/lib/db";
 import { isUuid } from "@/lib/sql";
-import { isOwnerId } from "@/lib/auth";
-import { createSignedPortfolioUrl } from "@/lib/supabase-storage";
+import { getOwnerSessionId } from "@/lib/auth";
+import { createSignedPortfolioUrl } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
 
@@ -13,12 +12,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user || !isOwnerId(user.id)) {
+  if (!(await getOwnerSessionId())) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

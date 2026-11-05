@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 
-import { createClient } from "@/src/lib/supabase/server";
 import { db } from "@/lib/db";
-import { isOwnerId } from "@/lib/auth";
+import { getOwnerSessionId } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -130,11 +129,7 @@ async function respond(ids: string[] | null, format: "csv" | "xlsx", label: stri
 
 /** All contacts as a CSV (the My Profile download link). */
 export async function GET() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user || !isOwnerId(user.id)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await getOwnerSessionId())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   return respond(null, "csv", "");
 }
 
@@ -144,11 +139,7 @@ export async function GET() {
  * "ids" it exports every active contact.
  */
 export async function POST(request: Request) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user || !isOwnerId(user.id)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await getOwnerSessionId())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   let body: { ids?: unknown; format?: unknown; label?: unknown };
   try {

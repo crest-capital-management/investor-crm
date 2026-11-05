@@ -1,18 +1,16 @@
 /**
- * Derives a human-readable display name from a Supabase user object.
+ * Derives a human-readable display name from the signed-in user.
  * Follows the fallback chain:
- * 1. user_metadata.full_name
- * 2. user_metadata.name
- * 3. Email handle (split by '.', '_', '-', capitalized)
- * 4. Fallback: "User"
+ * 1. name
+ * 2. Email handle (split by '.', '_', '-', capitalized)
+ * 3. Fallback: "User"
  */
 export function getUserDisplayName(user: {
   email?: string | null;
-  user_metadata?: Record<string, unknown> | null;
+  name?: string | null;
 } | null | undefined): string {
   if (!user) return "User";
-  const meta = user.user_metadata ?? {};
-  const rawName = String(meta.full_name || meta.name || "").trim();
+  const rawName = (user.name ?? "").trim();
   const email = user.email ?? "";
 
   let displayName = rawName;

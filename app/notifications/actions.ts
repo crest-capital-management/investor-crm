@@ -30,8 +30,8 @@ function truncate(value: string, max = 80) {
 }
 
 export async function getNotifications(): Promise<NotificationsResult> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { items: [], badgeCount: 0 };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { items: [], badgeCount: 0 };
 
   const settings = await getAppSettings();
   const now = new Date();

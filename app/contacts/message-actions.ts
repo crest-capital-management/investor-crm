@@ -13,8 +13,8 @@ import { isReplyWindowOpen } from "@/lib/reply-window";
 export async function generatePersonalisedMessage(
   contactId: string,
 ): Promise<{ message: string; windowOpen: boolean } | { error: string }> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const id = contactId.trim();
   let contact: DraftInput["contact"] | null;

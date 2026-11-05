@@ -127,8 +127,8 @@ export async function analyzePortfolioUpdate(args: {
   previousAnalysis: PortfolioAnalysis | null;
   previousLabel: string | null;
 }): Promise<PortfolioAnalysis> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY is not configured.");
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured.");
 
   const kind = portfolioFileKind(args.fileName, args.mimeType);
   if (!kind) throw new Error("Unsupported file type. Please use PDF, Excel (.xlsx) or CSV.");

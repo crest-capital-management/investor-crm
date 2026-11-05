@@ -60,8 +60,8 @@ function formatPortfolio(portfolio: PortfolioAnalysis | null) {
  * with a short reason. Only a suggestion: the owner can override it.
  */
 export async function scoreProspect(input: ScoringInput): Promise<ScoringResult> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY is not configured.");
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured.");
 
   const notes = [...input.meetingNotes]
     .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())

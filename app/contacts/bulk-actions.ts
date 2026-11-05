@@ -33,8 +33,8 @@ export async function bulkChangeTags(
   mode: BulkTagMode,
   tag: string,
 ): Promise<{ success: true; updated: number } | { error: string }> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const normalizedTag = TAG_OPTIONS.find((option) => option === tag.trim());
   if (!normalizedTag) return { error: "That tag is not available." };
@@ -282,8 +282,8 @@ export async function previewContactUpdate(
   rows: ContactUpdateRow[],
   tagMode: TagUpdateMode,
 ): Promise<{ preview: ContactUpdatePreview } | { error: string }> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
   if (!Array.isArray(rows) || rows.length === 0) return { error: "The file has no rows." };
   if (rows.length > 20000) return { error: "That file is too large. Please split it into smaller files." };
 
@@ -297,8 +297,8 @@ export async function applyContactUpdate(
   rows: ContactUpdateRow[],
   tagMode: TagUpdateMode,
 ): Promise<{ success: true; updated: number; preview: ContactUpdatePreview } | { error: string }> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
   if (!Array.isArray(rows) || rows.length === 0) return { error: "The file has no rows." };
   if (rows.length > 20000) return { error: "That file is too large. Please split it into smaller files." };
 

@@ -1,6 +1,6 @@
 /**
  * Gemini API integration helper for CREST Capital Management CRM.
- * Requires GEMINI_API_KEY in environment.
+ * Requires ANTHROPIC_API_KEY in environment.
  */
 
 export type ChatMessageForSummary = {
@@ -121,10 +121,10 @@ export async function callGeminiGenerateContent(
 export async function generateChatSummary(
   messages: ChatMessageForSummary[]
 ): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
 
   if (!apiKey) {
-    throw new Error("GEMINI_API_KEY is not configured.");
+    throw new Error("ANTHROPIC_API_KEY is not configured.");
   }
 
   if (!messages || messages.length === 0) {
@@ -201,8 +201,8 @@ export async function generateFollowUpSuggestion(
   meetingNotes: MeetingNoteForFollowUp[],
   todayIsoDate: string,
 ): Promise<FollowUpSuggestion> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY is not configured.");
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured.");
 
   if (messages.length === 0 && meetingNotes.length === 0) {
     throw new Error("No WhatsApp history or meeting notes to work from.");
@@ -311,8 +311,8 @@ export async function transcribeVoiceNoteToMeetingNote(
   audioBuffer: Buffer,
   mimeType: string,
 ): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY is not configured.");
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured.");
 
   const prompt = `You are an AI assistant for CREST Capital Management's investor CRM. Listen to this voice recording of a meeting or call with an investor and write it up as a meeting note.
 

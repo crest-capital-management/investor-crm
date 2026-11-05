@@ -8,8 +8,8 @@ import type { AppSettings } from "@/lib/settings";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function saveAppSettings(settings: AppSettings) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) return { error: "Unauthorized" };
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
 
   const reminderEmailTo = settings.reminderEmailTo?.trim() || null;
   if (reminderEmailTo && !EMAIL_PATTERN.test(reminderEmailTo)) {

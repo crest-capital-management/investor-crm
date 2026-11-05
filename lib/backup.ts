@@ -1,6 +1,6 @@
 import { gzipSync } from "node:zlib";
 import { db } from "@/lib/db";
-import { createServiceRoleClient } from "@/lib/supabase-service";
+import { listBackupFiles, removeBackupFiles, saveBackupFile } from "@/lib/storage";
 
 // Each table is read in a stable order.
 const BACKUP_TABLES: Array<{ table: string; orderBy: string[]; optional?: boolean }> = [
@@ -17,7 +17,6 @@ const BACKUP_TABLES: Array<{ table: string; orderBy: string[]; optional?: boolea
   { table: "app_settings", orderBy: ["id"], optional: true },
 ];
 
-export const BACKUP_BUCKET = "backups";
 /** Daily backups older than this are deleted. */
 export const BACKUP_RETENTION_DAYS = 30;
 
@@ -46,9 +45,8 @@ export async function buildCrmBackup(): Promise<CrmBackup> {
 }
 
 /**
- * Saves today's compressed backup to the private "backups" storage bucket
+ * Saves today's compressed backup to the private "backups" storage container
  * (created on first use) and deletes backups older than the retention period.
- * Needs the service-role client.
  */
 export async function saveDailyBackup(): Promise<{
   path: string;
@@ -56,40 +54,29 @@ export async function saveDailyBackup(): Promise<{
   counts: Record<string, number>;
   removed: number;
 }> {
-  const supabase = createServiceRoleClient();
-  // Private bucket: backups hold all CRM data, so never public.
-  const { data: bucket } = await supabase.storage.getBucket(BACKUP_BUCKET);
-  if (!bucket) {
-    const { error } = await supabase.storage.createBucket(BACKUP_BUCKET, { public: false });
-    if (error && !/already exists/i.test(error.message)) {
-      throw new Error(`Could not create the backups bucket: ${error.message}`);
-    }
-  } else if (bucket.public) {
-    throw new Error('The "backups" storage bucket is public. Make it private in Supabase first.');
-  }
-
   const backup = await buildCrmBackup();
   const compressed = gzipSync(Buffer.from(JSON.stringify(backup)));
   const path = `crest-crm-backup-${backup.exportedAt.slice(0, 10)}.json.gz`;
 
-  const { error: uploadError } = await supabase.storage
-    .from(BACKUP_BUCKET)
-    .upload(path, compressed, { contentType: "application/gzip", upsert: true });
-  if (uploadError) throw new Error(`Could not save the backup: ${uploadError.message}`);
+  try {
+    await saveBackupFile(path, compressed);
+  } catch (err) {
+    throw new Error(`Could not save the backup: ${err instanceof Error ? err.message : "unknown error"}`);
+  }
 
   // Remove backups past the retention period.
-  const { data: files } = await supabase.storage.from(BACKUP_BUCKET).list("", { limit: 1000 });
+  const files = await listBackupFiles();
   const cutoff = new Date(Date.now() - BACKUP_RETENTION_DAYS * 24 * 60 * 60 * 1000)
     .toISOString()
     .slice(0, 10);
-  const expired = (files ?? [])
+  const expired = files
     .map((file) => file.name)
     .filter((name) => {
       const date = name.match(/(\d{4}-\d{2}-\d{2})/)?.[1];
       return date !== undefined && date < cutoff;
     });
   if (expired.length) {
-    await supabase.storage.from(BACKUP_BUCKET).remove(expired);
+    await removeBackupFiles(expired);
   }
 
   return { path, bytes: compressed.length, counts: backup.counts, removed: expired.length };

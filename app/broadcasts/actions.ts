@@ -124,8 +124,8 @@ function validateTemplatePayload(data?: {
 }
 
 export async function createBroadcastDraft(data: CreateBroadcastDraftInput) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) {
+  const { error: authError } = await requireActionAuth();
+  if (authError) {
     return { error: "Unauthorized" };
   }
 
@@ -176,8 +176,8 @@ export async function createBroadcastDraft(data: CreateBroadcastDraftInput) {
 export async function createScheduledBroadcast(
   data: CreateScheduledBroadcastInput
 ) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) {
+  const { error: authError } = await requireActionAuth();
+  if (authError) {
     return { error: "Unauthorized" };
   }
 
@@ -245,8 +245,8 @@ export async function createScheduledBroadcast(
 }
 
 export async function updateBroadcast(id: string, data: UpdateBroadcastInput) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) {
+  const { error: authError } = await requireActionAuth();
+  if (authError) {
     return { error: "Unauthorized" };
   }
 
@@ -382,8 +382,8 @@ export async function updateBroadcast(id: string, data: UpdateBroadcastInput) {
 }
 
 export async function deleteBroadcast(id: string) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) {
+  const { error: authError } = await requireActionAuth();
+  if (authError) {
     return { error: "Unauthorized" };
   }
 
@@ -413,8 +413,8 @@ export async function deleteBroadcast(id: string) {
 }
 
 export async function deleteBroadcasts(ids: string[]) {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) {
+  const { error: authError } = await requireActionAuth();
+  if (authError) {
     return { error: "Unauthorized" };
   }
 
@@ -447,8 +447,8 @@ export async function deleteBroadcasts(ids: string[]) {
  * sendBroadcastNow, call it again while the result says `done: false`.
  */
 export async function retryFailedBroadcast(broadcastId: string): Promise<SendBroadcastResult> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) {
+  const { error: authError } = await requireActionAuth();
+  if (authError) {
     return { error: "Unauthorized" };
   }
 
@@ -466,8 +466,8 @@ export async function retryFailedBroadcast(broadcastId: string): Promise<SendBro
 export async function sendBroadcastNow(
   broadcastId: string
 ): Promise<SendBroadcastResult> {
-  const { supabase, error: authError } = await requireActionAuth();
-  if (authError || !supabase) {
+  const { error: authError } = await requireActionAuth();
+  if (authError) {
     return { error: "Unauthorized" };
   }
 

@@ -1,36 +1,13 @@
-import { createServerClient } from "@supabase/ssr";
+import { getToken } from "next-auth/jwt";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function proxy(request: NextRequest) {
-  let response = NextResponse.next({ request });
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-          response = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, options),
-          );
-        },
-      },
-    },
-  );
-
-  // getClaims verifies the session token locally (refreshing it when it has
-  // expired) instead of calling the auth service on every request.
-  const { data: claimsData } = await supabase.auth.getClaims();
+  // getToken checks the signed session cookie locally (no database or network call).
+  const token = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET });
   // Only the CRM owner counts as signed in. Anyone else is sent to /login, and /login
   // stays open to them (so a rejected account can't loop between the two).
-  const claims = claimsData?.claims ?? null;
   const ownerId = process.env.CRM_OWNER_ID?.trim().toLowerCase();
-  const user = claims && ownerId && String(claims.sub).toLowerCase() === ownerId ? claims : null;
+  const user = token?.sub && ownerId && token.sub.toLowerCase() === ownerId ? token : null;
   const pathname = request.nextUrl.pathname;
   const isProtectedRoute =
     pathname === "/" ||
@@ -44,7 +21,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
-  return response;
+  return NextResponse.next();
 }
 
 export const config = {

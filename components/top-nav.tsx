@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Menu, User } from "lucide-react";
-import { createClient } from "@/src/lib/supabase/client";
+import { getSession } from "next-auth/react";
 import { NotificationBell } from "@/components/notification-bell";
 import { useSidebar } from "@/components/sidebar-provider";
 import { cn } from "@/lib/utils";
@@ -13,9 +13,9 @@ import { isPublicPath } from "@/lib/public-routes";
 import { getUserDisplayName, getUserInitials } from "@/lib/user";
 
 function getInitialsFromUser(user: {
-  email?: string;
-  user_metadata?: Record<string, unknown>;
-} | null): string {
+  email?: string | null;
+  name?: string | null;
+} | null | undefined): string {
   if (!user) return "";
   const displayName = getUserDisplayName(user);
   return getUserInitials(displayName);
@@ -26,28 +26,16 @@ export function TopNav() {
   const [initials, setInitials] = useState<string | null>(null);
   const { toggle } = useSidebar();
 
+  // Re-read on navigation so the initials appear right after logging in and clear after logging out.
   useEffect(() => {
-    const supabase = createClient();
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user) {
-        setInitials(getInitialsFromUser(data.user));
-      }
+    let cancelled = false;
+    getSession().then((session) => {
+      if (!cancelled) setInitials(session?.user ? getInitialsFromUser(session.user) : null);
     });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        setInitials(getInitialsFromUser(session.user));
-      } else {
-        setInitials(null);
-      }
-    });
-
     return () => {
-      subscription.unsubscribe();
+      cancelled = true;
     };
-  }, []);
+  }, [pathname]);
 
   if (isPublicPath(pathname)) {
     return null;

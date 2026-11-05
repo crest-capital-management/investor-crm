@@ -1,6 +1,5 @@
-import { createServiceRoleClient } from "@/lib/supabase-service";
+import { saveInboundMedia } from "@/lib/storage";
 
-const WHATSAPP_MEDIA_BUCKET = "whatsapp-media";
 /** Bigger files stay as a Meta reference (opened on demand) to keep the webhook fast. */
 const MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024;
 
@@ -29,7 +28,7 @@ function extensionFor(mimeType: string, filename?: string): string {
 
 /**
  * Downloads a file a contact sent on WhatsApp (by Meta media ID) and stores
- * it in the whatsapp-media bucket, returning its URL. The storage path is
+ * it in the whatsapp-media container, returning its media_url. The storage path is
  * fixed per media ID, so receiving the same webhook twice doesn't duplicate it.
  * Meta keeps media for about 30 days; after that this throws.
  */
@@ -64,11 +63,5 @@ export async function storeInboundWhatsAppMedia(
   const safeId = mediaId.replace(/[^a-zA-Z0-9_-]/g, "_");
   const path = `inbound/${safeId}.${extensionFor(mimeType, filename)}`;
 
-  const supabase = createServiceRoleClient();
-  const { error } = await supabase.storage
-    .from(WHATSAPP_MEDIA_BUCKET)
-    .upload(path, bytes, { contentType: mimeType.split(";")[0].trim(), upsert: true });
-  if (error) throw new Error(`Failed to store media file: ${error.message}`);
-
-  return supabase.storage.from(WHATSAPP_MEDIA_BUCKET).getPublicUrl(path).data.publicUrl;
+  return saveInboundMedia(path, bytes, mimeType.split(";")[0].trim());
 }
