@@ -1,3 +1,4 @@
+import type { Readable } from "node:stream";
 import {
   BlobSASPermissions,
   BlobServiceClient,
@@ -97,19 +98,54 @@ export function mediaUrlForPath(path: string): string {
 }
 
 export type UploadTarget = { path: string; uploadUrl: string };
+export type UploadBucket = typeof WHATSAPP_MEDIA_BUCKET | typeof PORTFOLIO_BUCKET;
+
+/** Largest file the CRM accepts per container (Meta's 16 MB media limit; 15 MB for portfolio files). */
+export const MAX_UPLOAD_BYTES: Record<UploadBucket, number> = {
+  [WHATSAPP_MEDIA_BUCKET]: 16 * 1024 * 1024,
+  [PORTFOLIO_BUCKET]: 15 * 1024 * 1024,
+};
+/** An upload address from createMediaUploadTarget / createPortfolioUploadTarget stays usable this long. */
+export const UPLOAD_WINDOW_MS = 15 * 60 * 1000;
+
+// <contact uuid>/<13-digit time>-<safe name>, as newUploadPath makes it.
+const UPLOAD_PATH = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(\d{13})-[a-zA-Z0-9._-]{1,200}$/i;
+
+/** True if the path is one newUploadPath made in the last UPLOAD_WINDOW_MS. */
+export function isFreshUploadPath(path: string): boolean {
+  const match = path.match(UPLOAD_PATH);
+  if (!match) return false;
+  const age = Date.now() - Number(match[2]);
+  return age >= -60 * 1000 && age <= UPLOAD_WINDOW_MS;
+}
+
+function uploadAddress(bucket: UploadBucket, path: string): string {
+  return `/api/uploads?bucket=${encodeURIComponent(bucket)}&path=${encodeURIComponent(path)}`;
+}
 
 /**
- * Lets the browser upload a file straight to storage, so a big attachment
- * doesn't have to pass through the web server. The link can only create or
- * write that one file and expires after 15 minutes.
+ * Reserves a place for a file the browser is about to upload. The browser sends
+ * the file to the CRM's own /api/uploads route (signed-in owner only), which
+ * writes it to storage; storage itself is never opened to the browser.
  */
 export async function createMediaUploadTarget(contactId: string, filename: string): Promise<UploadTarget> {
   const path = newUploadPath(contactId, filename);
-  try {
-    return { path, uploadUrl: await signedUrl(WHATSAPP_MEDIA_BUCKET, path, "cw", 15 * 60) };
-  } catch (err) {
-    throw new Error(`Could not prepare the upload: ${err instanceof Error ? err.message : "unknown error"}`);
-  }
+  return { path, uploadUrl: uploadAddress(WHATSAPP_MEDIA_BUCKET, path) };
+}
+
+/** Writes an uploaded file from the browser (a stream) to storage. Never overwrites an existing file. */
+export async function saveUploadedFile(
+  bucket: UploadBucket,
+  path: string,
+  body: Readable,
+  contentType: string,
+): Promise<void> {
+  await container(bucket)
+    .getBlockBlobClient(path)
+    .uploadStream(body, 4 * 1024 * 1024, 4, {
+      blobHTTPHeaders: { blobContentType: contentType },
+      conditions: { ifNoneMatch: "*" },
+    });
 }
 
 /** Saves a file received from WhatsApp, replacing any earlier copy, and returns its media_url. */
@@ -136,11 +172,7 @@ export async function downloadStoredMedia(path: string): Promise<Buffer> {
 /** Same as createMediaUploadTarget, for the portfolio-updates container. */
 export async function createPortfolioUploadTarget(contactId: string, filename: string): Promise<UploadTarget> {
   const path = newUploadPath(contactId, filename);
-  try {
-    return { path, uploadUrl: await signedUrl(PORTFOLIO_BUCKET, path, "cw", 15 * 60) };
-  } catch (err) {
-    throw new Error(`Could not prepare the upload: ${err instanceof Error ? err.message : "unknown error"}`);
-  }
+  return { path, uploadUrl: uploadAddress(PORTFOLIO_BUCKET, path) };
 }
 
 /** Saves bytes (e.g. pasted text) straight into the portfolio-updates container. Never overwrites. */

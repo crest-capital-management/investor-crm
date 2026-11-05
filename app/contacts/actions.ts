@@ -657,9 +657,10 @@ export async function resendFailedWhatsAppMessage(messageId: string): Promise<Se
 }
 
 /**
- * Step 1 of sending a file: checks it and returns a one-time upload address so
- * the browser can send the file straight to storage. Going around the web
- * server avoids its request-size cap, so files up to Meta's 16 MB limit work.
+ * Step 1 of sending a file: checks it and returns the address the browser
+ * uploads it to (the CRM's /api/uploads route, which saves it to storage).
+ * A route rather than this action carries the file, because actions cap the
+ * request size; files up to Meta's 16 MB limit work.
  */
 export async function prepareWhatsAppMediaUpload(
   contactId: string,

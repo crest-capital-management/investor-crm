@@ -18,7 +18,7 @@ https://investor-crm.crest-capital.com.
 | `WHATSAPP_WEBHOOK_VERIFY_TOKEN` | Same as Netlify |
 | `META_APP_SECRET` | Same as Netlify (checks that webhook calls really come from Meta) |
 | `SCHEDULER_SECRET` | Same as Netlify (the scheduled jobs send it) |
-| `GEMINI_API_KEY` | Same as Netlify (AI features) |
+| `ANTHROPIC_API_KEY` | AI features. **For now put the Gemini key here** (on Netlify it is still called `GEMINI_API_KEY`); the code still calls Google Gemini until the AI calls are moved to Anthropic, so an Anthropic key here would stop the AI features |
 | `BREVO_API_KEY`, `BREVO_SENDER_EMAIL` | Same as Netlify (email) |
 | `BREVO_SENDER_NAME` | Optional, default "CREST CRM" |
 | `RESEND_API_KEY`, `RESEND_FROM_EMAIL` | Optional fallback email service, same as Netlify |
@@ -40,6 +40,7 @@ After Phase 3 the three Supabase settings are no longer used by the app and can 
 ## Also needed on the server
 
 - **nginx** must pass `X-Forwarded-For` (`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`); the login lockout uses it.
+- **nginx upload size** (Phase 3): file uploads go through the app (`/api/uploads`), up to 16 MB, so set `client_max_body_size 20m;` (nginx's default is 1 MB, which would reject most files).
 - **Scheduled jobs** (were Netlify functions): a cron/timer that sends `POST` with header `Authorization: Bearer <SCHEDULER_SECRET>` to
   - `/api/broadcasts/trigger` every 5 minutes,
   - `/api/follow-ups/trigger` daily at 10:00 IST,

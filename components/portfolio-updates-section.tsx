@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/components/toast-provider";
 import { toIndianGrouping } from "@/lib/indian-numbers";
-import { uploadToSignedUrl } from "@/lib/upload-to-storage";
+import { uploadFile } from "@/lib/upload-to-storage";
 import {
   analyzePortfolioUpdateById,
   createPortfolioUpdate,
@@ -257,8 +257,8 @@ export function PortfolioUpdatesSection({
         toast(prepared.error, "error");
         return;
       }
-      // The file goes straight to storage, not through the web server.
-      if (!(await uploadToSignedUrl(prepared.uploadUrl, file))) {
+      // The file goes to the CRM's upload route, which saves it to storage.
+      if (!(await uploadFile(prepared.uploadUrl, file))) {
         toast("The file could not be uploaded. Please try again.", "error");
         return;
       }

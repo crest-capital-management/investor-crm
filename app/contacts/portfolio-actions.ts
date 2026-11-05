@@ -32,7 +32,7 @@ async function findContact(id: string): Promise<{ id: string } | null> {
   }
 }
 
-/** Step 1: checks the file and returns a one-time address so the browser uploads straight to storage. */
+/** Step 1: checks the file and returns the address the browser uploads it to (the CRM's /api/uploads route). */
 export async function preparePortfolioUpload(
   contactId: string,
   filename: string,
