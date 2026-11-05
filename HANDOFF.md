@@ -1,9 +1,9 @@
 # CREST CRM — HANDOFF / CONTEXT
-## Updated: 4 November 2026 (Azure migration Phase 1 in progress: see section 0)
+## Updated: 5 November 2026 (Azure migration DONE: the CRM runs on the company server, see section 0)
 
 You are continuing development of an internal single-user Investor CRM for CREST Capital Management. This document is the source of truth for context — read it fully before suggesting any changes.
 
-**CURRENT PHASE (4 Nov 2026): migrating the live CRM off Supabase/Netlify to the company's Azure server, in three tested phases. Phase 1 (database to Azure PostgreSQL via `pg`) is coded and committed on branch `azure-phase1-database` but NOT yet run against a database. Read section 0 first.** The earlier status below is still true for the features themselves: the build is feature-complete for now. On 5–6 Oct a second large batch was added (§4, items 18–29): PDF auto-reply, loading screens, Brevo email, duplicate protection, broadcast delivery results + retry, the final tag list, owner checks, error pages, direct file uploads with signed links, merged detail components. **Open: deploy the latest push and run the pending SQL (§3), then the Meta billing / Business Verification blocker (§5).** The three `CRM_*_DOCUMENTATION` files (.md and .docx) and `CREST-CRM-PRD.docx` in the project root are snapshots from early 6 Oct and are slightly behind items 21–29; they are not committed.
+**CURRENT STATE (5 Nov 2026): the switch-over to Azure is done.** The live CRM is **https://investor-crm.crest-capital.com** (company Azure server 98.70.30.45, nginx → app on port 3002), database **`crest_crm`**, logins in **`crm_users`** (NextAuth + bcrypt), files in Azure Blob (account `crestfinancialreports`), WhatsApp webhook pointing at the company address. **Netlify (investor-crm.netlify.app) is frozen** (scheduled jobs off, builds stopped) and **Supabase is no longer used by the app**; both are kept as a way back for about 2 weeks. Phases 1-3 are merged into `master` (PRs #2, #3, #4). Open items: see "After the switch-over" in section 0. Older notes below describe the Supabase/Netlify setup and are history.
 
 IMPORTANT:
 - The project is substantially built. DO NOT rebuild existing functionality.
@@ -19,7 +19,22 @@ IMPORTANT:
 
 ---
 
-# 0. AZURE MIGRATION (IN PROGRESS, started 3 Nov 2026)
+# 0. AZURE MIGRATION (DONE 5 Nov 2026, started 3 Nov 2026)
+
+## Switch-over, 5 Nov 2026 (done, following azure/SWITCHOVER.md)
+- **Rules from now:** every change on its own branch, PR to `master`; **Aditya pushes, Claude never pushes**; Sharath S. reviews, merges and deploys on the server himself (the server does not update from GitHub on its own).
+- Before: PR #3 deployed by Sharath; server checks from outside: NextAuth up, nginx lets 2 MB+ uploads through, webhook and scheduler routes protected; **`NEXTAUTH_URL` was `http://localhost:3002`**, fixed by Sharath to the https address (cookies now `__Host-`/`__Secure-`); a fresh login on the company site updated `crm_users.last_login_at` in `crest_crm`, proving the server uses `crest_crm`. Meta app settings: Privacy Policy URL `https://investor-crm.crest-capital.com/privacy-policy`, data deletion instructions URL `.../privacy-policy#data-deletion` (Aditya).
+- Step 1: Netlify frozen by Aditya (`SCHEDULER_SECRET` deleted + redeploy, so its 3 scheduled functions stop; builds stopped). Step 2: Supabase had no pending/scheduled broadcasts; 1 new row since 4 Nov (a WhatsApp message). Step 3: `copy-data.js --replace` (approved): all 11 tables identical, 57 messages; `crm_users` untouched. Step 4: `copy-files.js`: 1 new backup file copied, all 41 identical. Step 5: Meta webhook moved by Aditya to `https://investor-crm.crest-capital.com/api/whatsapp/webhook`; test message "test 2" arrived in `crest_crm`; gap check found 1 message ("Hello") that reached Supabase between steps 3 and 5, copied by id → 59 messages. Step 7 smoke test on the company site: 1,562 contacts; incoming messages shown; "reply test" sent from the CRM and reported **read** (delivery status webhooks work); the reply "ok" arrived; Back up now saved to Azure; portfolio upload stored the file. Step 8: team told to use only the company address.
+- **Problem found:** AI features fail on the server with "API key not valid": the server's `ANTHROPIC_API_KEY` does not hold the Gemini key (the code still calls Gemini). Sharath to put the Gemini key value there and restart; then Re-analyze the test portfolio update and delete it (it is a real client statement on Aditya's test contact).
+
+## After the switch-over (open)
+- Sharath: confirm the 3 cron jobs (broadcasts every 5 min, reminder 10:00 IST, backup 03:00 IST, lines in `azure/SWITCHOVER.md`); until then scheduled broadcasts do not go out.
+- Sharath: fix `ANTHROPIC_API_KEY` (Gemini key for now); rotate the storage account key (it was emailed and pasted in chat) and update the server env and `.env.local`.
+- Aditya: download one final backup from Supabase Storage and keep it outside the CRM.
+- After ~2 weeks without problems: delete the Netlify site; remove `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL` from the server env and `.env.local`. After 30 days: pause or delete the Supabase project.
+- When the Anthropic key arrives: rewrite the AI features (`lib/gemini.ts`, `lib/message-drafting.ts`, `lib/portfolio-analysis.ts`, `lib/prospect-scoring.ts`) for Claude.
+- Proposed, not built: **Restore from backup** on My Profile (pick a stored backup or upload one, preview, type RESTORE, automatic safety backup, all-or-nothing replace of the 11 tables).
+- `.env.local` on Aditya's PC points at the live database now (`crest_crm`): local testing writes to live data. For local work, consider a separate test database.
 
 **Why:** the CRM is live at **https://investor-crm.crest-capital.com** (earlier https://investor-crm.netlify.app) and still runs on Supabase + Netlify. The company wants it on its own Azure server. The senior's plan, done **one phase at a time so each can be tested**:
 1. **Phase 1: database** Supabase Postgres to Azure PostgreSQL, replacing `supabase-js` table queries with direct SQL (`pg`). **Coded and committed, not yet run against a database.**
