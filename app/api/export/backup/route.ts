@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/src/lib/supabase/server";
 import { buildCrmBackup } from "@/lib/backup";
+import { isOwnerId } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -10,13 +11,13 @@ export async function GET() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) {
+  if (!user || !isOwnerId(user.id)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   let backup;
   try {
-    backup = await buildCrmBackup(supabase);
+    backup = await buildCrmBackup();
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: `Backup failed: ${message}` }, { status: 500 });

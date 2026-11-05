@@ -26,7 +26,11 @@ export async function proxy(request: NextRequest) {
   // getClaims verifies the session token locally (refreshing it when it has
   // expired) instead of calling the auth service on every request.
   const { data: claimsData } = await supabase.auth.getClaims();
-  const user = claimsData?.claims ?? null;
+  // Only the CRM owner counts as signed in. Anyone else is sent to /login, and /login
+  // stays open to them (so a rejected account can't loop between the two).
+  const claims = claimsData?.claims ?? null;
+  const ownerId = process.env.CRM_OWNER_ID?.trim().toLowerCase();
+  const user = claims && ownerId && String(claims.sub).toLowerCase() === ownerId ? claims : null;
   const pathname = request.nextUrl.pathname;
   const isProtectedRoute =
     pathname === "/" ||

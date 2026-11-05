@@ -3,12 +3,12 @@
 import { revalidatePath } from "next/cache";
 
 import { requireActionAuth } from "@/lib/auth";
+import { db } from "@/lib/db";
 import {
   normalizeGroupMembers,
   type GroupContactRelation,
 } from "@/lib/group-members";
-import { fetchAllPages } from "@/lib/supabase-pagination";
-import { ilikeAnyFilter } from "@/lib/postgrest-filter";
+import { escapeLike, ilikeAny } from "@/lib/sql";
 
 function validateName(value: string) {
   const name = value.trim();
@@ -17,32 +17,40 @@ function validateName(value: string) {
   return null;
 }
 
-async function hasDuplicateName(
-  supabase: NonNullable<Awaited<ReturnType<typeof requireActionAuth>>["supabase"]>,
-  name: string,
-  excludeId?: string,
-) {
-  let query = supabase.from("groups").select("id").ilike("name", name).limit(1);
-
-  if (excludeId) query = query.neq("id", excludeId);
-
-  const { data, error } = await query.maybeSingle();
-  return { duplicate: Boolean(data), error };
+async function hasDuplicateName(name: string, excludeId?: string) {
+  try {
+    const row = await db.maybeOne<{ id: string }>(
+      `select id from public.groups
+       where name ilike $1 and ($2::uuid is null or id <> $2::uuid)
+       limit 1`,
+      [escapeLike(name), excludeId ?? null],
+    );
+    return { duplicate: Boolean(row), error: null };
+  } catch (error) {
+    return { duplicate: false, error };
+  }
 }
 
 const EMPTY_GROUP_ERROR = "A group must have at least one member.";
 
-async function countActiveMembers(
-  supabase: NonNullable<Awaited<ReturnType<typeof requireActionAuth>>["supabase"]>,
-  groupId: string,
-) {
-  const { count, error } = await supabase
-    .from("contact_groups")
-    .select("contact_id, contacts!inner(id)", { count: "exact", head: true })
-    .eq("group_id", groupId)
-    .is("contacts.deleted_at", null);
+async function countActiveMembers(groupId: string) {
+  try {
+    const row = await db.one<{ count: number }>(
+      `select count(*)::int as count
+       from public.contact_groups cg
+       join public.contacts c on c.id = cg.contact_id
+       where cg.group_id = $1 and c.deleted_at is null`,
+      [groupId],
+    );
+    return { count: row.count, error: null };
+  } catch (error) {
+    return { count: 0, error };
+  }
+}
 
-  return { count: count ?? 0, error };
+async function groupExists(groupId: string) {
+  const row = await db.maybeOne<{ id: string }>(`select id from public.groups where id = $1`, [groupId]);
+  return Boolean(row);
 }
 
 export async function addGroup(name: string, contactIds: string[]) {
@@ -60,47 +68,39 @@ export async function addGroup(name: string, contactIds: string[]) {
     return { error: `${EMPTY_GROUP_ERROR} Select at least one contact.` };
   }
 
-  const duplicateCheck = await hasDuplicateName(supabase, trimmedName);
+  const duplicateCheck = await hasDuplicateName(trimmedName);
   if (duplicateCheck.error) return { error: "The group could not be checked for duplicates." };
   if (duplicateCheck.duplicate) return { error: "A group with this name already exists." };
 
   // Check the contacts exist before creating anything, so a stale selection
   // never leaves a half-made group behind.
-  const foundIds = new Set<string>();
-  for (let i = 0; i < normalizedContactIds.length; i += 100) {
-    const { data: contacts, error: contactsError } = await supabase
-      .from("contacts")
-      .select("id")
-      .is("deleted_at", null)
-      .in("id", normalizedContactIds.slice(i, i + 100));
-
-    if (contactsError) return { error: "The selected contacts could not be checked." };
-    (contacts ?? []).forEach((contact) => foundIds.add(contact.id as string));
-  }
-  if (foundIds.size !== normalizedContactIds.length) {
-    return { error: "One or more selected contacts could not be found." };
-  }
-
-  const { data: group, error } = await supabase
-    .from("groups")
-    .insert({ name: trimmedName })
-    .select("id")
-    .single();
-  if (error || !group) return { error: "The group could not be created." };
-
-  for (let i = 0; i < normalizedContactIds.length; i += 500) {
-    const { error: membersError } = await supabase.from("contact_groups").insert(
-      normalizedContactIds
-        .slice(i, i + 500)
-        .map((contactId) => ({ contact_id: contactId, group_id: group.id })),
+  try {
+    const found = await db.query<{ id: string }>(
+      `select id from public.contacts where deleted_at is null and id = any($1::uuid[])`,
+      [normalizedContactIds],
     );
-
-    if (membersError) {
-      // Roll back so an empty or partial group is never left behind.
-      await supabase.from("contact_groups").delete().eq("group_id", group.id);
-      await supabase.from("groups").delete().eq("id", group.id);
-      return { error: "The group could not be created with those contacts." };
+    if (new Set(found.map((contact) => contact.id)).size !== normalizedContactIds.length) {
+      return { error: "One or more selected contacts could not be found." };
     }
+  } catch {
+    return { error: "The selected contacts could not be checked." };
+  }
+
+  // The group and its members are saved together, so an empty or partial group is never left behind.
+  try {
+    await db.tx(async (tx) => {
+      const group = await tx.one<{ id: string }>(
+        `insert into public.groups (name) values ($1) returning id`,
+        [trimmedName],
+      );
+      await tx.execute(
+        `insert into public.contact_groups (contact_id, group_id)
+         select unnest($1::uuid[]), $2::uuid`,
+        [normalizedContactIds, group.id],
+      );
+    });
+  } catch {
+    return { error: "The group could not be created with those contacts." };
   }
 
   revalidatePath("/groups");
@@ -116,12 +116,15 @@ export async function updateGroup(id: string, formData: FormData) {
   const validationError = validateName(name);
   if (validationError) return { error: validationError };
 
-  const duplicateCheck = await hasDuplicateName(supabase, name, id);
+  const duplicateCheck = await hasDuplicateName(name, id);
   if (duplicateCheck.error) return { error: "The group could not be checked for duplicates." };
   if (duplicateCheck.duplicate) return { error: "A group with this name already exists." };
 
-  const { error } = await supabase.from("groups").update({ name }).eq("id", id);
-  if (error) return { error: "The group could not be updated." };
+  try {
+    await db.execute(`update public.groups set name = $1 where id = $2`, [name, id]);
+  } catch {
+    return { error: "The group could not be updated." };
+  }
 
   revalidatePath("/groups");
   revalidatePath("/contacts");
@@ -132,15 +135,14 @@ export async function deleteGroup(id: string) {
   const { supabase, error: authError } = await requireActionAuth();
   if (authError || !supabase) return { error: "Unauthorized" };
 
-  const { error: relationError } = await supabase
-    .from("contact_groups")
-    .delete()
-    .eq("group_id", id);
-
-  if (relationError) return { error: "The group could not be deleted." };
-
-  const { error } = await supabase.from("groups").delete().eq("id", id);
-  if (error) return { error: "The group could not be deleted." };
+  try {
+    await db.tx(async (tx) => {
+      await tx.execute(`delete from public.contact_groups where group_id = $1`, [id]);
+      await tx.execute(`delete from public.groups where id = $1`, [id]);
+    });
+  } catch {
+    return { error: "The group could not be deleted." };
+  }
 
   revalidatePath("/groups");
   revalidatePath("/contacts");
@@ -155,27 +157,27 @@ export async function removeContactFromGroup(groupId: string, contactId: string)
     return { error: "The group membership could not be found." };
   }
 
-  const [{ data: group, error: groupError }, { data: contact, error: contactError }] =
-    await Promise.all([
-      supabase.from("groups").select("id").eq("id", groupId).maybeSingle(),
-      supabase.from("contacts").select("id").eq("id", contactId).maybeSingle(),
+  try {
+    const [group, contact] = await Promise.all([
+      db.maybeOne<{ id: string }>(`select id from public.groups where id = $1`, [groupId]),
+      db.maybeOne<{ id: string }>(`select id from public.contacts where id = $1`, [contactId]),
     ]);
-
-  if (groupError || contactError || !group || !contact) {
+    if (!group || !contact) return { error: "The group membership could not be found." };
+  } catch {
     return { error: "The group membership could not be found." };
   }
 
-  const { data: membership, error: membershipError } = await supabase
-    .from("contact_groups")
-    .select("contact_id")
-    .eq("group_id", groupId)
-    .eq("contact_id", contactId)
-    .maybeSingle();
+  try {
+    const membership = await db.maybeOne<{ contact_id: string }>(
+      `select contact_id from public.contact_groups where group_id = $1 and contact_id = $2`,
+      [groupId, contactId],
+    );
+    if (!membership) return { error: "This contact is not in the group." };
+  } catch {
+    return { error: "The group membership could not be checked." };
+  }
 
-  if (membershipError) return { error: "The group membership could not be checked." };
-  if (!membership) return { error: "This contact is not in the group." };
-
-  const members = await countActiveMembers(supabase, groupId);
+  const members = await countActiveMembers(groupId);
   if (members.error) return { error: "The group members could not be counted." };
   if (members.count <= 1) {
     return {
@@ -183,13 +185,14 @@ export async function removeContactFromGroup(groupId: string, contactId: string)
     };
   }
 
-  const { error } = await supabase
-    .from("contact_groups")
-    .delete()
-    .eq("group_id", groupId)
-    .eq("contact_id", contactId);
-
-  if (error) return { error: "The contact could not be removed from the group." };
+  try {
+    await db.execute(
+      `delete from public.contact_groups where group_id = $1 and contact_id = $2`,
+      [groupId, contactId],
+    );
+  } catch {
+    return { error: "The contact could not be removed from the group." };
+  }
 
   revalidatePath("/groups");
   revalidatePath("/contacts");
@@ -206,35 +209,39 @@ export async function removeContactsFromGroup(groupId: string, contactIds: strin
 
   if (!groupId.trim()) return { error: "The group could not be found." };
   if (!normalizedContactIds.length) return { error: "No contacts were selected." };
-  const { data: group, error: groupError } = await supabase
-    .from("groups")
-    .select("id")
-    .eq("id", groupId)
-    .maybeSingle();
 
-  if (groupError || !group) return { error: "The group could not be found." };
+  try {
+    if (!(await groupExists(groupId))) return { error: "The group could not be found." };
+  } catch {
+    return { error: "The group could not be found." };
+  }
 
-  const { data: contacts, error: contactsError } = await supabase
-    .from("contacts")
-    .select("id")
-    .in("id", normalizedContactIds);
-
-  if (contactsError || contacts?.length !== normalizedContactIds.length) {
+  try {
+    const contacts = await db.query<{ id: string }>(
+      `select id from public.contacts where id = any($1::uuid[])`,
+      [normalizedContactIds],
+    );
+    if (contacts.length !== normalizedContactIds.length) {
+      return { error: "One or more selected contacts could not be found." };
+    }
+  } catch {
     return { error: "One or more selected contacts could not be found." };
   }
 
-  const { data: memberships, error: membershipError } = await supabase
-    .from("contact_groups")
-    .select("contact_id")
-    .eq("group_id", groupId)
-    .in("contact_id", normalizedContactIds);
-
-  if (membershipError) return { error: "The group memberships could not be checked." };
-
-  const memberIds = [...new Set((memberships ?? []).map((membership) => membership.contact_id))];
+  let memberIds: string[];
+  try {
+    const memberships = await db.query<{ contact_id: string }>(
+      `select contact_id from public.contact_groups
+       where group_id = $1 and contact_id = any($2::uuid[])`,
+      [groupId, normalizedContactIds],
+    );
+    memberIds = [...new Set(memberships.map((membership) => membership.contact_id))];
+  } catch {
+    return { error: "The group memberships could not be checked." };
+  }
   if (!memberIds.length) return { error: "The selected contacts are not in this group." };
 
-  const members = await countActiveMembers(supabase, groupId);
+  const members = await countActiveMembers(groupId);
   if (members.error) return { error: "The group members could not be counted." };
   if (members.count - memberIds.length < 1) {
     return {
@@ -242,13 +249,14 @@ export async function removeContactsFromGroup(groupId: string, contactIds: strin
     };
   }
 
-  const { error } = await supabase
-    .from("contact_groups")
-    .delete()
-    .eq("group_id", groupId)
-    .in("contact_id", memberIds);
-
-  if (error) return { error: "The contacts could not be removed from the group." };
+  try {
+    await db.execute(
+      `delete from public.contact_groups where group_id = $1 and contact_id = any($2::uuid[])`,
+      [groupId, memberIds],
+    );
+  } catch {
+    return { error: "The contacts could not be removed from the group." };
+  }
 
   revalidatePath("/groups");
   revalidatePath("/contacts");
@@ -267,26 +275,24 @@ export async function deleteGroups(ids: string[]) {
     return { error: "No groups were selected." };
   }
 
-  const { data: existingGroups, error: lookupError } = await supabase
-    .from("groups")
-    .select("id")
-    .in("id", groupIds);
-
-  if (lookupError || existingGroups?.length !== groupIds.length) {
+  try {
+    const existingGroups = await db.query<{ id: string }>(
+      `select id from public.groups where id = any($1::uuid[])`,
+      [groupIds],
+    );
+    if (existingGroups.length !== groupIds.length) {
+      return { error: "The selected groups could not be found." };
+    }
+  } catch {
     return { error: "The selected groups could not be found." };
   }
 
-  const { error: relationError } = await supabase
-    .from("contact_groups")
-    .delete()
-    .in("group_id", groupIds);
-
-  if (relationError) {
-    return { error: "The selected groups could not be deleted." };
-  }
-
-  const { error } = await supabase.from("groups").delete().in("id", groupIds);
-  if (error) {
+  try {
+    await db.tx(async (tx) => {
+      await tx.execute(`delete from public.contact_groups where group_id = any($1::uuid[])`, [groupIds]);
+      await tx.execute(`delete from public.groups where id = any($1::uuid[])`, [groupIds]);
+    });
+  } catch {
     return { error: "The selected groups could not be deleted." };
   }
 
@@ -307,39 +313,40 @@ export async function getGroupContactOptions(groupId: string, search = "") {
 
   if (!groupId.trim()) return { error: "The group could not be found." };
 
-  const { data: group, error: groupError } = await supabase
-    .from("groups")
-    .select("id")
-    .eq("id", groupId)
-    .maybeSingle();
+  try {
+    if (!(await groupExists(groupId))) return { error: "The group could not be found." };
+  } catch {
+    return { error: "The group could not be found." };
+  }
 
-  if (groupError || !group) return { error: "The group could not be found." };
-
-  const { data: memberships, error: membershipError } = await supabase
-    .from("contact_groups")
-    .select("contact_id")
-    .eq("group_id", groupId);
-
-  if (membershipError) return { error: "Contacts could not be loaded." };
+  let memberships: { contact_id: string }[];
+  try {
+    memberships = await db.query<{ contact_id: string }>(
+      `select contact_id from public.contact_groups where group_id = $1`,
+      [groupId],
+    );
+  } catch {
+    return { error: "Contacts could not be loaded." };
+  }
 
   const trimmedSearch = search.trim();
 
   let contacts: GroupContactOption[];
   try {
-    contacts = await fetchAllPages<GroupContactOption>((from, to) => {
-      let query = supabase.from("contacts").select("id, name, phone").is("deleted_at", null);
-      if (trimmedSearch) {
-        query = query.or(
-          ilikeAnyFilter(["name", "phone"], trimmedSearch),
-        );
-      }
-      return query.order("name", { ascending: true }).range(from, to);
-    });
+    const params: unknown[] = [];
+    const where = ["deleted_at is null"];
+    if (trimmedSearch) where.push(ilikeAny(["name", "phone"], trimmedSearch, params));
+    contacts = await db.query<GroupContactOption>(
+      `select id, name, phone from public.contacts
+       where ${where.join(" and ")}
+       order by name asc, id asc`,
+      params,
+    );
   } catch {
     return { error: "Contacts could not be loaded." };
   }
 
-  const memberIds = new Set((memberships ?? []).map((membership) => membership.contact_id));
+  const memberIds = new Set(memberships.map((membership) => membership.contact_id));
   return {
     contacts: contacts.filter((contact) => !memberIds.has(contact.id)),
     totalContacts: contacts.length,
@@ -358,19 +365,23 @@ export async function searchContactsForNewGroup(search = "") {
 
   const trimmedSearch = search.trim();
 
-  let query = supabase.from("contacts").select("id, name, phone").is("deleted_at", null);
-  if (trimmedSearch) {
-    query = query.or(ilikeAnyFilter(["name", "phone"], trimmedSearch));
+  let rows: GroupContactOption[];
+  try {
+    const params: unknown[] = [];
+    const where = ["deleted_at is null"];
+    if (trimmedSearch) where.push(ilikeAny(["name", "phone"], trimmedSearch, params));
+    params.push(NEW_GROUP_CONTACT_LIMIT + 1);
+    rows = await db.query<GroupContactOption>(
+      `select id, name, phone from public.contacts
+       where ${where.join(" and ")}
+       order by name asc, id asc
+       limit $${params.length}`,
+      params,
+    );
+  } catch {
+    return { error: "Contacts could not be loaded." };
   }
 
-  const { data, error } = await query
-    .order("name", { ascending: true })
-    .order("id", { ascending: true })
-    .limit(NEW_GROUP_CONTACT_LIMIT + 1);
-
-  if (error) return { error: "Contacts could not be loaded." };
-
-  const rows = (data ?? []) as GroupContactOption[];
   return {
     contacts: rows.slice(0, NEW_GROUP_CONTACT_LIMIT),
     hasMore: rows.length > NEW_GROUP_CONTACT_LIMIT,
@@ -388,51 +399,71 @@ export async function addContactsToGroup(groupId: string, contactIds: string[]) 
   if (!groupId.trim()) return { error: "The group could not be found." };
   if (!normalizedContactIds.length) return { error: "No contacts were selected." };
 
-  const { data: group, error: groupError } = await supabase
-    .from("groups")
-    .select("id")
-    .eq("id", groupId)
-    .maybeSingle();
+  try {
+    if (!(await groupExists(groupId))) return { error: "The group could not be found." };
+  } catch {
+    return { error: "The group could not be found." };
+  }
 
-  if (groupError || !group) return { error: "The group could not be found." };
-
-  const { data: contacts, error: contactsError } = await supabase
-    .from("contacts")
-    .select("id")
-    .in("id", normalizedContactIds);
-
-  if (contactsError || contacts?.length !== normalizedContactIds.length) {
+  try {
+    const contacts = await db.query<{ id: string }>(
+      `select id from public.contacts where id = any($1::uuid[])`,
+      [normalizedContactIds],
+    );
+    if (contacts.length !== normalizedContactIds.length) {
+      return { error: "One or more selected contacts could not be found." };
+    }
+  } catch {
     return { error: "One or more selected contacts could not be found." };
   }
 
-  const { data: existingMemberships, error: membershipError } = await supabase
-    .from("contact_groups")
-    .select("contact_id")
-    .eq("group_id", groupId)
-    .in("contact_id", normalizedContactIds);
+  let existingIds: Set<string>;
+  try {
+    const existingMemberships = await db.query<{ contact_id: string }>(
+      `select contact_id from public.contact_groups
+       where group_id = $1 and contact_id = any($2::uuid[])`,
+      [groupId, normalizedContactIds],
+    );
+    existingIds = new Set(existingMemberships.map((membership) => membership.contact_id));
+  } catch {
+    return { error: "The group memberships could not be checked." };
+  }
 
-  if (membershipError) return { error: "The group memberships could not be checked." };
-
-  const existingIds = new Set(
-    (existingMemberships ?? []).map((membership) => membership.contact_id),
-  );
   const newContactIds = normalizedContactIds.filter((id) => !existingIds.has(id));
 
   if (newContactIds.length) {
-    const { error: insertError } = await supabase.from("contact_groups").insert(
-      newContactIds.map((contactId) => ({ contact_id: contactId, group_id: groupId })),
-    );
-
-    if (insertError) return { error: "The contacts could not be added to the group." };
+    try {
+      await db.execute(
+        `insert into public.contact_groups (contact_id, group_id)
+         select unnest($1::uuid[]), $2::uuid
+         on conflict do nothing`,
+        [newContactIds, groupId],
+      );
+    } catch {
+      return { error: "The contacts could not be added to the group." };
+    }
   }
 
-  const { data: updatedGroup, error: updatedGroupError } = await supabase
-    .from("groups")
-    .select("id, name, created_at, contact_groups(contact_id, contacts(id, name, phone))")
-    .eq("id", groupId)
-    .single();
-
-  if (updatedGroupError || !updatedGroup) {
+  let relations: GroupContactRelation[];
+  try {
+    const updatedGroup = await db.maybeOne<{ contact_groups: GroupContactRelation[] }>(
+      `select coalesce((
+         select json_agg(json_build_object(
+           'contact_id', cg.contact_id,
+           'contacts', case when c.id is null then null
+                            else json_build_object('id', c.id, 'name', c.name, 'phone', c.phone) end
+         ))
+         from public.contact_groups cg
+         left join public.contacts c on c.id = cg.contact_id
+         where cg.group_id = g.id
+       ), '[]'::json) as contact_groups
+       from public.groups g
+       where g.id = $1`,
+      [groupId],
+    );
+    if (!updatedGroup) return { error: "The group members could not be refreshed." };
+    relations = updatedGroup.contact_groups;
+  } catch {
     return { error: "The group members could not be refreshed." };
   }
 
@@ -442,8 +473,6 @@ export async function addContactsToGroup(groupId: string, contactIds: string[]) 
     success: true,
     added: newContactIds.length,
     already: existingIds.size,
-    contactGroups: normalizeGroupMembers(
-      updatedGroup.contact_groups as GroupContactRelation[],
-    ),
+    contactGroups: normalizeGroupMembers(relations),
   };
 }

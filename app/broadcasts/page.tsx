@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { requireAuthFast } from "@/lib/auth";
+import { db } from "@/lib/db";
 import type { BroadcastData } from "@/app/broadcasts/actions";
 import { BroadcastsTable } from "@/components/broadcasts-table";
 import { PaginationControls } from "@/components/pagination-controls";
 import { Button } from "@/components/ui/button";
-import { getPageRange, getTotalPages, parsePage } from "@/lib/pagination";
+import { PAGE_SIZE, getTotalPages, parsePage } from "@/lib/pagination";
+import { pageClause } from "@/lib/sql";
 
 export const metadata: Metadata = {
   title: "Broadcasts",
@@ -17,31 +19,27 @@ export default async function BroadcastsPage({
   searchParams: Promise<{ page?: string }>;
 }) {
   const requestedPage = parsePage((await searchParams).page);
-  const { supabase } = await requireAuthFast();
+  await requireAuthFast();
 
-  const { count, error: countError } = await supabase
-    .from("broadcasts")
-    .select("id", { count: "exact", head: true })
-    .is("deleted_at", null);
-
-  const totalCount = count ?? 0;
-  // Clamp so a stale or hand-typed ?page=999 shows the last page instead of erroring.
-  const page = Math.min(requestedPage, getTotalPages(totalCount));
-  const { from, to } = getPageRange(page);
-
-  const broadcastsResult = countError
-    ? { data: null, error: countError }
-    : await supabase
-        .from("broadcasts")
-        .select(
-          "*"
-        )
-        .is("deleted_at", null)
-        .order("created_at", { ascending: false })
-        .order("id", { ascending: true })
-        .range(from, to);
-
-  if (broadcastsResult.error) {
+  let broadcasts: BroadcastData[];
+  let totalCount: number;
+  let page: number;
+  try {
+    const counted = await db.one<{ n: number }>(
+      "select count(*)::int as n from broadcasts where deleted_at is null",
+    );
+    totalCount = counted.n;
+    // Clamp so a stale or hand-typed ?page=999 shows the last page instead of erroring.
+    page = Math.min(requestedPage, getTotalPages(totalCount));
+    const params: unknown[] = [];
+    broadcasts = await db.query<BroadcastData>(
+      `select * from broadcasts
+        where deleted_at is null
+        order by created_at desc, id asc
+        ${pageClause(params, page, PAGE_SIZE)}`,
+      params,
+    );
+  } catch {
     return (
       <div className="p-4 sm:p-6 lg:p-8">
         <h1 className="text-2xl font-semibold">Broadcasts</h1>
@@ -49,8 +47,6 @@ export default async function BroadcastsPage({
       </div>
     );
   }
-
-  const broadcasts = (broadcastsResult.data ?? []) as BroadcastData[];
 
   return (
     <div className="flex min-h-0 flex-col p-4 sm:p-6 lg:p-8">

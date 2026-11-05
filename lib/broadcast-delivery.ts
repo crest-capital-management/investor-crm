@@ -1,5 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
-import { fetchAllPages } from "@/lib/supabase-pagination";
+import { db } from "@/lib/db";
 
 /** What WhatsApp reported after a broadcast was accepted for sending. */
 export interface BroadcastDeliveryResults {
@@ -21,20 +20,16 @@ const CHUNK = 100;
 
 /** Reads each recipient's later delivery result from the chat history. */
 export async function getBroadcastDeliveryResults(
-  supabase: SupabaseClient,
   broadcastId: string
 ): Promise<BroadcastDeliveryResults | null> {
   let recipients: Array<{ name: string | null; wamid: string | null }>;
   try {
-    recipients = await fetchAllPages<{ name: string | null; wamid: string | null }>((from, to) =>
-      supabase
-        .from("broadcast_recipients")
-        .select("name, wamid")
-        .eq("broadcast_id", broadcastId)
-        .eq("status", "sent")
-        .not("wamid", "is", null)
-        .order("id")
-        .range(from, to)
+    recipients = await db.query<{ name: string | null; wamid: string | null }>(
+      `select name, wamid
+         from broadcast_recipients
+        where broadcast_id = $1 and status = 'sent' and wamid is not null
+        order by id`,
+      [broadcastId],
     );
   } catch {
     return null; // the wamid column doesn't exist yet
@@ -58,11 +53,18 @@ export async function getBroadcastDeliveryResults(
 
   const seen = new Set<string>();
   for (let i = 0; i < wamids.length; i += CHUNK) {
-    const { data } = await supabase
-      .from("whatsapp_messages")
-      .select("wamid, status, status_error")
-      .in("wamid", wamids.slice(i, i + CHUNK));
-    for (const row of data ?? []) {
+    let rows: Array<{ wamid: string | null; status: string | null; status_error: string | null }> = [];
+    try {
+      rows = await db.query(
+        `select wamid, status, status_error
+           from whatsapp_messages
+          where wamid = any($1::text[])`,
+        [wamids.slice(i, i + CHUNK)],
+      );
+    } catch {
+      // Same as before: a failed lookup leaves these recipients counted as waiting.
+    }
+    for (const row of rows) {
       if (!row.wamid) continue;
       seen.add(row.wamid);
       if (row.status === "read") results.read++;

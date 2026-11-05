@@ -1,6 +1,7 @@
 "use server";
 
 import { requireActionAuth } from "@/lib/auth";
+import { db } from "@/lib/db";
 import { getAppSettings } from "@/lib/settings";
 import { getUnknownConversations } from "@/lib/unknown-numbers";
 
@@ -23,9 +24,6 @@ export type NotificationsResult = {
 
 const MAX_PER_KIND = 10;
 
-// Stand-in for a query that is switched off in Settings.
-const EMPTY_RESULT = { data: [], error: null, count: 0 };
-
 function truncate(value: string, max = 80) {
   const trimmed = value.trim();
   return trimmed.length > max ? `${trimmed.slice(0, max - 1)}…` : trimmed;
@@ -35,65 +33,78 @@ export async function getNotifications(): Promise<NotificationsResult> {
   const { supabase, error: authError } = await requireActionAuth();
   if (authError || !supabase) return { items: [], badgeCount: 0 };
 
-  const settings = await getAppSettings(supabase);
+  const settings = await getAppSettings();
   const now = new Date();
   const todayStr = now.toISOString().slice(0, 10);
   const sevenDaysAgoIso = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-  const [unreadResult, followUpsResult, broadcastsResult] = await Promise.all([
-    settings.notifyMessages
-      ? supabase
-          .rpc("unread_conversations", {}, { count: "exact" })
-          .range(0, MAX_PER_KIND - 1)
-      : Promise.resolve(EMPTY_RESULT),
-    settings.notifyFollowUps
-      ? supabase
-          .from("follow_ups")
-          .select("id, contact_id, due_date, message", { count: "exact" })
-          .eq("is_done", false)
-          .is("deleted_at", null)
-          .lte("due_date", todayStr)
-          .order("due_date", { ascending: true })
-          .order("id", { ascending: true })
-          .limit(MAX_PER_KIND)
-      : Promise.resolve(EMPTY_RESULT),
-    settings.notifyBroadcasts
-      ? supabase
-          .from("broadcasts")
-          .select("id, message_text, sent_at")
-          .eq("status", "sent")
-          .is("deleted_at", null)
-          .gte("sent_at", sevenDaysAgoIso)
-          .order("sent_at", { ascending: false })
-          .limit(MAX_PER_KIND)
-      : Promise.resolve(EMPTY_RESULT),
-  ]);
-
-  const unreadRows = (unreadResult.error ? [] : unreadResult.data ?? []) as Array<{
+  type UnreadRow = {
     contact_id: string;
     unread_count: number;
     last_message_at: string;
     last_message_text: string | null;
     last_media_url: string | null;
-  }>;
-  const followUps = followUpsResult.error ? [] : followUpsResult.data ?? [];
-  const broadcasts = broadcastsResult.error ? [] : broadcastsResult.data ?? [];
+  };
+  type FollowUpRow = { id: string; contact_id: string; due_date: string; message: string | null };
+  type BroadcastRow = { id: string; message_text: string | null; sent_at: string | null };
+
+  // Each list comes with its total (count(*) over ()); a failed or switched-off query counts as empty.
+  const [unreadList, followUpList, broadcasts] = await Promise.all([
+    settings.notifyMessages
+      ? db
+          .query<UnreadRow & { total: number }>(
+            "select *, count(*) over () as total from public.unread_conversations() order by last_message_at desc limit $1",
+            [MAX_PER_KIND],
+          )
+          .catch(() => [] as Array<UnreadRow & { total: number }>)
+      : Promise.resolve([] as Array<UnreadRow & { total: number }>),
+    settings.notifyFollowUps
+      ? db
+          .query<FollowUpRow & { total: number }>(
+            `select id, contact_id, due_date, message, count(*) over () as total
+               from follow_ups
+              where is_done = false and deleted_at is null and due_date <= $1
+              order by due_date asc, id asc
+              limit $2`,
+            [todayStr, MAX_PER_KIND],
+          )
+          .catch(() => [] as Array<FollowUpRow & { total: number }>)
+      : Promise.resolve([] as Array<FollowUpRow & { total: number }>),
+    settings.notifyBroadcasts
+      ? db
+          .query<BroadcastRow>(
+            `select id, message_text, sent_at from broadcasts
+              where status = 'sent' and deleted_at is null and sent_at >= $1
+              order by sent_at desc
+              limit $2`,
+            [sevenDaysAgoIso, MAX_PER_KIND],
+          )
+          .catch(() => [] as BroadcastRow[])
+      : Promise.resolve([] as BroadcastRow[]),
+  ]);
+
+  const unreadRows: UnreadRow[] = unreadList;
+  const followUps: FollowUpRow[] = followUpList;
 
   const contactIds = [
     ...new Set([
       ...unreadRows.map((row) => row.contact_id),
-      ...followUps.map((followUp) => followUp.contact_id as string),
+      ...followUps.map((followUp) => followUp.contact_id),
     ]),
   ];
 
   const contactNames = new Map<string, string>();
   if (contactIds.length) {
-    const { data: contacts } = await supabase
-      .from("contacts")
-      .select("id, name")
-      .in("id", contactIds);
-    for (const contact of contacts ?? []) {
-      contactNames.set(contact.id as string, contact.name as string);
+    try {
+      const contacts = await db.query<{ id: string; name: string }>(
+        "select id, name from contacts where id = any($1::uuid[])",
+        [contactIds],
+      );
+      for (const contact of contacts) {
+        contactNames.set(contact.id, contact.name);
+      }
+    } catch {
+      // Like before, a failed lookup leaves these items out.
     }
   }
 
@@ -116,7 +127,7 @@ export async function getNotifications(): Promise<NotificationsResult> {
   }
 
   // Numbers that messaged but aren't saved as contacts.
-  const unknown = settings.notifyMessages ? await getUnknownConversations(supabase) : [];
+  const unknown = settings.notifyMessages ? await getUnknownConversations() : [];
   for (const conversation of unknown.slice(0, MAX_PER_KIND)) {
     const who = conversation.profileName
       ? `${conversation.profileName} (${conversation.phone})`
@@ -168,9 +179,6 @@ export async function getNotifications(): Promise<NotificationsResult> {
 
   return {
     items,
-    badgeCount:
-      (unreadResult.error ? 0 : unreadResult.count ?? 0) +
-      unknown.length +
-      (followUpsResult.count ?? 0),
+    badgeCount: (unreadList[0]?.total ?? 0) + unknown.length + (followUpList[0]?.total ?? 0),
   };
 }

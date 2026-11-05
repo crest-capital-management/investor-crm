@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { requireAuthFast } from "@/lib/auth";
+import { db } from "@/lib/db";
 import { TemplateEditor } from "@/components/template-editor";
 import type { TemplateData } from "@/app/templates/actions";
 
@@ -16,20 +17,24 @@ interface PageProps {
 
 export default async function TemplateDetailPage({ params }: PageProps) {
   const { id } = await params;
-  const { supabase } = await requireAuthFast();
+  await requireAuthFast();
 
-  const { data: template, error } = await supabase
-    .from("templates")
-    .select("id, name, meta_template_id, variables, category, body_text, approved_at, created_at")
-    .eq("id", id)
-    .is("deleted_at", null)
-    .maybeSingle();
+  let typedTemplate: TemplateData | null;
+  try {
+    typedTemplate = await db.maybeOne<TemplateData>(
+      `select id, name, meta_template_id, variables, category, body_text, approved_at, created_at
+       from public.templates
+       where id = $1 and deleted_at is null`,
+      [id],
+    );
+  } catch {
+    typedTemplate = null;
+  }
 
-  if (error || !template) {
+  if (!typedTemplate) {
     notFound();
   }
 
-  const typedTemplate = template as TemplateData;
   const isApproved = Boolean(typedTemplate.approved_at);
 
   return (

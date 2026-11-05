@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { requireAuthFast } from "@/lib/auth";
-import { fetchAllPages } from "@/lib/supabase-pagination";
+import { db } from "@/lib/db";
 import { BroadcastEditor } from "@/components/broadcast-editor";
 import {
   BroadcastDeliveryResultsPanel,
@@ -29,67 +29,57 @@ interface PageProps {
 
 export default async function BroadcastDetailPage({ params }: PageProps) {
   const { id } = await params;
-  const { supabase } = await requireAuthFast();
+  await requireAuthFast();
 
-  const [broadcastResult, groupsResult, contactsResult, templatesResult] = await Promise.all([
-    supabase
-      .from("broadcasts")
-      .select(
-        "*"
+  // A failed lookup leaves that picker empty, as before; a failed broadcast lookup is "not found".
+  const [broadcastRow, groups, contacts, templates] = await Promise.all([
+    db
+      .maybeOne<BroadcastData>("select * from broadcasts where id = $1 and deleted_at is null", [id])
+      .catch(() => null),
+    db.query<GroupOption>("select id, name from groups order by name asc").catch(() => []),
+    db
+      .query<ContactOption>(
+        "select id, name, phone from contacts where deleted_at is null order by name asc, id asc",
       )
-      .eq("id", id)
-      .is("deleted_at", null)
-      .maybeSingle(),
-    supabase
-      .from("groups")
-      .select("id, name")
-      .order("name", { ascending: true }),
-    // Supabase returns at most 1000 rows per request, so page through to get every contact.
-    fetchAllPages<ContactOption>((from, to) =>
-      supabase
-        .from("contacts")
-        .select("id, name, phone")
-        .is("deleted_at", null)
-        .order("name", { ascending: true })
-        .order("id", { ascending: true })
-        .range(from, to)
-    ),
-    supabase
-      .from("templates")
-      .select("id, name, category, body_text, variables, approved_at, meta_template_id")
-      .is("deleted_at", null)
-      .order("name", { ascending: true }),
+      .catch(() => []),
+    db
+      .query<TemplateOption>(
+        `select id, name, category, body_text, variables, approved_at, meta_template_id
+           from templates
+          where deleted_at is null
+          order by name asc`,
+      )
+      .catch(() => []),
   ]);
 
-  if (broadcastResult.error || !broadcastResult.data) {
+  if (!broadcastRow) {
     notFound();
   }
 
-  const broadcast = broadcastResult.data as BroadcastData;
-  const groups = (groupsResult.data ?? []) as GroupOption[];
-  const contacts = contactsResult;
-  const templates = (templatesResult.data ?? []) as TemplateOption[];
+  const broadcast = broadcastRow;
 
   const isSent = broadcast.status === "sent";
   const isScheduled = broadcast.status === "scheduled";
   const isSending = broadcast.status === "sending";
 
-  const deliveryResults = isSent ? await getBroadcastDeliveryResults(supabase, id) : null;
+  const deliveryResults = isSent ? await getBroadcastDeliveryResults(id) : null;
 
   // Progress of a broadcast that is going out in batches.
   let sendingProgress: { done: number; total: number } | null = null;
   if (isSending) {
-    const countWhere = (statuses: string[]) =>
-      supabase
-        .from("broadcast_recipients")
-        .select("id", { count: "exact", head: true })
-        .eq("broadcast_id", id)
-        .in("status", statuses);
-    const [{ count: doneCount }, { count: totalCount }] = await Promise.all([
-      countWhere(["sent", "skipped", "failed"]),
-      countWhere(["pending", "sending", "sent", "skipped", "failed"]),
-    ]);
-    sendingProgress = { done: doneCount ?? 0, total: totalCount ?? 0 };
+    const progressCounts = await db
+      .one<{ done: number; total: number }>(
+        `select count(*) filter (where status in ('sent', 'skipped', 'failed'))::int as done,
+                count(*)::int as total
+           from broadcast_recipients
+          where broadcast_id = $1
+            and status in ('pending', 'sending', 'sent', 'skipped', 'failed')`,
+        [id],
+      )
+      .catch(() => ({ done: 0, total: 0 }));
+    const doneCount = progressCounts.done;
+    const totalCount = progressCounts.total;
+    sendingProgress = { done: doneCount, total: totalCount };
   }
 
   return (

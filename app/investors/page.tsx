@@ -4,9 +4,9 @@ import { InvestorsExplorer } from "@/components/investors-explorer";
 import type { ContactRow } from "@/components/contact-details-dialog";
 import type { InvestorTrackingRow } from "@/components/investor-tracking-table";
 import { INVESTOR_TAGS } from "@/lib/tags";
-import { fetchAllPages } from "@/lib/supabase-pagination";
-import { getPageRange, getTotalPages, parsePage } from "@/lib/pagination";
-import { ilikeAnyFilter } from "@/lib/postgrest-filter";
+import { PAGE_SIZE, getTotalPages, parsePage } from "@/lib/pagination";
+import { db, isMissingSchemaError } from "@/lib/db";
+import { ilikeAny, pageClause } from "@/lib/sql";
 import { getUnreadCountsByContact } from "@/lib/unread";
 
 export const metadata: Metadata = {
@@ -32,7 +32,7 @@ export default async function InvestorsPage({
   const search = resolvedSearchParams.search?.trim() ?? "";
   const requestedPage = parsePage(resolvedSearchParams.page);
 
-  const { supabase } = await requireAuthFast();
+  await requireAuthFast();
 
   let contacts: ContactRow[] = [];
   let interactions: InteractionRow[] = [];
@@ -43,74 +43,67 @@ export default async function InvestorsPage({
   let loadError: string | null = null;
 
   try {
-    const searchFilter = ilikeAnyFilter(["name", "phone", "email", "company"], search);
+    const filterParams: unknown[] = [INVESTOR_TAGS];
+    let filter = "c.tags && $1::text[] and c.deleted_at is null";
+    if (search) {
+      filter += ` and ${ilikeAny(["c.name", "c.phone", "c.email", "c.company"], search, filterParams)}`;
+    }
 
-    let countQuery = supabase
-      .from("contacts")
-      .select("id", { count: "exact", head: true })
-      .overlaps("tags", INVESTOR_TAGS)
-      .is("deleted_at", null);
-    if (search) countQuery = countQuery.or(searchFilter);
+    const { count } = await db.one<{ count: number }>(
+      `select count(*)::int as count from public.contacts c where ${filter}`,
+      filterParams,
+    );
 
-    const { count, error: countError } = await countQuery;
-    if (countError) throw new Error(countError.message);
-
-    totalCount = count ?? 0;
+    totalCount = count;
     // Clamp so a stale or hand-typed ?page=999 shows the last page instead of erroring.
     page = Math.min(requestedPage, getTotalPages(totalCount));
-    const { from, to } = getPageRange(page);
 
-    const buildContactsQuery = () => {
-      let query = supabase
-        .from("contacts")
-        .select("id, name, phone, email, company, tags, date_saved, notes, contact_groups(groups(id, name))")
-        .overlaps("tags", INVESTOR_TAGS)
-        .is("deleted_at", null);
-      if (search) query = query.or(searchFilter);
-      return query;
+    const loadContacts = (orderBy: string) => {
+      const params = [...filterParams];
+      return db.query<ContactRow>(
+        `select c.id, c.name, c.phone, c.email, c.company, c.tags, c.date_saved, c.notes,
+           coalesce((
+             select json_agg(json_build_object('groups', case when g.id is null then null
+                                              else json_build_object('id', g.id, 'name', g.name) end))
+             from public.contact_groups cg
+             left join public.groups g on g.id = cg.group_id
+             where cg.contact_id = c.id
+           ), '[]'::json) as contact_groups
+         from public.contacts c
+         where ${filter}
+         order by ${orderBy}
+         ${pageClause(params, page, PAGE_SIZE)}`,
+        params,
+      );
     };
 
     // Most recent chat first, like WhatsApp; then A to Z. "id" is a tie-breaker so
     // rows don't shuffle between pages. Until the chat-list migration is run the
     // last-message column doesn't exist, so fall back to A to Z.
-    let result = await buildContactsQuery()
-      .order("last_message_at", { ascending: false, nullsFirst: false })
-      .order("name", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, to);
-    if (result.error && /last_message/i.test(result.error.message)) {
-      result = await buildContactsQuery()
-        .order("name", { ascending: true })
-        .order("id", { ascending: true })
-        .range(from, to);
+    try {
+      contacts = await loadContacts("c.last_message_at desc nulls last, c.name asc, c.id asc");
+    } catch (err) {
+      if (!isMissingSchemaError(err)) throw err;
+      contacts = await loadContacts("c.name asc, c.id asc");
     }
-    if (result.error) throw new Error(result.error.message);
-    contacts = (result.data ?? []) as unknown as ContactRow[];
 
     const contactIds = contacts.map((contact) => contact.id);
 
     if (contactIds.length) {
       [interactions, followUps, unreadCounts] = await Promise.all([
-        fetchAllPages<InteractionRow>((from, to) =>
-          supabase
-            .from("interactions")
-            .select("contact_id, created_at")
-            .in("contact_id", contactIds)
-            .is("deleted_at", null)
-            .order("created_at", { ascending: false })
-            .range(from, to)
+        db.query<InteractionRow>(
+          `select contact_id, created_at from public.interactions
+           where contact_id = any($1::uuid[]) and deleted_at is null
+           order by created_at desc`,
+          [contactIds],
         ),
-        fetchAllPages<FollowUpRow>((from, to) =>
-          supabase
-            .from("follow_ups")
-            .select("contact_id, due_date")
-            .in("contact_id", contactIds)
-            .eq("is_done", false)
-            .is("deleted_at", null)
-            .order("due_date", { ascending: true })
-            .range(from, to)
+        db.query<FollowUpRow>(
+          `select contact_id, due_date from public.follow_ups
+           where contact_id = any($1::uuid[]) and is_done = false and deleted_at is null
+           order by due_date asc`,
+          [contactIds],
         ),
-        getUnreadCountsByContact(supabase),
+        getUnreadCountsByContact(),
       ]);
     }
   } catch (err) {

@@ -1,6 +1,7 @@
 "use server";
 
 import { requireActionAuth } from "@/lib/auth";
+import { db } from "@/lib/db";
 import { isReplyWindowOpen } from "@/lib/reply-window";
 import { revalidatePath } from "next/cache";
 import { generateChatSummary, transcribeVoiceNoteToMeetingNote } from "@/lib/gemini";
@@ -18,10 +19,10 @@ import {
   mediaStoragePathFromUrl,
   mediaUrlForPath,
 } from "@/lib/supabase-storage";
+import { param } from "@/lib/sql";
 import { TAG_OPTIONS } from "@/lib/tags";
 import { parseTagCell } from "@/lib/tag-match";
 import { parseExcelBuffer, type ParsedSpreadsheet } from "@/lib/parse-spreadsheet";
-import { fetchAllPages } from "@/lib/supabase-pagination";
 import { linkUnmatchedMessages } from "@/lib/link-messages";
 import { insertOutboundMessage, type SavedMessage } from "@/lib/message-status";
 
@@ -39,18 +40,19 @@ function normalizePhone(value: string) {
 }
 
 async function fetchAllContactPhones(
-  supabase: Awaited<ReturnType<typeof requireActionAuth>>["supabase"],
   options: { excludeId?: string; excludeDeleted?: boolean } = {}
 ): Promise<string[]> {
-  if (!supabase) return [];
   const { excludeId, excludeDeleted = true } = options;
 
-  const rows = await fetchAllPages<{ phone: string }>((from, to) => {
-    let query = supabase.from("contacts").select("phone").range(from, to);
-    if (excludeDeleted) query = query.is("deleted_at", null);
-    if (excludeId) query = query.neq("id", excludeId);
-    return query;
-  });
+  const params: unknown[] = [];
+  const conditions: string[] = [];
+  if (excludeDeleted) conditions.push("deleted_at is null");
+  if (excludeId) conditions.push(`id <> ${param(params, excludeId)}`);
+
+  const rows = await db.query<{ phone: string }>(
+    `select phone from public.contacts${conditions.length ? ` where ${conditions.join(" and ")}` : ""}`,
+    params,
+  );
 
   return rows.map((row) => String(row.phone));
 }
@@ -100,7 +102,7 @@ export async function addContact(formData: FormData) {
 
   let existingPhones: string[];
   try {
-    existingPhones = await fetchAllContactPhones(supabase);
+    existingPhones = await fetchAllContactPhones();
   } catch {
     return { error: "The contact could not be checked for duplicates." };
   }
@@ -109,26 +111,20 @@ export async function addContact(formData: FormData) {
     return { error: DUPLICATE_PHONE_ERROR };
   }
 
-  const { data: inserted, error } = await supabase
-    .from("contacts")
-    .insert({
-      name,
-      phone,
-      email: normalizedEmail,
-      company: company || null,
-      tags,
-      date_saved: dateSaved || null,
-      notes: notes || null,
-    })
-    .select("id, phone")
-    .single();
-
-  if (error) {
-    console.error("[addContact] insert failed:", error.message);
+  let inserted: { id: string; phone: string };
+  try {
+    inserted = await db.one<{ id: string; phone: string }>(
+      `insert into public.contacts (name, phone, email, company, tags, date_saved, notes)
+       values ($1, $2, $3, $4, $5::text[], $6, $7)
+       returning id, phone`,
+      [name, phone, normalizedEmail, company || null, tags, dateSaved || null, notes || null],
+    );
+  } catch (error) {
+    console.error("[addContact] insert failed:", error instanceof Error ? error.message : error);
     return { error: "The contact could not be saved. Please try again." };
   }
 
-  await linkUnmatchedMessages(supabase, [inserted]);
+  await linkUnmatchedMessages([inserted]);
 
   revalidatePath("/contacts");
   revalidatePath("/unread-messages");
@@ -175,16 +171,13 @@ export async function updateContact(id: string, formData: FormData) {
     return { error: "Date must use a valid YYYY-MM-DD date." };
   }
 
-  const { data: duplicate, error: duplicateError } = await supabase
-    .from("contacts")
-    .select("id")
-    .eq("phone", phone)
-    .neq("id", id)
-    .is("deleted_at", null)
-    .limit(1)
-    .maybeSingle();
-
-  if (duplicateError) {
+  let duplicate: { id: string } | null;
+  try {
+    duplicate = await db.maybeOne<{ id: string }>(
+      "select id from public.contacts where phone = $1 and id <> $2 and deleted_at is null limit 1",
+      [phone, id],
+    );
+  } catch {
     return { error: "The contact could not be checked for duplicates." };
   }
 
@@ -194,7 +187,7 @@ export async function updateContact(id: string, formData: FormData) {
 
   let otherPhones: string[];
   try {
-    otherPhones = await fetchAllContactPhones(supabase, { excludeId: id });
+    otherPhones = await fetchAllContactPhones({ excludeId: id });
   } catch {
     return { error: "The contact could not be checked for duplicates." };
   }
@@ -203,31 +196,59 @@ export async function updateContact(id: string, formData: FormData) {
     return { error: DUPLICATE_PHONE_ERROR };
   }
 
-  const { error } = await supabase
-    .from("contacts")
-    .update({
-      name,
-      phone,
-      email: normalizedEmail,
-      company: company || null,
-      tags,
-      date_saved: dateSaved || null,
-      notes: notes || null,
-    })
-    .eq("id", id);
-
-  if (error) {
+  try {
+    await db.execute(
+      `update public.contacts
+          set name = $2, phone = $3, email = $4, company = $5, tags = $6::text[], date_saved = $7, notes = $8
+        where id = $1`,
+      [id, name, phone, normalizedEmail, company || null, tags, dateSaved || null, notes || null],
+    );
+  } catch {
     return { error: "The contact could not be updated." };
   }
 
   // A corrected phone number may match messages that arrived unmatched.
-  await linkUnmatchedMessages(supabase, [{ id, phone }]);
+  await linkUnmatchedMessages([{ id, phone }]);
 
   revalidatePath("/contacts");
   return { success: true };
 }
 
 const CONTACT_TAG_OPTIONS = TAG_OPTIONS;
+
+async function findContactTags(id: string): Promise<{ id: string; tags: string[] | null } | null> {
+  try {
+    return await db.maybeOne<{ id: string; tags: string[] | null }>("select id, tags from public.contacts where id = $1", [id]);
+  } catch {
+    return null;
+  }
+}
+
+async function findContactPhone(id: string): Promise<{ id: string; phone: string } | null> {
+  try {
+    return await db.maybeOne<{ id: string; phone: string }>("select id, phone from public.contacts where id = $1", [id]);
+  } catch {
+    return null;
+  }
+}
+
+/** Runs a query and returns its rows, or null when it fails (so the caller can show its own message). */
+async function attempt<T>(run: () => Promise<T>): Promise<T | null> {
+  try {
+    return await run();
+  } catch {
+    return null;
+  }
+}
+
+/** True when the contact exists (a soft-deleted one counts, as before). */
+async function contactExists(id: string): Promise<boolean> {
+  try {
+    return (await db.maybeOne<{ id: string }>("select id from public.contacts where id = $1", [id])) !== null;
+  } catch {
+    return false;
+  }
+}
 
 export async function addTagToContact(id: string, tag: string) {
   const { supabase, error: authError } = await requireActionAuth();
@@ -237,13 +258,8 @@ export async function addTagToContact(id: string, tag: string) {
   if (!id.trim()) return { error: "The contact could not be found." };
   if (!CONTACT_TAG_OPTIONS.includes(normalizedTag)) return { error: "That tag is not available." };
 
-  const { data: contact, error: contactError } = await supabase
-    .from("contacts")
-    .select("id, tags")
-    .eq("id", id)
-    .maybeSingle();
-
-  if (contactError || !contact) return { error: "The contact could not be found." };
+  const contact = await findContactTags(id);
+  if (!contact) return { error: "The contact could not be found." };
 
   const tags = Array.isArray(contact.tags) ? contact.tags.filter((value): value is string => typeof value === "string") : [];
   if (tags.some((value) => value.toLowerCase() === normalizedTag.toLowerCase())) {
@@ -251,8 +267,11 @@ export async function addTagToContact(id: string, tag: string) {
   }
 
   const updatedTags = [...tags, normalizedTag];
-  const { error } = await supabase.from("contacts").update({ tags: updatedTags }).eq("id", id);
-  if (error) return { error: "The tag could not be added." };
+  try {
+    await db.execute("update public.contacts set tags = $2::text[] where id = $1", [id, updatedTags]);
+  } catch {
+    return { error: "The tag could not be added." };
+  }
 
   revalidatePath("/contacts");
   return { success: true, tags: updatedTags };
@@ -266,12 +285,8 @@ export async function removeTagFromContact(id: string, tag: string) {
   const normalizedTag = tag.trim();
   if (!id.trim() || !normalizedTag) return { error: "The contact could not be found." };
 
-  const { data: contact, error: contactError } = await supabase
-    .from("contacts")
-    .select("id, tags")
-    .eq("id", id)
-    .maybeSingle();
-  if (contactError || !contact) return { error: "The contact could not be found." };
+  const contact = await findContactTags(id);
+  if (!contact) return { error: "The contact could not be found." };
 
   const tags = Array.isArray(contact.tags)
     ? contact.tags.filter((value): value is string => typeof value === "string")
@@ -279,8 +294,11 @@ export async function removeTagFromContact(id: string, tag: string) {
   const updatedTags = tags.filter((value) => value.toLowerCase() !== normalizedTag.toLowerCase());
   if (updatedTags.length === tags.length) return { error: "That tag is not on this contact." };
 
-  const { error } = await supabase.from("contacts").update({ tags: updatedTags }).eq("id", id);
-  if (error) return { error: "The tag could not be removed." };
+  try {
+    await db.execute("update public.contacts set tags = $2::text[] where id = $1", [id, updatedTags]);
+  } catch {
+    return { error: "The tag could not be removed." };
+  }
 
   revalidatePath("/contacts");
   revalidatePath("/investors");
@@ -297,21 +315,16 @@ export async function addMeetingNote(contactId: string, note: string) {
   if (!normalizedContactId) return { error: "The contact could not be found." };
   if (!normalizedNote) return { error: "Meeting note is required." };
 
-  const { data: contact, error: contactError } = await supabase
-    .from("contacts")
-    .select("id")
-    .eq("id", normalizedContactId)
-    .maybeSingle();
+  if (!(await contactExists(normalizedContactId))) return { error: "The contact could not be found." };
 
-  if (contactError || !contact) return { error: "The contact could not be found." };
-
-  const { error } = await supabase.from("interactions").insert({
-    contact_id: normalizedContactId,
-    type: "meeting",
-    note: normalizedNote,
-  });
-
-  if (error) return { error: "The meeting note could not be saved." };
+  try {
+    await db.execute("insert into public.interactions (contact_id, type, note) values ($1, 'meeting', $2)", [
+      normalizedContactId,
+      normalizedNote,
+    ]);
+  } catch {
+    return { error: "The meeting note could not be saved." };
+  }
 
   revalidatePath("/investors");
   revalidatePath(`/investors/${normalizedContactId}`);
@@ -348,13 +361,7 @@ export async function transcribeVoiceNote(
     return { error: `Unsupported file type: ${file.type || "unknown"}. Please upload an audio file.` };
   }
 
-  const { data: contact, error: contactError } = await supabase
-    .from("contacts")
-    .select("id")
-    .eq("id", normalizedContactId)
-    .maybeSingle();
-
-  if (contactError || !contact) return { error: "The contact could not be found." };
+  if (!(await contactExists(normalizedContactId))) return { error: "The contact could not be found." };
 
   let audioBuffer: Buffer;
   try {
@@ -386,17 +393,17 @@ export async function getMeetingNotes(contactId: string) {
   const normalizedContactId = contactId.trim();
   if (!normalizedContactId) return { error: "The contact could not be found." };
 
-  const { data: notes, error } = await supabase
-    .from("interactions")
-    .select("id, note, created_at")
-    .eq("contact_id", normalizedContactId)
-    .eq("type", "meeting")
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false });
-
-  if (error) return { error: "Meeting notes could not be loaded." };
-
-  return { notes: (notes ?? []) as MeetingNote[] };
+  try {
+    const notes = await db.query<MeetingNote>(
+      `select id, note, created_at from public.interactions
+        where contact_id = $1 and type = 'meeting' and deleted_at is null
+        order by created_at desc`,
+      [normalizedContactId],
+    );
+    return { notes };
+  } catch {
+    return { error: "Meeting notes could not be loaded." };
+  }
 }
 
 export type SendWhatsAppReplyResult =
@@ -425,15 +432,10 @@ export async function sendWhatsAppReply(
   if (!normalizedContactId) return { error: "The contact could not be found." };
   if (!normalizedMessage) return { error: "Message cannot be empty." };
 
-  const { data: contact, error: contactError } = await supabase
-    .from("contacts")
-    .select("id, phone")
-    .eq("id", normalizedContactId)
-    .maybeSingle();
+  const contact = await findContactPhone(normalizedContactId);
+  if (!contact) return { error: "The contact could not be found." };
 
-  if (contactError || !contact) return { error: "The contact could not be found." };
-
-  if (!(await isReplyWindowOpen(supabase, normalizedContactId))) {
+  if (!(await isReplyWindowOpen(normalizedContactId))) {
     return { error: REPLY_WINDOW_CLOSED_ERROR };
   }
 
@@ -455,7 +457,6 @@ export async function sendWhatsAppReply(
   }
 
   const { error: insertError, message: savedMessage } = await insertOutboundMessage(
-    supabase,
     { contact_id: normalizedContactId, message_text: normalizedMessage },
     wamid,
   );
@@ -483,20 +484,23 @@ export async function sendWhatsAppTemplateToContact(
   const { supabase, error: authError } = await requireActionAuth();
   if (authError || !supabase) return { error: "Unauthorized" };
 
-  const { data: contact } = await supabase
-    .from("contacts")
-    .select("id, phone")
-    .eq("id", contactId.trim())
-    .is("deleted_at", null)
-    .maybeSingle();
+  const contact = await attempt(() =>
+    db.maybeOne<{ id: string; phone: string }>(
+      "select id, phone from public.contacts where id = $1 and deleted_at is null",
+      [contactId.trim()],
+    ),
+  );
   if (!contact) return { error: "The contact could not be found." };
 
-  const { data: template } = await supabase
-    .from("templates")
-    .select("name, language, body_text, meta_template_id, approved_at")
-    .eq("id", templateId)
-    .is("deleted_at", null)
-    .maybeSingle();
+  type TemplateRow = { name: string; language: string; body_text: string; meta_template_id: string | null; approved_at: string | null };
+  const template = await attempt(() =>
+    db.maybeOne<TemplateRow>(
+      `select name, language, body_text, meta_template_id, approved_at
+         from public.templates
+        where id = $1 and deleted_at is null`,
+      [templateId],
+    ),
+  );
   if (!template || !template.meta_template_id) {
     return { error: "The template could not be found. Try \"Sync from Meta\" on the Templates page." };
   }
@@ -533,7 +537,6 @@ export async function sendWhatsAppTemplateToContact(
   });
 
   const { error: insertError, message: savedMessage } = await insertOutboundMessage(
-    supabase,
     { contact_id: contact.id, message_text: sentText },
     wamid,
   );
@@ -572,12 +575,24 @@ export async function resendFailedWhatsAppMessage(messageId: string): Promise<Se
   const { supabase, error: authError } = await requireActionAuth();
   if (authError || !supabase) return { error: "Unauthorized" };
 
-  const { data: original, error: loadError } = await supabase
-    .from("whatsapp_messages")
-    .select("id, contact_id, direction, message_text, media_url, status, status_error, deleted_at")
-    .eq("id", messageId)
-    .maybeSingle();
-  if (loadError || !original || original.deleted_at) return { error: "That message could not be found." };
+  type OriginalRow = {
+    id: string;
+    contact_id: string | null;
+    direction: string | null;
+    message_text: string | null;
+    media_url: string | null;
+    status: string | null;
+    status_error: string | null;
+    deleted_at: string | null;
+  };
+  const original = await attempt(() =>
+    db.maybeOne<OriginalRow>(
+      `select id, contact_id, direction, message_text, media_url, status, status_error, deleted_at
+         from public.whatsapp_messages where id = $1`,
+      [messageId],
+    ),
+  );
+  if (!original || original.deleted_at) return { error: "That message could not be found." };
   if (original.direction !== "out" || original.status !== "failed" || !original.contact_id) {
     return { error: "Only a message that was not delivered can be resent." };
   }
@@ -586,14 +601,10 @@ export async function resendFailedWhatsAppMessage(messageId: string): Promise<Se
   }
 
   const contactId = original.contact_id as string;
-  const { data: contact, error: contactError } = await supabase
-    .from("contacts")
-    .select("id, phone")
-    .eq("id", contactId)
-    .maybeSingle();
-  if (contactError || !contact) return { error: "The contact could not be found." };
+  const contact = await findContactPhone(contactId);
+  if (!contact) return { error: "The contact could not be found." };
 
-  if (!(await isReplyWindowOpen(supabase, contactId))) {
+  if (!(await isReplyWindowOpen(contactId))) {
     return { error: REPLY_WINDOW_CLOSED_ERROR };
   }
 
@@ -629,16 +640,16 @@ export async function resendFailedWhatsAppMessage(messageId: string): Promise<Se
   }
 
   const { error: insertError, message: savedMessage } = await insertOutboundMessage(
-    supabase,
     { contact_id: contactId, message_text: original.message_text, media_url: original.media_url },
     wamid,
   );
   // Mark the failed one so it can't be resent again (it stays in the history).
-  await supabase
-    .from("whatsapp_messages")
-    .update({ status_error: `Resent. Original problem: ${original.status_error ?? "not delivered"}` })
-    .eq("id", original.id)
-    .eq("status", "failed");
+  await attempt(() =>
+    db.execute("update public.whatsapp_messages set status_error = $2 where id = $1 and status = 'failed'", [
+      original.id,
+      `Resent. Original problem: ${original.status_error ?? "not delivered"}`,
+    ]),
+  );
   if (insertError) return { error: "Message sent, but could not be saved to WhatsApp history." };
 
   // No page re-render here: the chat adds the saved message itself, so the reply isn't slowed down.
@@ -669,14 +680,9 @@ export async function prepareWhatsAppMediaUpload(
     return { error: `Unsupported file type: ${mimeType || "unknown"}.` };
   }
 
-  const { data: contact, error: contactError } = await supabase
-    .from("contacts")
-    .select("id")
-    .eq("id", normalizedContactId)
-    .maybeSingle();
-  if (contactError || !contact) return { error: "The contact could not be found." };
+  if (!(await contactExists(normalizedContactId))) return { error: "The contact could not be found." };
 
-  if (!(await isReplyWindowOpen(supabase, normalizedContactId))) {
+  if (!(await isReplyWindowOpen(normalizedContactId))) {
     return { error: REPLY_WINDOW_CLOSED_ERROR };
   }
 
@@ -711,14 +717,10 @@ export async function sendWhatsAppMediaFromStorage(
   const mediaType = mimeTypeToWhatsAppMediaType(mimeType);
   if (!mediaType) return { error: `Unsupported file type: ${mimeType || "unknown"}.` };
 
-  const { data: contact, error: contactError } = await supabase
-    .from("contacts")
-    .select("id, phone")
-    .eq("id", normalizedContactId)
-    .maybeSingle();
-  if (contactError || !contact) return { error: "The contact could not be found." };
+  const contact = await findContactPhone(normalizedContactId);
+  if (!contact) return { error: "The contact could not be found." };
 
-  if (!(await isReplyWindowOpen(supabase, normalizedContactId))) {
+  if (!(await isReplyWindowOpen(normalizedContactId))) {
     return { error: REPLY_WINDOW_CLOSED_ERROR };
   }
 
@@ -749,7 +751,6 @@ export async function sendWhatsAppMediaFromStorage(
   }
 
   const { error: insertError, message: savedMessage } = await insertOutboundMessage(
-    supabase,
     {
       contact_id: normalizedContactId,
       message_text: caption?.trim() || null,
@@ -782,23 +783,17 @@ export async function updateMeetingNote(
   if (!normalizedContactId) return { error: "The contact could not be found." };
   if (!normalizedNote) return { error: "Meeting note is required." };
 
-  // Verify contact exists
-  const { data: contact, error: contactError } = await supabase
-    .from("contacts")
-    .select("id")
-    .eq("id", normalizedContactId)
-    .maybeSingle();
-
-  if (contactError || !contact) return { error: "The contact could not be found." };
+  if (!(await contactExists(normalizedContactId))) return { error: "The contact could not be found." };
 
   // Verify interaction exists, belongs to contact, and is strictly of type 'meeting'
-  const { data: interaction, error: interactionError } = await supabase
-    .from("interactions")
-    .select("id, contact_id, type")
-    .eq("id", normalizedNoteId)
-    .maybeSingle();
+  const interaction = await attempt(() =>
+    db.maybeOne<{ id: string; contact_id: string | null; type: string }>(
+      "select id, contact_id, type from public.interactions where id = $1",
+      [normalizedNoteId],
+    ),
+  );
 
-  if (interactionError || !interaction) return { error: "Meeting note not found." };
+  if (!interaction) return { error: "Meeting note not found." };
   if (interaction.contact_id !== normalizedContactId) {
     return { error: "Meeting note does not belong to this contact." };
   }
@@ -807,14 +802,14 @@ export async function updateMeetingNote(
   }
 
   // Update only the note text. Preserves created_at, contact_id, type, id.
-  const { error: updateError } = await supabase
-    .from("interactions")
-    .update({ note: normalizedNote })
-    .eq("id", normalizedNoteId)
-    .eq("contact_id", normalizedContactId)
-    .eq("type", "meeting");
-
-  if (updateError) return { error: "The meeting note could not be updated." };
+  try {
+    await db.execute(
+      "update public.interactions set note = $3 where id = $1 and contact_id = $2 and type = 'meeting'",
+      [normalizedNoteId, normalizedContactId, normalizedNote],
+    );
+  } catch {
+    return { error: "The meeting note could not be updated." };
+  }
 
   revalidatePath("/investors");
   revalidatePath(`/investors/${normalizedContactId}`);
@@ -831,23 +826,17 @@ export async function deleteMeetingNote(noteId: string, contactId: string) {
   if (!normalizedNoteId) return { error: "Invalid note ID." };
   if (!normalizedContactId) return { error: "The contact could not be found." };
 
-  // Verify contact exists
-  const { data: contact, error: contactError } = await supabase
-    .from("contacts")
-    .select("id")
-    .eq("id", normalizedContactId)
-    .maybeSingle();
-
-  if (contactError || !contact) return { error: "The contact could not be found." };
+  if (!(await contactExists(normalizedContactId))) return { error: "The contact could not be found." };
 
   // Verify interaction exists, belongs to contact, and is strictly of type 'meeting'
-  const { data: interaction, error: interactionError } = await supabase
-    .from("interactions")
-    .select("id, contact_id, type")
-    .eq("id", normalizedNoteId)
-    .maybeSingle();
+  const interaction = await attempt(() =>
+    db.maybeOne<{ id: string; contact_id: string | null; type: string }>(
+      "select id, contact_id, type from public.interactions where id = $1",
+      [normalizedNoteId],
+    ),
+  );
 
-  if (interactionError || !interaction) return { error: "Meeting note not found." };
+  if (!interaction) return { error: "Meeting note not found." };
   if (interaction.contact_id !== normalizedContactId) {
     return { error: "Meeting note does not belong to this contact." };
   }
@@ -857,14 +846,14 @@ export async function deleteMeetingNote(noteId: string, contactId: string) {
 
   // Strictly soft-delete where id = noteId, contact_id = contactId, and type = 'meeting'
   // NEVER allow deleting type = 'follow_up'
-  const { error: deleteError } = await supabase
-    .from("interactions")
-    .update({ deleted_at: new Date().toISOString() })
-    .eq("id", normalizedNoteId)
-    .eq("contact_id", normalizedContactId)
-    .eq("type", "meeting");
-
-  if (deleteError) return { error: "The meeting note could not be deleted." };
+  try {
+    await db.execute(
+      "update public.interactions set deleted_at = $3 where id = $1 and contact_id = $2 and type = 'meeting'",
+      [normalizedNoteId, normalizedContactId, new Date().toISOString()],
+    );
+  } catch {
+    return { error: "The meeting note could not be deleted." };
+  }
 
   revalidatePath("/investors");
   revalidatePath(`/investors/${normalizedContactId}`);
@@ -879,18 +868,18 @@ export async function getContactGroupOptions(contactId: string) {
 
   if (!contactId.trim()) return { error: "The contact could not be found." };
 
-  const [{ data: contact, error: contactError }, { data: groups, error: groupsError }, { data: memberships, error: membershipsError }] = await Promise.all([
-    supabase.from("contacts").select("id").eq("id", contactId).maybeSingle(),
-    supabase.from("groups").select("id, name").order("name", { ascending: true }),
-    supabase.from("contact_groups").select("group_id").eq("contact_id", contactId),
+  const [contactFound, groups, memberships] = await Promise.all([
+    attempt(() => contactExists(contactId)),
+    attempt(() => db.query<ContactGroupOption>("select id, name from public.groups order by name asc")),
+    attempt(() => db.query<{ group_id: string }>("select group_id from public.contact_groups where contact_id = $1", [contactId])),
   ]);
 
-  if (contactError || !contact) return { error: "The contact could not be found." };
-  if (groupsError || membershipsError) return { error: "Groups could not be loaded." };
+  if (!contactFound) return { error: "The contact could not be found." };
+  if (!groups || !memberships) return { error: "Groups could not be loaded." };
 
-  const memberIds = new Set((memberships ?? []).map((membership) => membership.group_id));
+  const memberIds = new Set(memberships.map((membership) => membership.group_id));
   return {
-    groups: (groups ?? []).filter((group) => !memberIds.has(group.id)) as ContactGroupOption[],
+    groups: groups.filter((group) => !memberIds.has(group.id)),
   };
 }
 
@@ -902,35 +891,54 @@ export async function addContactToGroups(contactId: string, groupIds: string[]) 
   if (!contactId.trim()) return { error: "The contact could not be found." };
   if (!normalizedGroupIds.length) return { error: "No groups were selected." };
 
-  const [{ data: contact, error: contactError }, { data: groups, error: groupsError }, { data: memberships, error: membershipsError }] = await Promise.all([
-    supabase.from("contacts").select("id").eq("id", contactId).maybeSingle(),
-    supabase.from("groups").select("id, name").in("id", normalizedGroupIds),
-    supabase.from("contact_groups").select("group_id").eq("contact_id", contactId).in("group_id", normalizedGroupIds),
+  const [contactFound, groups, memberships] = await Promise.all([
+    attempt(() => contactExists(contactId)),
+    attempt(() => db.query<{ id: string; name: string }>("select id, name from public.groups where id = any($1::uuid[])", [normalizedGroupIds])),
+    attempt(() =>
+      db.query<{ group_id: string }>(
+        "select group_id from public.contact_groups where contact_id = $1 and group_id = any($2::uuid[])",
+        [contactId, normalizedGroupIds],
+      ),
+    ),
   ]);
 
-  if (contactError || !contact) return { error: "The contact could not be found." };
-  if (groupsError || groups?.length !== normalizedGroupIds.length) return { error: "One or more selected groups could not be found." };
-  if (membershipsError) return { error: "Group memberships could not be checked." };
+  if (!contactFound) return { error: "The contact could not be found." };
+  if (!groups || groups.length !== normalizedGroupIds.length) return { error: "One or more selected groups could not be found." };
+  if (!memberships) return { error: "Group memberships could not be checked." };
 
-  const existingIds = new Set((memberships ?? []).map((membership) => membership.group_id));
+  const existingIds = new Set(memberships.map((membership) => membership.group_id));
   const newGroupIds = normalizedGroupIds.filter((id) => !existingIds.has(id));
   if (newGroupIds.length) {
-    const { error } = await supabase.from("contact_groups").insert(newGroupIds.map((groupId) => ({ contact_id: contactId, group_id: groupId })));
-    if (error) return { error: "The contact could not be added to the groups." };
+    try {
+      await db.execute(
+        "insert into public.contact_groups (contact_id, group_id) select $1::uuid, unnest($2::uuid[])",
+        [contactId, newGroupIds],
+      );
+    } catch {
+      return { error: "The contact could not be added to the groups." };
+    }
   }
 
-  const { data: updatedMemberships, error: updatedMembershipsError } = await supabase
-    .from("contact_groups")
-    .select("groups(id, name)")
-    .eq("contact_id", contactId);
-  if (updatedMembershipsError) return { error: "The contact groups could not be refreshed." };
+  // Same shape as before: [{ groups: { id, name } }].
+  let updatedMemberships: Array<{ groups: { id: string; name: string } }>;
+  try {
+    updatedMemberships = await db.query<{ groups: { id: string; name: string } }>(
+      `select json_build_object('id', g.id, 'name', g.name) as groups
+         from public.contact_groups cg
+         join public.groups g on g.id = cg.group_id
+        where cg.contact_id = $1`,
+      [contactId],
+    );
+  } catch {
+    return { error: "The contact groups could not be refreshed." };
+  }
 
   revalidatePath("/contacts");
   revalidatePath("/groups");
   return {
     success: true,
     added: newGroupIds.length,
-    groups: updatedMemberships ?? [],
+    groups: updatedMemberships,
   };
 }
 
@@ -938,12 +946,9 @@ export async function deleteContact(id: string) {
   const { supabase, error: authError } = await requireActionAuth();
   if (authError || !supabase) return { error: "Unauthorized" };
 
-  const { error } = await supabase
-    .from("contacts")
-    .update({ deleted_at: new Date().toISOString() })
-    .eq("id", id);
-
-  if (error) {
+  try {
+    await db.execute("update public.contacts set deleted_at = $2 where id = $1", [id, new Date().toISOString()]);
+  } catch {
     return { error: "The contact could not be deleted." };
   }
 
@@ -965,13 +970,12 @@ export async function deleteContacts(ids: string[]) {
   // (groups skip deleted members), but their notes, follow-ups, messages and
   // group memberships stay in the database. There is no restore action yet.
   const deletedAt = new Date().toISOString();
-  const { error } = await supabase
-    .from("contacts")
-    .update({ deleted_at: deletedAt })
-    .in("id", contactIds)
-    .is("deleted_at", null);
-
-  if (error) {
+  try {
+    await db.execute("update public.contacts set deleted_at = $2 where id = any($1::uuid[]) and deleted_at is null", [
+      contactIds,
+      deletedAt,
+    ]);
+  } catch {
     return { error: "The selected contacts could not be deleted." };
   }
 
@@ -1088,7 +1092,7 @@ export async function importContacts(rowsRaw: string): Promise<ImportContactsRes
   try {
     // Matches the original behavior of this lookup: existing AND
     // soft-deleted contacts both count as "already taken" phone numbers.
-    existingPhonesList = await fetchAllContactPhones(supabase, { excludeDeleted: false });
+    existingPhonesList = await fetchAllContactPhones({ excludeDeleted: false });
   } catch {
     return { error: "Contacts could not be checked for duplicates." };
   }
@@ -1145,16 +1149,25 @@ export async function importContacts(rowsRaw: string): Promise<ImportContactsRes
       notes: row.notes || null,
     }));
 
-    const { data: insertedRows, error: insertError } = await supabase
-      .from("contacts")
-      .insert(batch)
-      .select("id, phone");
-
-    if (!insertError && insertedRows) {
-      await linkUnmatchedMessages(supabase, insertedRows);
+    // One statement per batch, so a batch is saved completely or not at all.
+    let insertedRows: Array<{ id: string; phone: string }> | null = null;
+    try {
+      insertedRows = await db.query<{ id: string; phone: string }>(
+        `insert into public.contacts (name, phone, email, company, tags, date_saved, notes)
+         select x.name, x.phone, x.email, x.company, x.tags, x.date_saved, x.notes
+           from jsonb_to_recordset($1::jsonb) as x(
+             name text, phone text, email text, company text, tags text[], date_saved date, notes text
+           )
+         returning id, phone`,
+        [JSON.stringify(batch)],
+      );
+    } catch {
+      insertedRows = null;
     }
 
-    if (insertError) {
+    if (insertedRows) {
+      await linkUnmatchedMessages(insertedRows);
+    } else {
       revalidatePath("/contacts");
       return {
         error: `Import stopped after ${i} of ${rowsToInsert.length} new contacts. The ${i} contacts already inserted were saved — try again to import the rest.`,
@@ -1219,33 +1232,31 @@ export async function generateWhatsAppSummary(
   if (!normalizedContactId) return { error: "The contact could not be found." };
 
   try {
-    const { data: messages, error: messagesError } = await supabase
-      .from("whatsapp_messages")
-      .select("*")
-      .eq("contact_id", normalizedContactId)
-      .is("deleted_at", null)
-      .order("sent_at", { ascending: true });
-
-    if (messagesError) {
+    let messages: Parameters<typeof generateChatSummary>[0];
+    try {
+      messages = await db.query(
+        `select * from public.whatsapp_messages
+          where contact_id = $1 and deleted_at is null
+          order by sent_at asc`,
+        [normalizedContactId],
+      );
+    } catch {
       return { error: "WhatsApp messages could not be loaded." };
     }
 
-    if (!messages || messages.length === 0) {
+    if (messages.length === 0) {
       return { error: "No WhatsApp messages found to summarize." };
     }
 
     const summary = await generateChatSummary(messages);
     const nowIso = new Date().toISOString();
 
-    const { error: updateError } = await supabase
-      .from("contacts")
-      .update({
-        whatsapp_summary: summary,
-        whatsapp_summary_generated_at: nowIso,
-      })
-      .eq("id", normalizedContactId);
-
-    if (updateError) {
+    try {
+      await db.execute(
+        "update public.contacts set whatsapp_summary = $2, whatsapp_summary_generated_at = $3 where id = $1",
+        [normalizedContactId, summary, nowIso],
+      );
+    } catch {
       return { error: "Failed to save the WhatsApp summary." };
     }
 

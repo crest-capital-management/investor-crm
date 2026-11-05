@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireActionAuth } from "@/lib/auth";
+import { db } from "@/lib/db";
 import {
   retryFailedBroadcastRecipients,
   sendBroadcastBatch,
@@ -157,17 +158,14 @@ export async function createBroadcastDraft(data: CreateBroadcastDraftInput) {
     return { error: templateError };
   }
 
-  const { error } = await supabase.from("broadcasts").insert({
-    message_text: messageText,
-    target_type: data.target_type,
-    target_ids: normalizedTargetIds,
-    status: "draft",
-    template_id: templateId,
-    variable_mappings: variableMappings,
-  });
-
-  if (error) {
-    console.error("Failed to create broadcast draft.", error.message);
+  try {
+    await db.execute(
+      `insert into broadcasts (message_text, target_type, target_ids, status, template_id, variable_mappings)
+       values ($1, $2, $3::text[], 'draft', $4, $5::jsonb)`,
+      [messageText, data.target_type, normalizedTargetIds, templateId, JSON.stringify(variableMappings)],
+    );
+  } catch (error) {
+    console.error("Failed to create broadcast draft.", error instanceof Error ? error.message : error);
     return { error: "Failed to create broadcast draft." };
   }
 
@@ -224,18 +222,21 @@ export async function createScheduledBroadcast(
     return { error: templateError };
   }
 
-  const { error } = await supabase.from("broadcasts").insert({
-    message_text: messageText,
-    target_type: data.target_type,
-    target_ids: normalizedTargetIds,
-    status: "scheduled",
-    scheduled_for: scheduledDate.toISOString(),
-    template_id: templateId,
-    variable_mappings: variableMappings,
-  });
-
-  if (error) {
-    console.error("Failed to create scheduled broadcast.", error.message);
+  try {
+    await db.execute(
+      `insert into broadcasts (message_text, target_type, target_ids, status, scheduled_for, template_id, variable_mappings)
+       values ($1, $2, $3::text[], 'scheduled', $4, $5, $6::jsonb)`,
+      [
+        messageText,
+        data.target_type,
+        normalizedTargetIds,
+        scheduledDate.toISOString(),
+        templateId,
+        JSON.stringify(variableMappings),
+      ],
+    );
+  } catch (error) {
+    console.error("Failed to create scheduled broadcast.", error instanceof Error ? error.message : error);
     return { error: "Failed to create scheduled broadcast." };
   }
 
@@ -276,14 +277,17 @@ export async function updateBroadcast(id: string, data: UpdateBroadcastInput) {
   }
 
   // Verify status is draft or scheduled
-  const { data: existing, error: fetchError } = await supabase
-    .from("broadcasts")
-    .select("status")
-    .eq("id", id)
-    .is("deleted_at", null)
-    .maybeSingle();
+  let existing: { status: string } | null;
+  try {
+    existing = await db.maybeOne<{ status: string }>(
+      "select status from broadcasts where id = $1 and deleted_at is null",
+      [id],
+    );
+  } catch {
+    existing = null;
+  }
 
-  if (fetchError || !existing) {
+  if (!existing) {
     return { error: "Broadcast not found." };
   }
 
@@ -350,13 +354,26 @@ export async function updateBroadcast(id: string, data: UpdateBroadcastInput) {
     updatePayload.scheduled_for = scheduledDate.toISOString();
   }
 
-  const { error } = await supabase
-    .from("broadcasts")
-    .update(updatePayload)
-    .eq("id", id);
+  // Only the fields present in the payload are changed.
+  const params: unknown[] = [id];
+  const sets: string[] = [];
+  const setField = (column: string, value: unknown, cast = "") => {
+    params.push(value);
+    sets.push(`${column} = $${params.length}${cast}`);
+  };
+  setField("message_text", updatePayload.message_text);
+  setField("target_type", updatePayload.target_type);
+  setField("target_ids", updatePayload.target_ids, "::text[]");
+  if (updatePayload.scheduled_for !== undefined) setField("scheduled_for", updatePayload.scheduled_for);
+  if (updatePayload.template_id !== undefined) setField("template_id", updatePayload.template_id);
+  if (updatePayload.variable_mappings !== undefined) {
+    setField("variable_mappings", JSON.stringify(updatePayload.variable_mappings), "::jsonb");
+  }
 
-  if (error) {
-    console.error("Failed to update broadcast.", error.message);
+  try {
+    await db.execute(`update broadcasts set ${sets.join(", ")} where id = $1`, params);
+  } catch (error) {
+    console.error("Failed to update broadcast.", error instanceof Error ? error.message : error);
     return { error: "Failed to update broadcast." };
   }
 
@@ -374,23 +391,20 @@ export async function deleteBroadcast(id: string) {
     return { error: "Broadcast ID is required." };
   }
 
-  const { data: current } = await supabase
-    .from("broadcasts")
-    .select("status")
-    .eq("id", id)
-    .maybeSingle();
+  const current = await db
+    .maybeOne<{ status: string }>("select status from broadcasts where id = $1", [id])
+    .catch(() => null);
   if (current?.status === "sending") {
     return { error: "This broadcast is still sending. Wait until it finishes before deleting it." };
   }
 
-  const { error } = await supabase
-    .from("broadcasts")
-    .update({ deleted_at: new Date().toISOString() })
-    .eq("id", id)
-    .neq("status", "sending");
-
-  if (error) {
-    console.error("Failed to delete broadcast.", error.message);
+  try {
+    await db.execute(
+      "update broadcasts set deleted_at = $2 where id = $1 and status <> 'sending'",
+      [id, new Date().toISOString()],
+    );
+  } catch (error) {
+    console.error("Failed to delete broadcast.", error instanceof Error ? error.message : error);
     return { error: "Failed to delete broadcast." };
   }
 
@@ -409,19 +423,17 @@ export async function deleteBroadcasts(ids: string[]) {
     return { error: "No broadcasts were selected." };
   }
 
-  const { data: deletedRows, error } = await supabase
-    .from("broadcasts")
-    .update({ deleted_at: new Date().toISOString() })
-    .in("id", broadcastIds)
-    .neq("status", "sending")
-    .select("id");
-
-  if (error) {
-    console.error("Failed to delete broadcasts.", error.message);
+  let deleted: number;
+  try {
+    deleted = await db.execute(
+      "update broadcasts set deleted_at = $2 where id = any($1::uuid[]) and status <> 'sending'",
+      [broadcastIds, new Date().toISOString()],
+    );
+  } catch (error) {
+    console.error("Failed to delete broadcasts.", error instanceof Error ? error.message : error);
     return { error: "Failed to delete broadcasts." };
   }
 
-  const deleted = deletedRows?.length ?? 0;
   if (deleted === 0) {
     return { error: "Broadcasts that are still sending can't be deleted. Try again once they finish." };
   }
@@ -440,7 +452,7 @@ export async function retryFailedBroadcast(broadcastId: string): Promise<SendBro
     return { error: "Unauthorized" };
   }
 
-  const result = await retryFailedBroadcastRecipients(supabase, broadcastId);
+  const result = await retryFailedBroadcastRecipients(broadcastId);
   revalidatePath("/broadcasts");
   revalidatePath(`/broadcasts/${broadcastId}`);
   return result;
@@ -459,5 +471,5 @@ export async function sendBroadcastNow(
     return { error: "Unauthorized" };
   }
 
-  return sendBroadcastBatch(supabase, broadcastId);
+  return sendBroadcastBatch(broadcastId);
 }

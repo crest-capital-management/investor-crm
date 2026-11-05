@@ -5,14 +5,18 @@ import { usePathname } from "next/navigation";
 
 import { isPublicPath } from "@/lib/public-routes";
 import { MESSAGES_CHANGED_EVENT, UNREAD_CHANGED_EVENT } from "@/lib/unread-events";
-import { createClient } from "@/src/lib/supabase/client";
+
+const POLL_INTERVAL_MS = 5000;
 
 /**
- * Listens for WhatsApp message changes pushed by Supabase Realtime and tells
- * the rest of the app, so a message that just arrived shows up within a
- * second or two instead of at the next refresh. It renders nothing. If live
- * updates aren't available (for example the database step hasn't been run),
- * the regular refresh timers keep everything current.
+ * Checks every few seconds whether WhatsApp messages have changed and tells the
+ * rest of the app, so a message that just arrived shows up within seconds
+ * instead of at the next refresh. It renders nothing.
+ *
+ * This is a stand-in for Supabase Realtime, which can't see the Azure database.
+ * Only a tiny fingerprint is fetched on each check; the lists reload only when
+ * it changes. Checking pauses while the tab is hidden. Server-sent events will
+ * replace this later.
  */
 export function RealtimeBridge() {
   const pathname = usePathname();
@@ -21,36 +25,40 @@ export function RealtimeBridge() {
   useEffect(() => {
     if (isPublic) return;
 
-    const supabase = createClient();
     let cancelled = false;
-    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let lastFingerprint: string | null = null;
     let timer: number | null = null;
 
-    // Several events can arrive together (a message plus its status); notify once.
-    function notify() {
-      if (timer !== null) return;
-      timer = window.setTimeout(() => {
-        timer = null;
-        window.dispatchEvent(new Event(MESSAGES_CHANGED_EVENT));
-        window.dispatchEvent(new Event(UNREAD_CHANGED_EVENT));
-      }, 300);
+    async function check() {
+      if (cancelled || document.visibilityState !== "visible") return;
+      try {
+        const response = await fetch("/api/messages/pulse", { cache: "no-store" });
+        if (!response.ok) return; // signed out or offline: the regular refresh timers keep things current
+        const data = (await response.json()) as { fingerprint?: string };
+        if (cancelled || typeof data.fingerprint !== "string") return;
+        // The first check only records the starting point; later changes notify the app.
+        if (lastFingerprint !== null && data.fingerprint !== lastFingerprint) {
+          window.dispatchEvent(new Event(MESSAGES_CHANGED_EVENT));
+          window.dispatchEvent(new Event(UNREAD_CHANGED_EVENT));
+        }
+        lastFingerprint = data.fingerprint;
+      } catch {
+        // Network hiccup: try again at the next tick.
+      }
     }
 
-    supabase.auth
-      .getSession()
-      .then(({ data }) => {
-        if (cancelled || !data.session) return;
-        channel = supabase
-          .channel("crm-whatsapp-messages")
-          .on("postgres_changes", { event: "*", schema: "public", table: "whatsapp_messages" }, notify)
-          .subscribe();
-      })
-      .catch(() => {});
+    function onVisible() {
+      if (document.visibilityState === "visible") void check();
+    }
+
+    void check();
+    timer = window.setInterval(() => void check(), POLL_INTERVAL_MS);
+    document.addEventListener("visibilitychange", onVisible);
 
     return () => {
       cancelled = true;
-      if (timer !== null) window.clearTimeout(timer);
-      if (channel) void supabase.removeChannel(channel);
+      if (timer !== null) window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [isPublic]);
 

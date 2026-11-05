@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireActionAuth } from "@/lib/auth";
+import { db } from "@/lib/db";
 import {
   fetchWhatsAppMessageTemplates,
   type MetaMessageTemplate,
@@ -87,21 +88,16 @@ export async function createTemplate(data: CreateTemplateInput) {
   const normalizedBody = data.body_text.trim();
   const variables = data.variables && typeof data.variables === "object" ? data.variables : {};
 
-  const { data: inserted, error } = await supabase
-    .from("templates")
-    .insert({
-      name: normalizedName,
-      category: data.category,
-      body_text: normalizedBody,
-      variables,
-      meta_template_id: null,
-      approved_at: null,
-    })
-    .select("id")
-    .single();
-
-  if (error) {
-    console.error("Failed to create template.", error.message);
+  let inserted: { id: string };
+  try {
+    inserted = await db.one<{ id: string }>(
+      `insert into public.templates (name, category, body_text, variables, meta_template_id, approved_at)
+       values ($1, $2, $3, $4::jsonb, null, null)
+       returning id`,
+      [normalizedName, data.category, normalizedBody, JSON.stringify(variables)],
+    );
+  } catch (error) {
+    console.error("Failed to create template.", error instanceof Error ? error.message : error);
     return { error: "Failed to create template." };
   }
 
@@ -129,14 +125,17 @@ export async function updateTemplate(id: string, data: UpdateTemplateInput) {
   const variables = data.variables && typeof data.variables === "object" ? data.variables : {};
 
   // Verify template exists and is not deleted
-  const { data: existing, error: fetchError } = await supabase
-    .from("templates")
-    .select("id, meta_template_id")
-    .eq("id", id)
-    .is("deleted_at", null)
-    .maybeSingle();
+  let existing: { id: string; meta_template_id: string | null } | null;
+  try {
+    existing = await db.maybeOne<{ id: string; meta_template_id: string | null }>(
+      `select id, meta_template_id from public.templates where id = $1 and deleted_at is null`,
+      [id],
+    );
+  } catch {
+    existing = null;
+  }
 
-  if (fetchError || !existing) {
+  if (!existing) {
     return { error: "Template not found." };
   }
 
@@ -148,18 +147,15 @@ export async function updateTemplate(id: string, data: UpdateTemplateInput) {
     };
   }
 
-  const { error } = await supabase
-    .from("templates")
-    .update({
-      name: normalizedName,
-      category: data.category,
-      body_text: normalizedBody,
-      variables,
-    })
-    .eq("id", id);
-
-  if (error) {
-    console.error("Failed to update template.", error.message);
+  try {
+    await db.execute(
+      `update public.templates
+       set name = $1, category = $2, body_text = $3, variables = $4::jsonb
+       where id = $5`,
+      [normalizedName, data.category, normalizedBody, JSON.stringify(variables), id],
+    );
+  } catch (error) {
+    console.error("Failed to update template.", error instanceof Error ? error.message : error);
     return { error: "Failed to update template." };
   }
 
@@ -178,13 +174,10 @@ export async function deleteTemplate(id: string) {
     return { error: "Template ID is required." };
   }
 
-  const { error } = await supabase
-    .from("templates")
-    .update({ deleted_at: new Date().toISOString() })
-    .eq("id", id);
-
-  if (error) {
-    console.error("Failed to delete template.", error.message);
+  try {
+    await db.execute(`update public.templates set deleted_at = $1 where id = $2`, [new Date().toISOString(), id]);
+  } catch (error) {
+    console.error("Failed to delete template.", error instanceof Error ? error.message : error);
     return { error: "Failed to delete template." };
   }
 
@@ -252,18 +245,27 @@ export async function syncMetaTemplates(): Promise<SyncMetaTemplatesResult> {
     };
   }
 
-  const { data: allRows, error: existingError } = await supabase
-    .from("templates")
-    .select("id, name, meta_template_id, approved_at, deleted_at");
-  const existingRows = (allRows ?? []).filter((row) => !row.deleted_at);
-  // Templates deleted in the CRM stay hidden instead of coming back on every sync.
-  const deletedMetaIds = new Set(
-    (allRows ?? []).filter((row) => row.deleted_at && row.meta_template_id).map((row) => row.meta_template_id),
-  );
-  if (existingError) {
-    console.error("Could not load CRM templates.", existingError.message);
+  type ExistingTemplate = {
+    id: string;
+    name: string;
+    meta_template_id: string | null;
+    approved_at: string | null;
+    deleted_at: string | null;
+  };
+  let allRows: ExistingTemplate[];
+  try {
+    allRows = await db.query<ExistingTemplate>(
+      `select id, name, meta_template_id, approved_at, deleted_at from public.templates`,
+    );
+  } catch (error) {
+    console.error("Could not load CRM templates.", error instanceof Error ? error.message : error);
     return { error: "Could not load CRM templates." };
   }
+  const existingRows = allRows.filter((row) => !row.deleted_at);
+  // Templates deleted in the CRM stay hidden instead of coming back on every sync.
+  const deletedMetaIds = new Set(
+    allRows.filter((row) => row.deleted_at && row.meta_template_id).map((row) => row.meta_template_id),
+  );
 
   const skipped: string[] = [];
   let imported = 0;
@@ -304,11 +306,24 @@ export async function syncMetaTemplates(): Promise<SyncMetaTemplatesResult> {
       approved_at: isApproved ? existing?.approved_at ?? new Date().toISOString() : null,
     };
 
-    const { error } = existing
-      ? await supabase.from("templates").update(row).eq("id", existing.id)
-      : await supabase.from("templates").insert(row);
-    if (error) {
-      console.error(`Could not save template "${template.name}":`, error.message);
+    try {
+      if (existing) {
+        await db.execute(
+          `update public.templates
+           set name = $1, category = $2, language = $3, body_text = $4, variables = $5::jsonb,
+               meta_template_id = $6, approved_at = $7
+           where id = $8`,
+          [row.name, row.category, row.language, row.body_text, JSON.stringify(row.variables), row.meta_template_id, row.approved_at, existing.id],
+        );
+      } else {
+        await db.execute(
+          `insert into public.templates (name, category, language, body_text, variables, meta_template_id, approved_at)
+           values ($1, $2, $3, $4, $5::jsonb, $6, $7)`,
+          [row.name, row.category, row.language, row.body_text, JSON.stringify(row.variables), row.meta_template_id, row.approved_at],
+        );
+      }
+    } catch (error) {
+      console.error(`Could not save template "${template.name}":`, error instanceof Error ? error.message : error);
       return { error: `Could not save the template "${template.name}".` };
     }
     imported++;
@@ -322,12 +337,13 @@ export async function syncMetaTemplates(): Promise<SyncMetaTemplatesResult> {
   const gone = existingRows.filter((row) => row.meta_template_id && !metaIds.has(row.meta_template_id));
   const removed: string[] = [];
   if (gone.length > 0) {
-    const { error: removeError } = await supabase
-      .from("templates")
-      .update({ deleted_at: new Date().toISOString() })
-      .in("id", gone.map((row) => row.id));
-    if (removeError) {
-      console.error("Could not remove deleted templates:", removeError.message);
+    try {
+      await db.execute(`update public.templates set deleted_at = $1 where id = any($2::uuid[])`, [
+        new Date().toISOString(),
+        gone.map((row) => row.id),
+      ]);
+    } catch (error) {
+      console.error("Could not remove deleted templates:", error instanceof Error ? error.message : error);
       return { error: "Could not remove templates that were deleted at Meta." };
     }
     removed.push(...gone.map((row) => row.name));
@@ -357,13 +373,29 @@ export async function getChatTemplates(): Promise<ChatTemplate[]> {
   const { supabase, error: authError } = await requireActionAuth();
   if (authError || !supabase) return [];
 
-  const { data } = await supabase
-    .from("templates")
-    .select("id, name, language, body_text, variables, meta_template_id, approved_at")
-    .is("deleted_at", null)
-    .order("name", { ascending: true });
+  type ChatTemplateRow = {
+    id: string;
+    name: string;
+    language: string;
+    body_text: string | null;
+    variables: Record<string, string> | null;
+    meta_template_id: string | null;
+    approved_at: string | null;
+  };
+  let data: ChatTemplateRow[];
+  try {
+    data = await db.query<ChatTemplateRow>(
+      `select id, name, language, body_text, variables, meta_template_id, approved_at
+       from public.templates
+       where deleted_at is null
+       order by name asc`,
+    );
+  } catch {
+    // The old query ignored errors and showed no templates.
+    data = [];
+  }
 
-  return (data ?? [])
+  return data
     .filter((row) => !row.meta_template_id || row.approved_at)
     .map((row) => ({
       id: row.id,

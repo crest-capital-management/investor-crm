@@ -1,6 +1,7 @@
 "use server";
 
 import { requireActionAuth } from "@/lib/auth";
+import { db, isMissingSchemaError } from "@/lib/db";
 import { analyzePortfolioUpdate, portfolioFileKind } from "@/lib/portfolio-analysis";
 import {
   MAX_PORTFOLIO_FILE_BYTES,
@@ -19,8 +20,16 @@ const MAX_PASTED_CHARS = 100_000;
 const MISSING_TABLE_ERROR =
   "Portfolio updates aren't set up yet. Run the latest Supabase migration (portfolio_updates) first.";
 
-function isMissingTable(error: { code?: string; message?: string } | null) {
-  return !!error && (error.code === "42P01" || error.code === "PGRST205" || /portfolio_updates/.test(error.message ?? ""));
+function isMissingTable(error: unknown) {
+  return isMissingSchemaError(error) || /portfolio_updates/.test((error as { message?: string } | null)?.message ?? "");
+}
+
+async function findContact(id: string): Promise<{ id: string } | null> {
+  try {
+    return await db.maybeOne<{ id: string }>("select id from public.contacts where id = $1", [id]);
+  } catch {
+    return null;
+  }
 }
 
 /** Step 1: checks the file and returns a one-time address so the browser uploads straight to storage. */
@@ -37,7 +46,7 @@ export async function preparePortfolioUpload(
   const kind = portfolioFileKind(filename, null);
   if (!kind || kind === "text") return { error: "Please choose a PDF, Excel (.xlsx) or CSV file." };
 
-  const { data: contact } = await supabase.from("contacts").select("id").eq("id", contactId.trim()).maybeSingle();
+  const contact = await findContact(contactId.trim());
   if (!contact) return { error: "The contact could not be found." };
 
   try {
@@ -61,20 +70,17 @@ export async function createPortfolioUpdate(
   const id = contactId.trim();
   if (!path.startsWith(`${id}/`) || path.includes("..")) return { error: "That file isn't available for this contact." };
 
-  const { data, error } = await supabase
-    .from("portfolio_updates")
-    .insert({
-      contact_id: id,
-      file_path: path,
-      file_name: fileName,
-      mime_type: mimeType || null,
-      size_bytes: size,
-      source: "file",
-    })
-    .select("id")
-    .single();
-  if (error || !data) return { error: isMissingTable(error) ? MISSING_TABLE_ERROR : "The update could not be saved." };
-  return { id: data.id };
+  try {
+    const data = await db.one<{ id: string }>(
+      `insert into public.portfolio_updates (contact_id, file_path, file_name, mime_type, size_bytes, source)
+       values ($1, $2, $3, $4, $5, 'file')
+       returning id`,
+      [id, path, fileName, mimeType || null, size],
+    );
+    return { id: data.id };
+  } catch (error) {
+    return { error: isMissingTable(error) ? MISSING_TABLE_ERROR : "The update could not be saved." };
+  }
 }
 
 /** Saves pasted text as a text attachment. Analysis is a separate call, like for files. */
@@ -91,7 +97,7 @@ export async function createPortfolioUpdateFromText(
   if (!body) return { error: "Paste the update text first." };
   if (body.length > MAX_PASTED_CHARS) return { error: "That text is too long. Please paste under 100,000 characters." };
 
-  const { data: contact } = await supabase.from("contacts").select("id").eq("id", id).maybeSingle();
+  const contact = await findContact(id);
   if (!contact) return { error: "The contact could not be found." };
 
   const cleanTitle = title.trim().slice(0, 80);
@@ -103,24 +109,18 @@ export async function createPortfolioUpdateFromText(
     return { error: err instanceof Error ? err.message : "The update could not be saved." };
   }
 
-  const { data, error } = await supabase
-    .from("portfolio_updates")
-    .insert({
-      contact_id: id,
-      title: cleanTitle || null,
-      file_path: path,
-      file_name: fileName,
-      mime_type: "text/plain",
-      size_bytes: Buffer.byteLength(body, "utf8"),
-      source: "paste",
-    })
-    .select("id")
-    .single();
-  if (error || !data) {
+  try {
+    const data = await db.one<{ id: string }>(
+      `insert into public.portfolio_updates (contact_id, title, file_path, file_name, mime_type, size_bytes, source)
+       values ($1, $2, $3, $4, 'text/plain', $5, 'paste')
+       returning id`,
+      [id, cleanTitle || null, path, fileName, Buffer.byteLength(body, "utf8")],
+    );
+    return { id: data.id };
+  } catch (error) {
     await removePortfolioFile(path);
     return { error: isMissingTable(error) ? MISSING_TABLE_ERROR : "The update could not be saved." };
   }
-  return { id: data.id };
 }
 
 /**
@@ -134,24 +134,33 @@ export async function analyzePortfolioUpdateById(
   const { supabase, error: authError } = await requireActionAuth();
   if (authError || !supabase) return { error: "Unauthorized" };
 
-  const { data: row, error: rowError } = await supabase
-    .from("portfolio_updates")
-    .select("id, contact_id, file_path, file_name, mime_type, created_at")
-    .eq("id", updateId)
-    .is("deleted_at", null)
-    .maybeSingle();
-  if (rowError || !row) return { error: "The update could not be found." };
+  type UpdateRow = { id: string; contact_id: string; file_path: string; file_name: string; mime_type: string | null; created_at: string };
+  let row: UpdateRow | null;
+  try {
+    row = await db.maybeOne<UpdateRow>(
+      `select id, contact_id, file_path, file_name, mime_type, created_at
+         from public.portfolio_updates
+        where id = $1 and deleted_at is null`,
+      [updateId],
+    );
+  } catch {
+    row = null;
+  }
+  if (!row) return { error: "The update could not be found." };
 
-  const { data: previousRow } = await supabase
-    .from("portfolio_updates")
-    .select("analysis, title, file_name, created_at")
-    .eq("contact_id", row.contact_id)
-    .eq("analysis_status", "done")
-    .is("deleted_at", null)
-    .lt("created_at", row.created_at)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  let previousRow: { analysis: PortfolioAnalysis | null; title: string | null; file_name: string; created_at: string } | null;
+  try {
+    previousRow = await db.maybeOne(
+      `select analysis, title, file_name, created_at
+         from public.portfolio_updates
+        where contact_id = $1 and analysis_status = 'done' and deleted_at is null and created_at < $2
+        order by created_at desc
+        limit 1`,
+      [row.contact_id, row.created_at],
+    );
+  } catch {
+    previousRow = null;
+  }
 
   let analysis: PortfolioAnalysis | null = null;
   let failure: string | null = null;
@@ -161,26 +170,35 @@ export async function analyzePortfolioUpdateById(
       buffer,
       fileName: row.file_name,
       mimeType: row.mime_type,
-      previousAnalysis: (previousRow?.analysis as PortfolioAnalysis | null) ?? null,
+      previousAnalysis: previousRow?.analysis ?? null,
       previousLabel: previousRow ? (previousRow.title ?? previousRow.file_name) : null,
     });
   } catch (err: unknown) {
     failure = err instanceof Error ? err.message : "The analysis failed.";
   }
 
-  const { data: saved, error: saveError } = await supabase
-    .from("portfolio_updates")
-    .update(
-      analysis
-        ? { analysis, analysis_status: "done", analysis_error: null, as_of_date: asOfDate(analysis.aum.as_of) }
-        : { analysis_status: "failed", analysis_error: failure },
-    )
-    .eq("id", row.id)
-    .select(PORTFOLIO_UPDATE_COLUMNS)
-    .single();
-  if (saveError || !saved) return { error: "The analysis could not be saved." };
+  let saved: PortfolioUpdate;
+  try {
+    saved = analysis
+      ? await db.one<PortfolioUpdate>(
+          `update public.portfolio_updates
+              set analysis = $2::jsonb, analysis_status = 'done', analysis_error = null, as_of_date = $3
+            where id = $1
+            returning ${PORTFOLIO_UPDATE_COLUMNS}`,
+          [row.id, JSON.stringify(analysis), asOfDate(analysis.aum.as_of)],
+        )
+      : await db.one<PortfolioUpdate>(
+          `update public.portfolio_updates
+              set analysis_status = 'failed', analysis_error = $2
+            where id = $1
+            returning ${PORTFOLIO_UPDATE_COLUMNS}`,
+          [row.id, failure],
+        );
+  } catch {
+    return { error: "The analysis could not be saved." };
+  }
   if (failure) return { error: failure };
-  return { update: saved as PortfolioUpdate };
+  return { update: saved };
 }
 
 function asOfDate(value: string | null): string | null {
@@ -191,11 +209,11 @@ export async function deletePortfolioUpdate(updateId: string): Promise<{ success
   const { supabase, error: authError } = await requireActionAuth();
   if (authError || !supabase) return { error: "Unauthorized" };
 
-  const { error } = await supabase
-    .from("portfolio_updates")
-    .update({ deleted_at: new Date().toISOString() })
-    .eq("id", updateId);
-  if (error) return { error: "The update could not be deleted." };
+  try {
+    await db.execute("update public.portfolio_updates set deleted_at = $2 where id = $1", [updateId, new Date().toISOString()]);
+  } catch {
+    return { error: "The update could not be deleted." };
+  }
   return { success: true };
 }
 
@@ -206,12 +224,16 @@ export async function listPortfolioUpdates(
   const { supabase, error: authError } = await requireActionAuth();
   if (authError || !supabase) return { error: "Unauthorized" };
 
-  const { data, error } = await supabase
-    .from("portfolio_updates")
-    .select(PORTFOLIO_UPDATE_COLUMNS)
-    .eq("contact_id", contactId.trim())
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false });
-  if (error) return { error: "Portfolio updates could not be loaded." };
-  return { updates: (data ?? []) as PortfolioUpdate[] };
+  try {
+    const updates = await db.query<PortfolioUpdate>(
+      `select ${PORTFOLIO_UPDATE_COLUMNS}
+         from public.portfolio_updates
+        where contact_id = $1 and deleted_at is null
+        order by created_at desc`,
+      [contactId.trim()],
+    );
+    return { updates };
+  } catch {
+    return { error: "Portfolio updates could not be loaded." };
+  }
 }
