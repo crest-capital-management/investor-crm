@@ -1,4 +1,8 @@
-// Copies all CRM rows from live Supabase (read-only snapshot) into the empty crest_crm, then verifies counts and checksums.
+// Copies all CRM rows from live Supabase (read-only snapshot) into crest_crm, then verifies counts and checksums.
+//   node azure/copy-data.js                first copy; refuses unless crest_crm is empty
+//   node azure/copy-data.js --replace      final re-sync at switch-over: empties the 11 CRM tables and copies
+//                                          again, all in one transaction (crm_users, the logins, is not touched)
+//   node azure/copy-data.js --verify-only  only compares
 // Values travel as raw text, so timestamps keep their microseconds and arrays/jsonb are re-parsed by PostgreSQL unchanged.
 const path = require('path');
 const fs = require('fs');
@@ -9,6 +13,7 @@ const env = Object.fromEntries(fs.readFileSync(path.join(root, '.env.local'), 'u
 const azureUrl = new URL(env.AZURE_CONNECTION_STRING.replace(/^postgresql\+\w+:/, 'postgresql:'));
 if (azureUrl.pathname !== '/crest_crm') throw new Error('refusing: AZURE_CONNECTION_STRING does not point at crest_crm');
 const verifyOnly = process.argv[2] === '--verify-only';
+const replace = process.argv[2] === '--replace';
 
 const raw = { getTypeParser: () => v => v };
 const src = new Client({ connectionString: env.SUPABASE_DB_URL.replace(/[?&]sslmode=[^&]*/, ''),
@@ -34,8 +39,13 @@ const checksum = async (c, t, cols) => (await c.query(
     await src.query('begin isolation level repeatable read read only'); // one consistent snapshot of all tables
     if (!verifyOnly) {
       const existing = (await dst.query(`select sum(n)::int n from (${tables.map(t => `select count(*) n from public."${t}"`).join(' union all ')}) s`)).rows[0].n;
-      if (existing > 0) throw new Error(`refusing: crest_crm already has ${existing} rows`);
+      if (existing > 0 && !replace) throw new Error(`refusing: crest_crm already has ${existing} rows (use --replace for the final re-sync)`);
       await dst.query('begin');
+      if (existing > 0) {
+        // Same transaction as the copy: if anything below fails, the old rows come back untouched.
+        await dst.query(`truncate table ${tables.map(t => `public."${t}"`).join(', ')}`);
+        console.log(`emptied the CRM tables (${existing} rows) to replace them`);
+      }
       // The trigger would rewrite contacts.last_message_*; those values are copied as they are.
       await dst.query('alter table public.whatsapp_messages disable trigger whatsapp_messages_touch_contact');
       for (const t of tables) {
