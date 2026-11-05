@@ -49,8 +49,8 @@ function formatMessages(messages: DraftInput["messages"]) {
  * or sends it.
  */
 export async function draftMessage(input: DraftInput): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY is not configured.");
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured.");
 
   const notes = [...input.meetingNotes]
     .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
