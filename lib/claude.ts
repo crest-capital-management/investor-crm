@@ -6,7 +6,8 @@ import Anthropic from "@anthropic-ai/sdk";
  * take audio, so they stay on Gemini (lib/gemini.ts, GEMINI_API_KEY).
  */
 
-const MODEL = "claude-opus-5-5";
+// Haiku: fast and low-cost, enough for these short summaries, drafts and extractions.
+const MODEL = "claude-haiku-5-5";
 const MAX_TOKENS = 16000;
 
 let client: Anthropic | null = null;
@@ -35,7 +36,7 @@ export type AskClaudeOptions = {
 export async function askClaude(options: AskClaudeOptions): Promise<string> {
   const anthropic = getClient();
 
-  const content: Anthropic.Beta.BetaContentBlockParam[] = [];
+  const content: Anthropic.ContentBlockParam[] = [];
   if (options.pdf) {
     content.push({
       type: "document",
@@ -46,16 +47,12 @@ export async function askClaude(options: AskClaudeOptions): Promise<string> {
 
   const signal = options.timeoutMs ? AbortSignal.timeout(options.timeoutMs) : undefined;
 
-  let response: Anthropic.Beta.BetaMessage;
+  let response: Anthropic.Message;
   try {
-    response = await anthropic.beta.messages.create(
+    response = await anthropic.messages.create(
       {
         model: MODEL,
         max_tokens: MAX_TOKENS,
-        // If Claude's safety checks wrongly decline a request, the API retries it
-        // on a recommended fallback model instead of failing.
-        betas: ["server-side-fallback-2026-07-01"],
-        fallbacks: "default",
         output_config: {
           effort: options.effort ?? "low",
           ...(options.jsonSchema ? { format: { type: "json_schema", schema: options.jsonSchema } } : {}),
@@ -80,7 +77,7 @@ export async function askClaude(options: AskClaudeOptions): Promise<string> {
   }
 
   const text = response.content
-    .filter((block): block is Anthropic.Beta.BetaTextBlock => block.type === "text")
+    .filter((block): block is Anthropic.TextBlock => block.type === "text")
     .map((block) => block.text)
     .join("")
     .trim();
