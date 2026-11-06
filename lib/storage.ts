@@ -232,6 +232,25 @@ export async function removeBackupFiles(names: string[]): Promise<void> {
   await Promise.all(names.map((name) => backups.getBlockBlobClient(name).deleteIfExists()));
 }
 
+/** Reads one backup file's bytes (for a restore). */
+export async function downloadBackupFile(name: string): Promise<Buffer> {
+  try {
+    return await container(BACKUP_BUCKET).getBlockBlobClient(name).downloadToBuffer();
+  } catch (err) {
+    throw new Error(`Could not read the backup file: ${err instanceof Error ? err.message : "unknown error"}`);
+  }
+}
+
+/** Writes a backup file uploaded from the browser (a stream) into the backups container. Never overwrites. */
+export async function saveUploadedBackupFile(name: string, body: Readable): Promise<void> {
+  const backups = container(BACKUP_BUCKET);
+  await backups.createIfNotExists();
+  await backups.getBlockBlobClient(name).uploadStream(body, 4 * 1024 * 1024, 4, {
+    blobHTTPHeaders: { blobContentType: "application/gzip" },
+    conditions: { ifNoneMatch: "*" },
+  });
+}
+
 /** A download link for one backup. */
 export function createBackupDownloadUrl(name: string, seconds = 60): Promise<string> {
   return signedUrl(BACKUP_BUCKET, name, "r", seconds, { contentDisposition: attachment(name) });
