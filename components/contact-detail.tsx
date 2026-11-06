@@ -69,6 +69,9 @@ import {
   type ContactRow,
 } from "@/components/contact-details-dialog";
 
+import { ContactSectionField } from "@/components/contact-section-field";
+import type { ContactSection } from "@/lib/section-filter";
+
 export type { WhatsAppMessage };
 
 type ContactDetailProps = {
@@ -88,6 +91,8 @@ type ContactDetailProps = {
   portfolioUpdatesError?: string | null;
   initialProspectScore?: ProspectScore;
   prospectScoreError?: string | null;
+  /** The contact's section and the sections to choose from (null before sections are set up). */
+  section?: { sectionId: string | null; sections: ContactSection[] } | null;
 };
 
 function toISODateString(date: Date) {
@@ -188,6 +193,7 @@ export function ContactDetail({
   portfolioUpdatesError = null,
   initialProspectScore = EMPTY_PROSPECT_SCORE,
   prospectScoreError = null,
+  section = null,
 }: ContactDetailProps) {
   const isInvestor = variant === "investor";
   const noun = isInvestor ? "investor" : "contact";
@@ -660,6 +666,9 @@ export function ContactDetail({
                   <p className="mt-1 text-muted-foreground">No company added</p>
                 )}
               </div>
+              {section && section.sections.length > 0 && (
+                <ContactSectionField contactId={contact.id} sectionId={section.sectionId} sections={section.sections} />
+              )}
               <div className="flex items-end justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Phone</p>

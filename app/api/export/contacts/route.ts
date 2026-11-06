@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 
-import { db } from "@/lib/db";
+import { db, isMissingSchemaError } from "@/lib/db";
 import { getOwnerSessionId } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +16,7 @@ type ContactExportRow = {
   notes: string | null;
   date_saved: string | null;
   contact_groups: Array<{ groups: { name: string } | Array<{ name: string }> | null }> | null;
+  section_name?: string | null;
 };
 
 // Same shape PostgREST gave for contact_groups(groups(name)): [{ groups: { name } }].
@@ -26,7 +27,9 @@ const COLUMNS = `c.id, c.name, c.phone, c.email, c.company, c.tags, c.notes, c.d
       where cg.contact_id = c.id),
     '[]'::json
   ) as contact_groups`;
-const HEADER = ["Name", "Phone", "Email", "Company", "Tags", "Groups", "Notes", "Date Saved"];
+// Contact section (azure/003_contact_sections.sql); left out if that change isn't applied yet.
+const SECTION_COLUMN = "(select s.name from contact_sections s where s.id = c.section_id) as section_name";
+const HEADER = ["Name", "Phone", "Email", "Company", "Tags", "Groups", "Section", "Notes", "Date Saved"];
 const MAX_IDS = 20000;
 
 // Quotes the value for CSV and neutralises spreadsheet formulas (a cell that
@@ -52,6 +55,7 @@ function toCells(contact: ContactExportRow): string[] {
     contact.company ?? "",
     (contact.tags ?? []).join("; "),
     groupNames(contact),
+    contact.section_name ?? "",
     contact.notes ?? "",
     contact.date_saved?.slice(0, 10) ?? "",
   ];
@@ -59,16 +63,25 @@ function toCells(contact: ContactExportRow): string[] {
 
 /** All active contacts (A to Z), or just the given ones in the order given. */
 async function loadContacts(ids: string[] | null): Promise<ContactExportRow[]> {
-  if (!ids) {
-    return db.query<ContactExportRow>(
-      `select ${COLUMNS} from contacts c where c.deleted_at is null order by c.name asc, c.id asc`,
-    );
-  }
+  const query = (columns: string) =>
+    ids
+      ? db.query<ContactExportRow>(
+          `select ${columns} from contacts c where c.id = any($1::uuid[]) and c.deleted_at is null`,
+          [ids],
+        )
+      : db.query<ContactExportRow>(
+          `select ${columns} from contacts c where c.deleted_at is null order by c.name asc, c.id asc`,
+        );
 
-  const rows = await db.query<ContactExportRow>(
-    `select ${COLUMNS} from contacts c where c.id = any($1::uuid[]) and c.deleted_at is null`,
-    [ids],
-  );
+  let rows: ContactExportRow[];
+  try {
+    rows = await query(`${COLUMNS}, ${SECTION_COLUMN}`);
+  } catch (err) {
+    if (!isMissingSchemaError(err)) throw err;
+    rows = await query(COLUMNS);
+  }
+  if (!ids) return rows;
+
   const byId = new Map<string, ContactExportRow>();
   for (const row of rows) byId.set(row.id, row);
   return ids.map((id) => byId.get(id)).filter((row): row is ContactExportRow => Boolean(row));
@@ -92,8 +105,9 @@ async function buildXlsx(contacts: ContactExportRow[]): Promise<Buffer> {
     { header: HEADER[3], key: "company", width: 28 },
     { header: HEADER[4], key: "tags", width: 28 },
     { header: HEADER[5], key: "groups", width: 24 },
-    { header: HEADER[6], key: "notes", width: 44 },
-    { header: HEADER[7], key: "date", width: 14, style: { numFmt: "@" } },
+    { header: HEADER[6], key: "section", width: 16 },
+    { header: HEADER[7], key: "notes", width: 44 },
+    { header: HEADER[8], key: "date", width: 14, style: { numFmt: "@" } },
   ];
   const header = sheet.getRow(1);
   header.font = { bold: true };

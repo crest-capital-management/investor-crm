@@ -4,6 +4,7 @@ import { listBackupFiles, removeBackupFiles, saveBackupFile } from "@/lib/storag
 
 // Each table is read in a stable order.
 const BACKUP_TABLES: Array<{ table: string; orderBy: string[]; optional?: boolean }> = [
+  { table: "contact_sections", orderBy: ["id"], optional: true },
   { table: "contacts", orderBy: ["id"] },
   { table: "groups", orderBy: ["id"] },
   { table: "contact_groups", orderBy: ["contact_id", "group_id"] },

@@ -35,10 +35,15 @@ export async function GET() {
   try {
     let contacts: Record<string, unknown>[];
     try {
-      contacts = await load(WITH_LAST_MESSAGE);
+      contacts = await load(`${WITH_LAST_MESSAGE}, c.section_id`);
     } catch {
-      // The last-message columns don't exist until the chat-list migration is run.
-      contacts = await load(BASE_COLUMNS);
+      try {
+        // section_id doesn't exist until azure/003_contact_sections.sql is applied.
+        contacts = await load(WITH_LAST_MESSAGE);
+      } catch {
+        // The last-message columns don't exist until the chat-list migration is run.
+        contacts = await load(BASE_COLUMNS);
+      }
     }
     return NextResponse.json({ contacts }, { headers: { "Cache-Control": "private, no-store" } });
   } catch {

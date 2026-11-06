@@ -63,6 +63,8 @@ export type ContactRow = {
   last_message_at?: string | null;
   last_message_text?: string | null;
   last_message_direction?: string | null;
+  /** Contact section (azure/003_contact_sections.sql); absent before that change is applied. */
+  section_id?: string | null;
   contact_groups:
     | Array<{
         groups:

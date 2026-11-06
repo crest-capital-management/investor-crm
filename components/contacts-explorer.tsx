@@ -7,6 +7,8 @@ import type { ContactRow } from "@/components/contact-details-dialog";
 import { ContactsTable } from "@/components/contacts-table";
 import { ExportContactsMenu, type ExportOption } from "@/components/export-contacts-menu";
 import { PaginationControls } from "@/components/pagination-controls";
+import { SectionTabs } from "@/components/section-tabs";
+import { ALL_SECTIONS, inSection, type SectionsInfo } from "@/lib/section-filter";
 import { TagFilter } from "@/components/tag-filter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,6 +25,8 @@ const contactsCache: { rows: ContactRow[] | null } = { rows: null };
  * every keystroke; until then (or if loading fails) the server's page is shown.
  */
 export function ContactsExplorer({
+  sectionsInfo,
+  initialSection,
   serverContacts,
   serverFilteredCount,
   unreadCounts,
@@ -30,6 +34,9 @@ export function ContactsExplorer({
   initialTags,
   initialPage,
 }: {
+  /** Null before the sections database change is applied (no tabs then). */
+  sectionsInfo: SectionsInfo | null;
+  initialSection: string;
   serverContacts: ContactRow[];
   serverFilteredCount: number;
   unreadCounts: Record<string, number>;
@@ -39,17 +46,22 @@ export function ContactsExplorer({
 }) {
   const [search, setSearch] = useState(initialSearch);
   const [tags, setTags] = useState<string[]>(initialTags);
+  const [section, setSection] = useState(initialSection);
   const [page, setPage] = useState(initialPage);
   const deferredSearch = useDeferredValue(search);
 
   const allContacts = useAllRows<ContactRow>("/api/contacts/index", "contacts", contactsCache, serverContacts);
   const serverIndex = useMemo(() => buildSearchIndex(serverContacts), [serverContacts]);
   const fullIndex = useMemo(() => (allContacts ? buildSearchIndex(allContacts) : null), [allContacts]);
+  const sectionIndex = useMemo(
+    () => (fullIndex ? fullIndex.filter((entry) => inSection(entry.contact, section)) : null),
+    [fullIndex, section],
+  );
 
   const view = useMemo(() => {
     const trimmed = deferredSearch.trim();
-    if (fullIndex) {
-      const matches = searchContacts(fullIndex, trimmed, tags);
+    if (sectionIndex) {
+      const matches = searchContacts(sectionIndex, trimmed, tags);
       const totalPages = getTotalPages(matches.length);
       const currentPage = Math.min(page, totalPages);
       const { from, to } = getPageRange(currentPage);
@@ -61,14 +73,14 @@ export function ContactsExplorer({
       };
     }
     // Not loaded yet: filter the page the server sent.
-    const unchanged = !trimmed && tags.join(",") === initialTags.join(",");
+    const unchanged = !trimmed && tags.join(",") === initialTags.join(",") && section === initialSection;
     if (unchanged) return { rows: serverContacts, total: serverFilteredCount, page: initialPage, matchingIds: undefined };
-    const matches = searchContacts(serverIndex, trimmed, tags);
+    const matches = searchContacts(serverIndex, trimmed, tags).filter((contact) => inSection(contact, section));
     return { rows: matches, total: matches.length, page: 1, matchingIds: undefined };
-  }, [deferredSearch, tags, page, fullIndex, serverContacts, serverIndex, serverFilteredCount, initialPage, initialTags]);
+  }, [deferredSearch, tags, section, page, sectionIndex, serverContacts, serverIndex, serverFilteredCount, initialPage, initialTags, initialSection]);
 
-  // Export choices: the current search/filter results (when one is applied), or everything.
-  const isFiltered = Boolean(deferredSearch.trim()) || tags.length > 0;
+  // Export choices: the current section/search/filter results (when one is applied), or everything.
+  const isFiltered = Boolean(deferredSearch.trim()) || tags.length > 0 || section !== ALL_SECTIONS;
   const exportOptions: ExportOption[] = [
     ...(isFiltered && view.matchingIds
       ? [
@@ -83,12 +95,34 @@ export function ContactsExplorer({
   // Keep the address bar in step (so a refresh or shared link shows the same view) without a server round trip.
   useEffect(() => {
     const params = new URLSearchParams();
+    if (section !== ALL_SECTIONS) params.set("section", section);
     if (deferredSearch.trim()) params.set("search", deferredSearch.trim());
     if (tags.length > 0) params.set("tags", tags.join(","));
     if (view.page > 1) params.set("page", String(view.page));
     const query = params.toString();
     window.history.replaceState(window.history.state, "", query ? `?${query}` : window.location.pathname);
-  }, [deferredSearch, tags, view.page]);
+  }, [deferredSearch, tags, section, view.page]);
+
+  // The tab counts follow the loaded list (so they update right after a move), else the server's.
+  const tabsInfo = useMemo(() => {
+    if (!sectionsInfo || !allContacts) return sectionsInfo;
+    const counts = new Map<string, number>();
+    let none = 0;
+    for (const contact of allContacts) {
+      if (contact.section_id) counts.set(contact.section_id, (counts.get(contact.section_id) ?? 0) + 1);
+      else none += 1;
+    }
+    return {
+      sections: sectionsInfo.sections.map((s) => ({ ...s, count: counts.get(s.id) ?? 0 })),
+      total: allContacts.length,
+      noSection: none,
+    };
+  }, [sectionsInfo, allContacts]);
+
+  function handleSectionChange(next: string) {
+    setSection(next);
+    setPage(1);
+  }
 
   function handleSearchChange(value: string) {
     setSearch(value);
@@ -102,6 +136,7 @@ export function ContactsExplorer({
 
   return (
     <>
+      {tabsInfo && <SectionTabs info={tabsInfo} value={section} onChange={handleSectionChange} />}
       <div className="mt-3 flex flex-wrap items-center gap-2.5 sm:gap-3">
         <div className="relative w-full max-w-md sm:w-80">
           <Input
@@ -130,7 +165,8 @@ export function ContactsExplorer({
 
       <div className="mt-3 flex min-h-0 flex-1 flex-col">
         <ContactsTable
-          key={`${deferredSearch.trim()}-${tags.join(",")}-${view.page}`}
+          key={`${deferredSearch.trim()}-${tags.join(",")}-${section}-${view.page}`}
+          sections={sectionsInfo?.sections}
           contacts={view.rows}
           matchingIds={view.matchingIds}
           totalMatching={view.total}

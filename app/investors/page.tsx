@@ -8,6 +8,8 @@ import { PAGE_SIZE, getTotalPages, parsePage } from "@/lib/pagination";
 import { db, isMissingSchemaError } from "@/lib/db";
 import { ilikeAny, pageClause } from "@/lib/sql";
 import { getUnreadCountsByContact } from "@/lib/unread";
+import { loadSectionsInfo } from "@/lib/sections";
+import { ALL_SECTIONS, parseSectionParam, sectionCondition, type SectionsInfo } from "@/lib/section-filter";
 
 export const metadata: Metadata = {
   title: "Investors",
@@ -26,7 +28,7 @@ type FollowUpRow = {
 export default async function InvestorsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ search?: string; page?: string }>;
+  searchParams: Promise<{ search?: string; page?: string; section?: string }>;
 }) {
   const resolvedSearchParams = await searchParams;
   const search = resolvedSearchParams.search?.trim() ?? "";
@@ -41,10 +43,17 @@ export default async function InvestorsPage({
   let totalCount = 0;
   let page = requestedPage;
   let loadError: string | null = null;
+  let sectionsInfo: SectionsInfo | null = null;
+  let section = ALL_SECTIONS;
 
   try {
+    sectionsInfo = await loadSectionsInfo({ investorTags: INVESTOR_TAGS });
+    section = parseSectionParam(resolvedSearchParams.section, sectionsInfo);
+
     const filterParams: unknown[] = [INVESTOR_TAGS];
     let filter = "c.tags && $1::text[] and c.deleted_at is null";
+    const inSectionSql = sectionCondition(section, filterParams);
+    if (inSectionSql) filter += ` and ${inSectionSql}`;
     if (search) {
       filter += ` and ${ilikeAny(["c.name", "c.phone", "c.email", "c.company"], search, filterParams)}`;
     }
@@ -61,7 +70,7 @@ export default async function InvestorsPage({
     const loadContacts = (orderBy: string) => {
       const params = [...filterParams];
       return db.query<ContactRow>(
-        `select c.id, c.name, c.phone, c.email, c.company, c.tags, c.date_saved, c.notes,
+        `select c.id, c.name, c.phone, c.email, c.company, c.tags, c.date_saved, c.notes,${sectionsInfo ? " c.section_id," : ""}
            coalesce((
              select json_agg(json_build_object('groups', case when g.id is null then null
                                               else json_build_object('id', g.id, 'name', g.name) end))
@@ -153,7 +162,9 @@ export default async function InvestorsPage({
       {/* Search, table and paging (instant once all investors are loaded) */}
       <InvestorsExplorer
         // A new address from outside the list (back/forward) restarts it with that search and page.
-        key={`${search}|${page}`}
+        key={`${search}|${page}|${section}`}
+        sectionsInfo={sectionsInfo}
+        initialSection={section}
         serverRows={rows}
         serverTotal={totalCount}
         unreadCounts={unreadCounts}

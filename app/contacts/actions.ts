@@ -26,6 +26,7 @@ import { parseTagCell } from "@/lib/tag-match";
 import { parseExcelBuffer, type ParsedSpreadsheet } from "@/lib/parse-spreadsheet";
 import { linkUnmatchedMessages } from "@/lib/link-messages";
 import { insertOutboundMessage, type SavedMessage } from "@/lib/message-status";
+import { assignNewContactsToSection, sectionNameForPhone } from "@/lib/sections";
 
 // The live host (Netlify) rejects requests over about 6MB, so keep these under that.
 const MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024;
@@ -109,7 +110,8 @@ export async function addContact(formData: FormData) {
   }
 
   if (existingPhones.some((existingPhone) => normalizePhone(existingPhone) === phone)) {
-    return { error: DUPLICATE_PHONE_ERROR };
+    const sectionName = await sectionNameForPhone(phone);
+    return { error: sectionName ? `This phone number is already saved, in the "${sectionName}" section.` : DUPLICATE_PHONE_ERROR };
   }
 
   let inserted: { id: string; phone: string };
@@ -125,9 +127,11 @@ export async function addContact(formData: FormData) {
     return { error: "The contact could not be saved. Please try again." };
   }
 
+  await assignNewContactsToSection([inserted.id], String(formData.get("sectionId") ?? ""));
   await linkUnmatchedMessages([inserted]);
 
   revalidatePath("/contacts");
+  revalidatePath("/investors");
   revalidatePath("/unread-messages");
   return { success: true };
 }
@@ -1055,7 +1059,7 @@ export type ImportContactsResult =
 // we can report exactly how far an import got if something does fail.
 const IMPORT_INSERT_BATCH_SIZE = 300;
 
-export async function importContacts(rowsRaw: string): Promise<ImportContactsResult> {
+export async function importContacts(rowsRaw: string, sectionId?: string | null): Promise<ImportContactsResult> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
 
@@ -1168,6 +1172,7 @@ export async function importContacts(rowsRaw: string): Promise<ImportContactsRes
     }
 
     if (insertedRows) {
+      await assignNewContactsToSection(insertedRows.map((row) => row.id), sectionId);
       await linkUnmatchedMessages(insertedRows);
     } else {
       revalidatePath("/contacts");

@@ -10,6 +10,8 @@ import { PAGE_SIZE, getTotalPages, parsePage } from "@/lib/pagination";
 import { getUnreadCountsByContact } from "@/lib/unread";
 import { ilikeAny, pageClause, param } from "@/lib/sql";
 import { INVESTOR_TAGS } from "@/lib/tags";
+import { loadSectionsInfo } from "@/lib/sections";
+import { ALL_SECTIONS, parseSectionParam, sectionCondition, type SectionsInfo } from "@/lib/section-filter";
 
 export const metadata: Metadata = {
   title: "Contacts",
@@ -18,7 +20,7 @@ export const metadata: Metadata = {
 export default async function ContactsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ search?: string; tags?: string; page?: string }>;
+  searchParams: Promise<{ search?: string; tags?: string; page?: string; section?: string }>;
 }) {
   const resolvedSearchParams = await searchParams;
   const search = resolvedSearchParams.search?.trim() ?? "";
@@ -39,24 +41,36 @@ export default async function ContactsPage({
   let totalGroups = 0;
   let unreadCounts: Record<string, number> = {};
   let loadError: string | null = null;
+  let sectionsInfo: SectionsInfo | null = null;
+  let section = ALL_SECTIONS;
 
   try {
-    // The search and tag filter, shared by the filtered count and the page of contacts.
+    sectionsInfo = await loadSectionsInfo();
+    section = parseSectionParam(resolvedSearchParams.section, sectionsInfo);
+
+    // The section, search and tag filter, shared by the filtered count and the page of contacts.
     const filterParams: unknown[] = [];
     const conditions = ["c.deleted_at is null"];
+    const inSectionSql = sectionCondition(section, filterParams);
+    if (inSectionSql) conditions.push(inSectionSql);
     if (search) conditions.push(ilikeAny(["c.name", "c.phone", "c.email", "c.company"], search, filterParams));
     if (selectedTags.length > 0) conditions.push(`c.tags && ${param(filterParams, selectedTags)}::text[]`);
     const where = conditions.join(" and ");
+
+    // The overview cards count the chosen section only.
+    const statsParams: unknown[] = [INVESTOR_TAGS];
+    const statsSection = sectionCondition(section, statsParams);
+    const statsWhere = `c.deleted_at is null${statsSection ? ` and ${statsSection}` : ""}`;
 
     const [filtered, stats, unread] = await Promise.all([
       db.one<{ count: number }>(`select count(*)::int as count from public.contacts c where ${where}`, filterParams),
       db.one<{ total: number; investors: number; tagged: number; groups: number }>(
         `select
-           (select count(*)::int from public.contacts where deleted_at is null) as total,
-           (select count(*)::int from public.contacts where deleted_at is null and tags && $1::text[]) as investors,
-           (select count(*)::int from public.contacts where deleted_at is null and tags <> '{}') as tagged,
+           (select count(*)::int from public.contacts c where ${statsWhere}) as total,
+           (select count(*)::int from public.contacts c where ${statsWhere} and c.tags && $1::text[]) as investors,
+           (select count(*)::int from public.contacts c where ${statsWhere} and c.tags <> '{}') as tagged,
            (select count(*)::int from public.groups) as groups`,
-        [INVESTOR_TAGS],
+        statsParams,
       ),
       getUnreadCountsByContact(),
     ]);
@@ -77,7 +91,7 @@ export default async function ContactsPage({
     const paging = pageClause(pageParams, page, PAGE_SIZE);
     contacts = await db.query<ContactRow>(
       `select c.id, c.name, c.phone, c.email, c.company, c.tags, c.date_saved, c.notes,
-              c.last_message_at, c.last_message_text, c.last_message_direction,
+              c.last_message_at, c.last_message_text, c.last_message_direction,${sectionsInfo ? " c.section_id," : ""}
               coalesce((
                 select json_agg(json_build_object('groups', json_build_object('id', g.id, 'name', g.name)))
                   from public.contact_groups cg
@@ -105,6 +119,10 @@ export default async function ContactsPage({
     );
   }
 
+  // New contacts go into the section being viewed (or the first section on "All").
+  const defaultSectionId =
+    sectionsInfo?.sections.find((s) => s.id === section)?.id ?? sectionsInfo?.sections[0]?.id ?? null;
+
   return (
     <div className="flex min-h-0 flex-col p-4 sm:p-6 lg:p-8">
       {/* Header */}
@@ -118,8 +136,8 @@ export default async function ContactsPage({
 
         <div className="flex items-center gap-2">
           <UpdateContactsDialog />
-          <ImportContactsDialog />
-          <AddContactDialog />
+          <ImportContactsDialog sections={sectionsInfo?.sections} defaultSectionId={defaultSectionId} />
+          <AddContactDialog sections={sectionsInfo?.sections} defaultSectionId={defaultSectionId} />
         </div>
       </div>
 
@@ -149,7 +167,9 @@ export default async function ContactsPage({
       <ContactsExplorer
         // A new address from outside the list (a sidebar tag link, back/forward)
         // restarts it with that search, tags and page.
-        key={`${search}|${tagsParam}|${page}`}
+        key={`${search}|${tagsParam}|${page}|${section}`}
+        sectionsInfo={sectionsInfo}
+        initialSection={section}
         serverContacts={contacts}
         serverFilteredCount={filteredCount}
         unreadCounts={unreadCounts}

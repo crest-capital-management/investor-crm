@@ -38,6 +38,7 @@ import {
 import { Download, FileText, Loader2, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { parseTagCell } from "@/lib/tag-match";
+import type { ContactSection } from "@/lib/section-filter";
 
 type ContactField = keyof ImportContactRow;
 type Mapping = Record<number, ContactField | "skip">;
@@ -133,10 +134,18 @@ function getMappedRows(csv: CsvData, mapping: Mapping): MappedRow[] {
   });
 }
 
-export function ImportContactsDialog() {
+export function ImportContactsDialog({
+  sections,
+  defaultSectionId = null,
+}: {
+  /** Contact sections to choose from; without them new contacts go into the first section. */
+  sections?: ContactSection[];
+  defaultSectionId?: string | null;
+} = {}) {
   const router = useRouter();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
+  const [sectionId, setSectionId] = useState(defaultSectionId ?? "");
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [csv, setCsv] = useState<CsvData | null>(null);
@@ -363,7 +372,7 @@ export function ImportContactsDialog() {
     if (!canContinue) return;
     setError(null);
     setImporting(true);
-    const importResult = await importContacts(JSON.stringify(validRows));
+    const importResult = await importContacts(JSON.stringify(validRows), sectionId || null);
     setImporting(false);
     if ("error" in importResult) {
       toast(importResult.error, "error");
@@ -421,6 +430,11 @@ export function ImportContactsDialog() {
         onOpenChange={(next) => {
           setOpen(next);
           if (!next && !workspaceOpen) resetState();
+          if (next && sections?.length) {
+            // Default to the section tab being viewed (tabs change the address without a reload).
+            const current = new URLSearchParams(window.location.search).get("section");
+            setSectionId(current && sections.some((s) => s.id === current) ? current : defaultSectionId ?? sections[0].id);
+          }
         }}
       >
         <SheetTrigger render={<Button variant="outline" className="h-9 px-3 text-xs sm:h-10 sm:px-4 sm:text-sm" />}>
@@ -747,7 +761,30 @@ export function ImportContactsDialog() {
                     })()}
                 </div>
               </main>
-              <footer className="flex shrink-0 items-center justify-end gap-2 border-t bg-muted/20 px-8 py-4"><Button variant="outline" onClick={closeWorkspace} disabled={importing}>Cancel</Button><Button onClick={handleImport} disabled={!canContinue || importing}>{importing ? "Importing..." : `Continue (${mappedRequiredCount}/${requiredFieldCount})`}</Button></footer>
+              <footer className="flex shrink-0 items-center justify-end gap-2 border-t bg-muted/20 px-8 py-4">
+                {sections && sections.length > 0 && (
+                  <div className="mr-auto flex items-center gap-2 text-sm">
+                    <span className="text-muted-foreground">New contacts go to</span>
+                    <Select
+                      items={Object.fromEntries(sections.map((s) => [s.id, s.name]))}
+                      value={sectionId}
+                      onValueChange={(value) => setSectionId(value ?? "")}
+                      disabled={importing}
+                    >
+                      <SelectTrigger className="h-9 w-44" aria-label="Section for new contacts">
+                        <SelectValue placeholder="Choose a section" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {sections.map((section) => (
+                          <SelectItem key={section.id} value={section.id}>
+                            {section.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                <Button variant="outline" onClick={closeWorkspace} disabled={importing}>Cancel</Button><Button onClick={handleImport} disabled={!canContinue || importing}>{importing ? "Importing..." : `Continue (${mappedRequiredCount}/${requiredFieldCount})`}</Button></footer>
             </>
           )}
         </div>

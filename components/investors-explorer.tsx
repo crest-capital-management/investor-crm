@@ -5,6 +5,8 @@ import { X } from "lucide-react";
 
 import { InvestorTrackingTable, type InvestorTrackingRow } from "@/components/investor-tracking-table";
 import { PaginationControls } from "@/components/pagination-controls";
+import { SectionTabs } from "@/components/section-tabs";
+import { ALL_SECTIONS, inSection, type SectionsInfo } from "@/lib/section-filter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { buildSearchIndex, searchContacts } from "@/lib/contact-search";
@@ -20,12 +22,17 @@ const investorsCache: { rows: InvestorTrackingRow[] | null } = { rows: null };
  * until then (or if loading fails) the server's page is shown.
  */
 export function InvestorsExplorer({
+  sectionsInfo,
+  initialSection,
   serverRows,
   serverTotal,
   unreadCounts,
   initialSearch,
   initialPage,
 }: {
+  /** Null before the sections database change is applied (no tabs then). */
+  sectionsInfo: SectionsInfo | null;
+  initialSection: string;
   serverRows: InvestorTrackingRow[];
   serverTotal: number;
   unreadCounts: Record<string, number>;
@@ -33,44 +40,72 @@ export function InvestorsExplorer({
   initialPage: number;
 }) {
   const [search, setSearch] = useState(initialSearch);
+  const [section, setSection] = useState(initialSection);
   const [page, setPage] = useState(initialPage);
   const deferredSearch = useDeferredValue(search);
 
   const allRows = useAllRows<InvestorTrackingRow>("/api/investors/index", "investors", investorsCache, serverRows);
   const serverIndex = useMemo(() => buildSearchIndex(serverRows), [serverRows]);
   const fullIndex = useMemo(() => (allRows ? buildSearchIndex(allRows) : null), [allRows]);
+  const sectionIndex = useMemo(
+    () => (fullIndex ? fullIndex.filter((entry) => inSection(entry.contact, section)) : null),
+    [fullIndex, section],
+  );
 
   const view = useMemo(() => {
     const trimmed = deferredSearch.trim();
-    if (fullIndex) {
-      const matches = searchContacts(fullIndex, trimmed, [], "name");
+    if (sectionIndex) {
+      const matches = searchContacts(sectionIndex, trimmed, [], "name");
       const totalPages = getTotalPages(matches.length);
       const currentPage = Math.min(page, totalPages);
       const { from, to } = getPageRange(currentPage);
       return { rows: matches.slice(from, to + 1), total: matches.length, page: currentPage };
     }
     // Not loaded yet: filter the page the server sent.
-    if (!trimmed) return { rows: serverRows, total: serverTotal, page: initialPage };
-    const matches = searchContacts(serverIndex, trimmed, [], "name");
+    if (!trimmed && section === initialSection) return { rows: serverRows, total: serverTotal, page: initialPage };
+    const matches = searchContacts(serverIndex, trimmed, [], "name").filter((row) => inSection(row, section));
     return { rows: matches, total: matches.length, page: 1 };
-  }, [deferredSearch, page, fullIndex, serverRows, serverIndex, serverTotal, initialPage]);
+  }, [deferredSearch, section, page, sectionIndex, serverRows, serverIndex, serverTotal, initialPage, initialSection]);
 
   // Keep the address bar in step without a server round trip.
   useEffect(() => {
     const params = new URLSearchParams();
+    if (section !== ALL_SECTIONS) params.set("section", section);
     if (deferredSearch.trim()) params.set("search", deferredSearch.trim());
     if (view.page > 1) params.set("page", String(view.page));
     const query = params.toString();
     window.history.replaceState(window.history.state, "", query ? `?${query}` : window.location.pathname);
-  }, [deferredSearch, view.page]);
+  }, [deferredSearch, section, view.page]);
+
+  // The tab counts follow the loaded list, else the server's.
+  const tabsInfo = useMemo(() => {
+    if (!sectionsInfo || !allRows) return sectionsInfo;
+    const counts = new Map<string, number>();
+    let none = 0;
+    for (const row of allRows) {
+      if (row.section_id) counts.set(row.section_id, (counts.get(row.section_id) ?? 0) + 1);
+      else none += 1;
+    }
+    return {
+      sections: sectionsInfo.sections.map((s) => ({ ...s, count: counts.get(s.id) ?? 0 })),
+      total: allRows.length,
+      noSection: none,
+    };
+  }, [sectionsInfo, allRows]);
 
   function handleSearchChange(value: string) {
     setSearch(value);
     setPage(1);
   }
 
+  function handleSectionChange(next: string) {
+    setSection(next);
+    setPage(1);
+  }
+
   return (
     <>
+      {tabsInfo && <SectionTabs info={tabsInfo} value={section} onChange={handleSectionChange} />}
       <div className="relative mt-3 max-w-md">
         <Input
           value={search}
