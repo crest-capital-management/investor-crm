@@ -4,7 +4,8 @@ import { requireActionAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { isReplyWindowOpen } from "@/lib/reply-window";
 import { revalidatePath } from "next/cache";
-import { generateChatSummary, transcribeVoiceNoteToMeetingNote } from "@/lib/gemini";
+import { generateChatSummary } from "@/lib/contact-ai";
+import { transcribeVoiceNoteToMeetingNote } from "@/lib/gemini";
 import {
   mimeTypeToWhatsAppMediaType,
   normalizeToLocalPhone,

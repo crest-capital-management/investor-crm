@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireActionAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { generateFollowUpSuggestion } from "@/lib/gemini";
+import { generateFollowUpSuggestion } from "@/lib/contact-ai";
 
 export type FollowUp = {
   id: string;
@@ -82,7 +82,7 @@ export type SuggestFollowUpResult =
   | { error: string };
 
 /**
- * Uses AI (Gemini) to suggest a follow-up for an investor based on their
+ * Uses AI (Claude) to suggest a follow-up for an investor based on their
  * WhatsApp history and meeting notes. This only returns a suggestion for
  * the user to review — it does not save anything. The user still confirms
  * and saves it through the existing addFollowUp flow (the manual Add

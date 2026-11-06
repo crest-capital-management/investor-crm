@@ -18,7 +18,8 @@ https://investor-crm.crest-capital.com.
 | `WHATSAPP_WEBHOOK_VERIFY_TOKEN` | Same as Netlify |
 | `META_APP_SECRET` | Same as Netlify (checks that webhook calls really come from Meta) |
 | `SCHEDULER_SECRET` | Same as Netlify (the scheduled jobs send it) |
-| `ANTHROPIC_API_KEY` | AI features. **For now put the Gemini key here** (on Netlify it is still called `GEMINI_API_KEY`); the code still calls Google Gemini until the AI calls are moved to Anthropic, so an Anthropic key here would stop the AI features |
+| `ANTHROPIC_API_KEY` | AI features (Claude): chat summary, follow-up suggestion, message drafting, prospect scoring, portfolio analysis. Holds the **Anthropic** key |
+| `GEMINI_API_KEY` | Voice note → meeting note only (Claude does not take audio, so this one feature stays on Google Gemini). Holds the **Gemini** key; without it only voice notes stop working |
 | `BREVO_API_KEY`, `BREVO_SENDER_EMAIL` | Same as Netlify (email) |
 | `BREVO_SENDER_NAME` | Optional, default "CREST CRM" |
 | `RESEND_API_KEY`, `RESEND_FROM_EMAIL` | Optional fallback email service, same as Netlify |

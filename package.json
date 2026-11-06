@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
     "@azure/storage-blob": "^12.34.0",
     "@base-ui/react": "^1.8.0",
     "@types/pg": "^8.23.1",
