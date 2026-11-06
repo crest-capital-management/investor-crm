@@ -25,6 +25,7 @@ import {
 import { DateSavedPicker } from "@/components/date-saved-picker";
 import { addContact } from "@/app/contacts/actions";
 import { useToast } from "@/components/toast-provider";
+import type { ContactSection } from "@/lib/section-filter";
 
 import { TAG_OPTIONS } from "@/lib/tags";
 export { TAG_OPTIONS };
@@ -43,6 +44,8 @@ export function AddContactDialog({
   triggerLabel = "+ Add Contact",
   triggerClassName = "h-9 px-3 text-xs sm:h-10 sm:px-4 sm:text-sm",
   onCreated,
+  sections,
+  defaultSectionId = null,
 }: {
   /** Pre-fill, e.g. when saving a number that messaged on WhatsApp. */
   initialName?: string;
@@ -50,6 +53,9 @@ export function AddContactDialog({
   triggerLabel?: React.ReactNode;
   triggerClassName?: string;
   onCreated?: () => void;
+  /** Contact sections to choose from; without them the contact goes into the first section. */
+  sections?: ContactSection[];
+  defaultSectionId?: string | null;
 } = {}) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
@@ -70,8 +76,10 @@ export function AddContactDialog({
   const [dateSaved, setDateSaved] = useState<Date | undefined>(undefined);
   const [dateError, setDateError] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
+  const [sectionId, setSectionId] = useState(defaultSectionId ?? "");
 
   function resetForm() {
+    setSectionId(defaultSectionId ?? "");
     setName(initialName);
     setPhone(initialPhone);
     setEmail("");
@@ -134,6 +142,7 @@ export function AddContactDialog({
       dateSaved ? toISODateString(dateSaved) : ""
     );
     formData.set("notes", notes.trim());
+    formData.set("sectionId", sectionId);
 
     setSubmitting(true);
 
@@ -160,6 +169,10 @@ export function AddContactDialog({
 
         if (!next) {
           resetForm();
+        } else if (sections?.length) {
+          // Default to the section tab being viewed (tabs change the address without a reload).
+          const current = new URLSearchParams(window.location.search).get("section");
+          if (current && sections.some((s) => s.id === current)) setSectionId(current);
         }
       }}
     >
@@ -278,6 +291,29 @@ export function AddContactDialog({
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Section */}
+            {sections && sections.length > 0 && (
+              <div className="flex flex-col gap-1.5 sm:gap-2">
+                <Label>Section</Label>
+                <Select
+                  items={Object.fromEntries(sections.map((s) => [s.id, s.name]))}
+                  value={sectionId}
+                  onValueChange={(value) => setSectionId(value ?? "")}
+                >
+                  <SelectTrigger className="h-9 text-sm sm:h-10 w-full" aria-label="Section">
+                    <SelectValue placeholder="Select a section" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sections.map((section) => (
+                      <SelectItem key={section.id} value={section.id}>
+                        {section.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             {/* Date */}
             <DateSavedPicker

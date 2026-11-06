@@ -7,6 +7,7 @@ import { db, isMissingSchemaError } from "@/lib/db";
 import type { ContactRow } from "@/components/contact-details-dialog";
 import { requireAuthFast } from "@/lib/auth";
 import { getUnreadCountsByContact } from "@/lib/unread";
+import { loadContactSection } from "@/lib/sections";
 import { ContactDetail } from "@/components/contact-detail";
 import type { MeetingNote } from "@/app/contacts/actions";
 import type { FollowUp } from "@/app/investors/actions";
@@ -92,11 +93,12 @@ export default async function ContactDetailPage({
     prospectScoreError = error;
   }
 
-  const unreadCounts = await getUnreadCountsByContact();
+  const [unreadCounts, section] = await Promise.all([getUnreadCountsByContact(), loadContactSection(id)]);
 
   return (
     <ContactDetail
       contact={contact}
+      section={section}
       initialNotes={notesError ? [] : notes}
       notesError={notesError ? "Meeting notes could not be loaded." : null}
       initialFollowUps={followUpsError ? [] : followUps}

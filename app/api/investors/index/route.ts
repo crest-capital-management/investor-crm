@@ -31,10 +31,15 @@ export async function GET() {
   try {
     let investors: Row[];
     try {
-      investors = await loadInvestors(WITH_LAST_MESSAGE);
+      investors = await loadInvestors(`${WITH_LAST_MESSAGE}, section_id`);
     } catch {
-      // The last-message columns don't exist until the chat-list migration is run.
-      investors = await loadInvestors(BASE_COLUMNS);
+      try {
+        // section_id doesn't exist until azure/003_contact_sections.sql is applied.
+        investors = await loadInvestors(WITH_LAST_MESSAGE);
+      } catch {
+        // The last-message columns don't exist until the chat-list migration is run.
+        investors = await loadInvestors(BASE_COLUMNS);
+      }
     }
 
     // The latest interaction and the earliest pending follow-up per contact.

@@ -13,6 +13,8 @@ import { useToast } from "@/components/toast-provider";
 import { UnreadBadge } from "@/components/unread-badge";
 import { BulkTagDialog } from "@/components/bulk-tag-dialog";
 import { ExportContactsMenu } from "@/components/export-contacts-menu";
+import { MoveToSectionDialog } from "@/components/move-to-section-dialog";
+import type { ContactSection } from "@/lib/section-filter";
 import {
   Dialog,
   DialogClose,
@@ -42,9 +44,12 @@ export function ContactsTable({
   unreadCounts = {},
   matchingIds,
   totalMatching = 0,
+  sections,
 }: {
   contacts: ContactRow[];
   search: string;
+  /** Contact sections (absent before the sections database change is applied). */
+  sections?: ContactSection[];
   /** Ids of every contact matching the current search and tag filter (all pages), when known. */
   matchingIds?: string[];
   totalMatching?: number;
@@ -57,6 +62,9 @@ export function ContactsTable({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
+  const [moveDialogOpen, setMoveDialogOpen] = useState(false);
+  const sectionNames = new Map((sections ?? []).map((section) => [section.id, section.name]));
+  const showSections = Boolean(sections && sections.length > 0);
   const selectAllRef = useRef<HTMLInputElement>(null);
   const contactIds = contacts.map((contact) => contact.id);
   const selectedVisibleCount = contactIds.filter((id) => selectedIds.has(id)).length;
@@ -120,6 +128,18 @@ export function ContactsTable({
           router.refresh();
         }}
       />
+      {showSections && (
+        <MoveToSectionDialog
+          open={moveDialogOpen}
+          onOpenChange={setMoveDialogOpen}
+          ids={[...selectedIds]}
+          sections={sections ?? []}
+          onDone={() => {
+            setSelectedIds(new Set());
+            router.refresh();
+          }}
+        />
+      )}
       {selectedIds.size > 0 && (
         <div className="mb-3 flex shrink-0 items-center justify-between rounded-lg border bg-background px-4 py-2.5">
           <p className="text-sm font-medium">
@@ -152,6 +172,11 @@ export function ContactsTable({
                 { label: `Selected (${selectedIds.size.toLocaleString("en-IN")}) · CSV`, format: "csv", ids: [...selectedIds], fileLabel: "selected" },
               ]}
             />
+            {showSections && (
+              <Button type="button" variant="outline" size="sm" onClick={() => setMoveDialogOpen(true)} disabled={deleting}>
+                Move to…
+              </Button>
+            )}
             <Button type="button" variant="outline" size="sm" onClick={() => setTagDialogOpen(true)} disabled={deleting}>
               Change tag
             </Button>
@@ -191,6 +216,7 @@ export function ContactsTable({
                 <th className="w-[19%] px-5 py-2.5 sm:py-3 font-medium">Email</th>
                 <th className="w-[17%] px-5 py-2.5 sm:py-3 font-medium">Tags</th>
                 <th className="w-[16%] px-5 py-2.5 sm:py-3 font-medium">Groups</th>
+                {showSections && <th className="px-5 py-2.5 sm:py-3 font-medium">Section</th>}
               </tr>
             </thead>
 
@@ -273,13 +299,18 @@ export function ContactsTable({
                           <span className="text-muted-foreground">—</span>
                         )}
                       </td>
+                      {showSections && (
+                        <td className="whitespace-nowrap px-5 py-2.5 sm:py-4 text-muted-foreground">
+                          {(contact.section_id && sectionNames.get(contact.section_id)) || "—"}
+                        </td>
+                      )}
                     </tr>
                   </ContactDetailsDialog>
                 ))
               ) : (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={showSections ? 8 : 7}
                     className="px-5 py-12 text-center text-muted-foreground"
                   >
                     {search ? "No contacts found." : "No contacts yet."}

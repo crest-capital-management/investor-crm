@@ -5,6 +5,7 @@ import { PROSPECT_SCORE_COLUMNS, type ProspectScore } from "@/lib/prospect-score
 import { requireAuthFast } from "@/lib/auth";
 import { db, isMissingSchemaError } from "@/lib/db";
 import { getUnreadCountsByContact } from "@/lib/unread";
+import { loadContactSection } from "@/lib/sections";
 import { InvestorDetail, type WhatsAppMessage } from "@/components/investor-detail";
 import type { MeetingNote } from "@/app/contacts/actions";
 import type { FollowUp } from "@/app/investors/actions";
@@ -113,11 +114,12 @@ export default async function InvestorDetailPage({
     ),
   );
 
-  const unreadCounts = await getUnreadCountsByContact();
+  const [unreadCounts, section] = await Promise.all([getUnreadCountsByContact(), loadContactSection(id)]);
 
   return (
     <InvestorDetail
       contact={contact}
+      section={section}
       initialNotes={notesError ? [] : (notes ?? [])}
       notesError={notesError ? "Meeting notes could not be loaded." : null}
       initialFollowUps={followUpsError ? [] : (followUps ?? [])}
