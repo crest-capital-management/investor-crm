@@ -1,14 +1,8 @@
 /**
- * Gemini API integration helper for CREST Capital Management CRM.
- * Requires ANTHROPIC_API_KEY in environment.
+ * Gemini, used only for voice notes: Claude does not take audio input, so
+ * the voice note -> meeting note feature stays on Gemini. Requires
+ * GEMINI_API_KEY. All other AI features use Claude (lib/claude.ts).
  */
-
-export type ChatMessageForSummary = {
-  direction: string;
-  message_text: string | null;
-  sent_at: string | null;
-  created_at: string;
-};
 
 interface GeminiPart {
   text?: string;
@@ -22,7 +16,7 @@ interface GeminiCandidate {
   finishReason?: string;
 }
 
-export interface GeminiApiResponse {
+interface GeminiApiResponse {
   candidates?: GeminiCandidate[];
   error?: {
     code?: number;
@@ -38,10 +32,8 @@ const RETRYABLE_STATUS_CODES = new Set([429, 500, 503]);
 const MAX_RETRIES_PER_MODEL = 1;
 const RETRY_BASE_DELAY_MS = 600;
 
-// gemini-3.6-flash is our preferred model, but it's a "thinking" model that
-// runs low on capacity during demand spikes. gemini-flash-lite-latest is a
-// lighter model that stays available, used as a fallback so the feature
-// still works (with a slightly less polished result) instead of erroring.
+// gemini-3.6-flash is the preferred model; gemini-flash-lite-latest is a
+// lighter model that stays available when the preferred one is overloaded.
 const MODEL_FALLBACK_CHAIN = ["gemini-3.6-flash", "gemini-flash-lite-latest"];
 
 function sleep(ms: number) {
@@ -54,53 +46,32 @@ function geminiUrl(model: string) {
 
 /**
  * POSTs to a Gemini generateContent endpoint, retrying with backoff on
- * transient errors (model overloaded / rate limited), then falling back to
- * a lighter model if the preferred one stays unavailable.
- *
- * With timeoutMs, the whole call (all retries and fallbacks) gives up after
- * that long with a clear error instead of hanging.
+ * transient errors, then falling back to a lighter model if the preferred
+ * one stays unavailable.
  */
-export async function callGeminiGenerateContent(
-  apiKey: string,
-  body: unknown,
-  options: { timeoutMs?: number } = {}
-): Promise<GeminiApiResponse> {
+async function callGeminiGenerateContent(apiKey: string, body: unknown): Promise<GeminiApiResponse> {
   let lastErrorMessage = "Gemini API request failed.";
-  const signal = options.timeoutMs ? AbortSignal.timeout(options.timeoutMs) : undefined;
 
   for (const model of MODEL_FALLBACK_CHAIN) {
     for (let attempt = 0; attempt <= MAX_RETRIES_PER_MODEL; attempt++) {
-      let response: Response;
-      let data: GeminiApiResponse;
-      try {
-        response = await fetch(geminiUrl(model), {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-goog-api-key": apiKey,
-          },
-          body: JSON.stringify(body),
-          signal,
-        });
-        data = await response.json();
-      } catch (err: unknown) {
-        if (signal?.aborted) {
-          throw new Error("The AI took too long to respond. Please try again.");
-        }
-        throw err;
-      }
+      const response = await fetch(geminiUrl(model), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
+        body: JSON.stringify(body),
+      });
+      const data: GeminiApiResponse = await response.json();
 
       if (response.ok && !data.error) {
         return data;
       }
 
       const statusCode = data.error?.code ?? response.status;
-      lastErrorMessage =
-        data.error?.message ||
-        `Gemini API responded with HTTP status ${response.status}`;
+      lastErrorMessage = data.error?.message || `Gemini API responded with HTTP status ${response.status}`;
 
-      const isRetryable = RETRYABLE_STATUS_CODES.has(statusCode);
-      if (!isRetryable) {
+      if (!RETRYABLE_STATUS_CODES.has(statusCode)) {
         throw new Error(lastErrorMessage);
       }
 
@@ -114,195 +85,6 @@ export async function callGeminiGenerateContent(
 }
 
 /**
- * Generates an AI summary of a contact's WhatsApp conversation history using Gemini 3.6 Flash.
- * Produces a concise, scannable summary in at most 2 short sentences (under 40 words total)
- * with an optional next step.
- */
-export async function generateChatSummary(
-  messages: ChatMessageForSummary[]
-): Promise<string> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-
-  if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY is not configured.");
-  }
-
-  if (!messages || messages.length === 0) {
-    throw new Error("No messages provided to summarize.");
-  }
-
-  // Format messages chronologically with inbound/outbound labels
-  const sorted = [...messages].sort((a, b) => {
-    const timeA = new Date(a.sent_at || a.created_at).getTime();
-    const timeB = new Date(b.sent_at || b.created_at).getTime();
-    return timeA - timeB;
-  });
-
-  const formattedHistory = sorted
-    .map((m) => {
-      const isInbound =
-        m.direction === "in" || m.direction?.toLowerCase() === "inbound";
-      const label = isInbound ? "Contact (Inbound)" : "Team (Outbound)";
-      const timestamp = m.sent_at || m.created_at;
-      const text =
-        m.message_text && m.message_text.trim()
-          ? m.message_text.trim()
-          : "[Media / non-text message]";
-      return `[${timestamp}] ${label}: ${text}`;
-    })
-    .join("\n");
-
-  const prompt = `You are an AI assistant for CREST Capital Management's investor CRM.
-Summarize this WhatsApp conversation in at most 2 short sentences (under 40 words total). Be direct and specific — no filler phrases like "the contact" or "the team". If there's a clear next step or pending action, end with a separate short line starting with "Next: ".
-
-WhatsApp Conversation History:
-${formattedHistory}
-
-Summary:`;
-
-  const data = await callGeminiGenerateContent(apiKey, {
-    contents: [
-      {
-        parts: [
-          {
-            text: prompt,
-          },
-        ],
-      },
-    ],
-  });
-
-  const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-
-  if (!generatedText || !generatedText.trim()) {
-    throw new Error("No summary generated by Gemini.");
-  }
-
-  return generatedText.trim();
-}
-
-export type MeetingNoteForFollowUp = {
-  note: string;
-  created_at: string;
-};
-
-export type FollowUpSuggestion =
-  | { needed: true; dueDate: string; message: string }
-  | { needed: false };
-
-/**
- * Uses Gemini to decide, from a contact's WhatsApp history and meeting
- * notes, whether a follow-up is warranted, and if so drafts a due date and
- * message. This only produces a suggestion — nothing is saved until the
- * user reviews and confirms it via the normal Add Follow-up flow.
- */
-export async function generateFollowUpSuggestion(
-  messages: ChatMessageForSummary[],
-  meetingNotes: MeetingNoteForFollowUp[],
-  todayIsoDate: string,
-): Promise<FollowUpSuggestion> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured.");
-
-  if (messages.length === 0 && meetingNotes.length === 0) {
-    throw new Error("No WhatsApp history or meeting notes to work from.");
-  }
-
-  const sortedMessages = [...messages].sort((a, b) => {
-    const timeA = new Date(a.sent_at || a.created_at).getTime();
-    const timeB = new Date(b.sent_at || b.created_at).getTime();
-    return timeA - timeB;
-  });
-
-  const formattedHistory = sortedMessages.length
-    ? sortedMessages
-        .map((m) => {
-          const isInbound =
-            m.direction === "in" || m.direction?.toLowerCase() === "inbound";
-          const label = isInbound ? "Contact (Inbound)" : "Team (Outbound)";
-          const timestamp = m.sent_at || m.created_at;
-          const text =
-            m.message_text && m.message_text.trim()
-              ? m.message_text.trim()
-              : "[Media / non-text message]";
-          return `[${timestamp}] ${label}: ${text}`;
-        })
-        .join("\n")
-    : "(none)";
-
-  const sortedNotes = [...meetingNotes].sort(
-    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-  );
-  const formattedNotes = sortedNotes.length
-    ? sortedNotes.map((n) => `[${n.created_at}] ${n.note.trim()}`).join("\n")
-    : "(none)";
-
-  const prompt = `You are an AI assistant for CREST Capital Management's investor CRM. Today's date is ${todayIsoDate}.
-
-Based on the WhatsApp conversation history and meeting notes below, decide whether a follow-up action is currently warranted for this investor (e.g. there's an open commitment, an unanswered question, a promised next step, or it's been a while since contact with a clear pending item). If nothing warrants following up, say so.
-
-WhatsApp Conversation History:
-${formattedHistory}
-
-Meeting Notes:
-${formattedNotes}
-
-Respond with ONLY a single JSON object, no other text, in exactly one of these two shapes:
-{"needed": false}
-or
-{"needed": true, "due_date": "YYYY-MM-DD", "message": "short, specific follow-up action, under 25 words"}
-
-The due_date must be a real calendar date on or after ${todayIsoDate}, in YYYY-MM-DD format.`;
-
-  const data = await callGeminiGenerateContent(apiKey, {
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: { responseMimeType: "application/json" },
-  });
-
-  const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!generatedText || !generatedText.trim()) {
-    throw new Error("No follow-up suggestion generated by Gemini.");
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(generatedText.trim());
-  } catch {
-    throw new Error("Gemini returned an unexpected response format.");
-  }
-
-  if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    !("needed" in parsed)
-  ) {
-    throw new Error("Gemini returned an unexpected response format.");
-  }
-
-  const result = parsed as Record<string, unknown>;
-
-  if (result.needed === false) {
-    return { needed: false };
-  }
-
-  if (
-    result.needed === true &&
-    typeof result.due_date === "string" &&
-    /^\d{4}-\d{2}-\d{2}$/.test(result.due_date) &&
-    typeof result.message === "string" &&
-    result.message.trim()
-  ) {
-    return {
-      needed: true,
-      dueDate: result.due_date,
-      message: result.message.trim(),
-    };
-  }
-
-  throw new Error("Gemini returned an incomplete follow-up suggestion.");
-}
-
-/**
  * Transcribes a voice note recording and turns it into a clean, well
  * formatted meeting note using Gemini's audio understanding. The audio
  * itself is not stored — only the resulting text is saved as a meeting note.
@@ -311,8 +93,8 @@ export async function transcribeVoiceNoteToMeetingNote(
   audioBuffer: Buffer,
   mimeType: string,
 ): Promise<string> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured.");
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("GEMINI_API_KEY is not configured (voice notes use Gemini).");
 
   const prompt = `You are an AI assistant for CREST Capital Management's investor CRM. Listen to this voice recording of a meeting or call with an investor and write it up as a meeting note.
 
