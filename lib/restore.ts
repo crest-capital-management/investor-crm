@@ -10,6 +10,8 @@ import { db, type Queryable } from "@/lib/db";
 
 /** Insert order (parents before children); deletes run in reverse. */
 export const RESTORE_TABLES: Array<{ table: string; label: string; optional?: boolean }> = [
+  // Contact sections (azure/003_contact_sections.sql), before contacts which point at them.
+  { table: "contact_sections", label: "Sections", optional: true },
   { table: "contacts", label: "Contacts" },
   { table: "groups", label: "Groups" },
   { table: "templates", label: "Templates" },
@@ -121,7 +123,8 @@ export async function replaceAllData(
           throw new Error(`The database has no ${table} table. Run the database setup first.`);
         }
         // Settings missing from the backup are kept; other missing tables are emptied.
-        return !(table === "app_settings" && backup.data[table] === undefined);
+        // Sections missing from an older backup are kept too (its contacts get no section).
+        return !((table === "app_settings" || table === "contact_sections") && backup.data[table] === undefined);
       });
 
       // No one else can change these tables until the restore is finished (reading still works).

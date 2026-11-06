@@ -116,6 +116,11 @@ export async function previewRestore(name: string): Promise<{ preview?: RestoreP
     if (backup.data.app_settings === undefined) {
       warnings.push("This backup has no settings; your current settings will be kept.");
     }
+    if (backup.data.contact_sections === undefined && counts.contact_sections !== null) {
+      warnings.push(
+        "This backup is from before sections (tabs) existed; your current sections are kept and the restored contacts will have no section. You can move them afterwards.",
+      );
+    }
     return { preview: { exportedAt: backup.exportedAt, tables, warnings } };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "The backup could not be read." };
