@@ -26,6 +26,20 @@ function formatDate(date: string) {
   });
 }
 
+/** "6 Nov 2026", or "6 Nov 2026, 7:45 pm (before a restore)" for a safety copy. */
+export function backupLabel(backup: StoredBackup) {
+  if (!backup.beforeRestoreAt) return formatDate(backup.date);
+  const taken = new Date(`${backup.date}T${backup.beforeRestoreAt}:00Z`);
+  const when = taken.toLocaleString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return `${when} (before a restore)`;
+}
+
 /** Automatic nightly backups kept in private storage, with download links. */
 export function StoredBackups() {
   const { toast } = useToast();
@@ -103,7 +117,7 @@ export function StoredBackups() {
           {backups.map((backup) => (
             <li key={backup.name} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
               <span>
-                {formatDate(backup.date)}
+                {backupLabel(backup)}
                 <span className="ml-2 text-xs text-muted-foreground">{formatSize(backup.bytes)}</span>
               </span>
               <Button
