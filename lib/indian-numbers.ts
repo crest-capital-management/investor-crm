@@ -12,14 +12,6 @@ function groupIndian(digits: string): string {
   return `${rest},${lastThree}`;
 }
 
-/** Formats a number with Indian grouping, e.g. 5756422.7 -> "57,56,422.7". */
-export function formatIndianNumber(value: number, maximumFractionDigits = 2): string {
-  if (!Number.isFinite(value)) return "";
-  const [integer, fraction] = Math.abs(value).toFixed(maximumFractionDigits).split(".");
-  const trimmed = fraction ? fraction.replace(/0+$/, "") : "";
-  return `${value < 0 ? "-" : ""}${groupIndian(integer)}${trimmed ? `.${trimmed}` : ""}`;
-}
-
 /**
  * Rewrites Western-grouped numbers in a piece of text to Indian grouping
  * ("₹5,756,422.70" -> "₹57,56,422.70"). Numbers with five digits or fewer, and

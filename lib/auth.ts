@@ -65,14 +65,6 @@ export async function requireAuthFast() {
 }
 
 /**
- * Same as requireActionAuth. Kept for the actions that used to need an extra
- * owner check; requireActionAuth now confirms the owner for every action.
- */
-export async function requireOwnerAction() {
-  return requireActionAuth();
-}
-
-/**
  * Ensures the caller is the signed-in owner for Server Actions.
  * If not, returns an Unauthorized error response instead of redirecting.
  */

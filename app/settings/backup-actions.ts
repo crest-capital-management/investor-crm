@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireOwnerAction } from "@/lib/auth";
+import { requireActionAuth } from "@/lib/auth";
 import { STORED_BACKUP_NAME, UPLOADED_BACKUP_NAME, saveDailyBackup, saveSafetyBackup } from "@/lib/backup";
 import { RESTORE_TABLES, currentCounts, parseBackupFile, replaceAllData } from "@/lib/restore";
 import { createBackupDownloadUrl, downloadBackupFile, listBackupFiles, removeBackupFiles } from "@/lib/storage";
@@ -16,11 +16,11 @@ export interface StoredBackup {
 }
 
 // The backups container is private, so it is read with the storage account's
-// own key, but only after the signed-in owner is confirmed (requireOwnerAction).
+// own key, but only after the signed-in owner is confirmed (requireActionAuth).
 
 /** Saved backups, newest first. */
 export async function listStoredBackups(): Promise<{ backups?: StoredBackup[]; error?: string }> {
-  const { error: authError } = await requireOwnerAction();
+  const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
 
   let files;
@@ -51,7 +51,7 @@ export async function listStoredBackups(): Promise<{ backups?: StoredBackup[]; e
 
 /** A download link for one backup, valid for one minute. */
 export async function getBackupDownloadUrl(name: string): Promise<{ url?: string; error?: string }> {
-  const { error: authError } = await requireOwnerAction();
+  const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
   if (!STORED_BACKUP_NAME.test(name)) {
     return { error: "Unknown backup." };
@@ -66,7 +66,7 @@ export async function getBackupDownloadUrl(name: string): Promise<{ url?: string
 
 /** Takes a backup now (same as the nightly one). */
 export async function backUpNow(): Promise<{ success?: boolean; error?: string }> {
-  const { error: authError } = await requireOwnerAction();
+  const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
   try {
     await saveDailyBackup();
@@ -92,7 +92,7 @@ async function readBackup(name: string) {
 
 /** Reads a backup and shows what a restore would do. Changes nothing. */
 export async function previewRestore(name: string): Promise<{ preview?: RestorePreview; error?: string }> {
-  const { error: authError } = await requireOwnerAction();
+  const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
   if (!isRestorableName(name)) return { error: "Unknown backup." };
 
@@ -135,7 +135,7 @@ export async function restoreFromBackup(
   name: string,
   confirmation: string,
 ): Promise<{ counts?: Record<string, number>; safetyBackup?: string; error?: string }> {
-  const { error: authError } = await requireOwnerAction();
+  const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
   if (!isRestorableName(name)) return { error: "Unknown backup." };
   if (confirmation.trim() !== "RESTORE") return { error: 'Type RESTORE to confirm.' };

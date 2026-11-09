@@ -90,15 +90,3 @@ export async function loadContactSection(contactId: string): Promise<ContactSect
     return null;
   }
 }
-
-/** The sections in tab order (no counts), or [] before the database change is applied. */
-export async function listSections(): Promise<ContactSection[]> {
-  try {
-    return await db.query<ContactSection>(
-      "select id, name from public.contact_sections order by sort_order, lower(name)",
-    );
-  } catch (err) {
-    if (isMissingSchemaError(err)) return [];
-    throw err;
-  }
-}

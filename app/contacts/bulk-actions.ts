@@ -12,7 +12,7 @@ const CHUNK = 500;
 const MAX_CONTACTS = 5000;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIGRATION_HINT =
-  "The latest database update hasn't been run yet. Run 20261016000000_company_and_bulk_updates.sql in the Supabase SQL Editor, then try again.";
+  "The latest database update hasn't been run yet. Run 20261016000000_company_and_bulk_updates.sql on the database, then try again.";
 
 function isMissingFunction(error: unknown) {
   const { code, message } = (error ?? {}) as { code?: string; message?: string };

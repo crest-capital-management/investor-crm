@@ -11,7 +11,7 @@ import {
   type ProspectScore,
 } from "@/lib/prospect-score-types";
 
-const MISSING_COLUMN_ERROR = "Prospect score isn't set up yet. Run the latest Supabase migration (prospect score) first.";
+const MISSING_COLUMN_ERROR = "Prospect score isn't set up yet. Run the latest database migration (prospect score) first.";
 
 function isMissingColumn(error: unknown) {
   return isMissingSchemaError(error) || /ai_score|manual_score/.test((error as { message?: string } | null)?.message ?? "");

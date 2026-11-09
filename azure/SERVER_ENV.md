@@ -3,15 +3,17 @@
 Names only. Never commit real values. The app runs on port 3002 behind nginx at
 https://investor-crm.crest-capital.com.
 
-## A. Needed now, for PR #2 (Phase 1: database)
+The switch-over finished on 5 Nov 2026: database, login and files all run on
+Azure. The Supabase settings (`NEXT_PUBLIC_SUPABASE_URL`,
+`NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) are not read by
+the app any more and can be removed from the server.
+
+## A. App settings
 
 | Name | Value |
 |---|---|
 | `AZURE_CONNECTION_STRING` | `postgresql://crest:<db password>@localhost:5432/crest_crm` (the CRM's own database, not `crest`) |
 | `CRM_OWNER_ID` | The owner's user id (Aditya has it; same value as in his `.env.local`) |
-| `NEXT_PUBLIC_SUPABASE_URL` | Same as Netlify (Phase 1 still logs in and stores files through Supabase) |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Same as Netlify |
-| `SUPABASE_SERVICE_ROLE_KEY` | Same as Netlify |
 | `WHATSAPP_ACCESS_TOKEN` | Same as Netlify |
 | `WHATSAPP_PHONE_NUMBER_ID` | Same as Netlify |
 | `WHATSAPP_BUSINESS_ACCOUNT_ID` | Same as Netlify |
@@ -24,19 +26,17 @@ https://investor-crm.crest-capital.com.
 | `BREVO_SENDER_NAME` | Optional, default "CREST CRM" |
 | `RESEND_API_KEY`, `RESEND_FROM_EMAIL` | Optional fallback email service, same as Netlify |
 | `REMINDER_EMAIL_TO` | Where the daily reminder email goes, same as Netlify |
-| `URL` | `https://investor-crm.crest-capital.com` (links in the PDF auto-reply; Netlify set this itself) |
+| `URL` | `https://investor-crm.crest-capital.com` (links in the PDF auto-reply; falls back to `NEXTAUTH_URL` if unset) |
 
 Not needed on the server: `DATABASE_SSL_NO_VERIFY` (the database is on the same machine, so no TLS is used), `DATABASE_URL` (old name for `AZURE_CONNECTION_STRING`). Optional: `DATABASE_POOL_MAX` (default 10).
 
-## B. Added later, with Phase 2 (login) and Phase 3 (files)
+## B. Login and files
 
 | Name | Value |
 |---|---|
 | `NEXTAUTH_SECRET` | A new long random value made on the server: `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` |
 | `NEXTAUTH_URL` | `https://investor-crm.crest-capital.com` |
 | `AZURE_STORAGE_CONNECTION_STRING` | The storage account connection string with its access key (account `crestfinancialreports`) |
-
-After Phase 3 the three Supabase settings are no longer used by the app and can be removed.
 
 ## Also needed on the server
 

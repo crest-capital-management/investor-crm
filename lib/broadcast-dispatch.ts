@@ -7,16 +7,6 @@ import {
 } from "@/lib/whatsapp";
 import { insertOutboundMessage } from "@/lib/message-status";
 
-export interface BroadcastSendResult {
-  contactId: string;
-  name: string;
-  phone: string;
-  success: boolean;
-  error?: string;
-  /** Not attempted: plain text and the contact's 24-hour reply window is closed. */
-  skipped?: boolean;
-}
-
 /** Stored on broadcasts.send_summary once a broadcast has been sent. */
 export interface BroadcastSendSummary {
   total: number;
@@ -249,7 +239,7 @@ export type SendBroadcastResult =
   | ({ success: true; error?: undefined } & BroadcastProgress)
   | { success?: false; error: string };
 
-// Netlify allows ~60 s per request. Recipients are claimed in small batches
+// Keep each request short so the scheduler call and proxies don't time out. Recipients are claimed in small batches
 // and sent a few at a time, stopping with a safety margin before the limit.
 const BATCH_SIZE = 20;
 const CONCURRENCY = 5;

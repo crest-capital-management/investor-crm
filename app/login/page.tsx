@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import LoginPage from "@/src/app/login/page";
+import LoginForm from "./login-form";
 
 export const metadata: Metadata = {
   title: "Login",
 };
 
-export default LoginPage;
+export default LoginForm;
