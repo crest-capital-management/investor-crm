@@ -2,17 +2,11 @@ import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
 import { getOwnerSessionId } from "@/lib/auth";
+import { CONTACT_GROUPS_COLUMN } from "@/lib/contact-queries";
 
 export const dynamic = "force-dynamic";
 
 const BASE_COLUMNS = "c.id, c.name, c.phone, c.email, c.company, c.tags, c.date_saved, c.notes";
-// Same shape PostgREST gave for contact_groups(groups(id, name)): [{ groups: { id, name } }].
-const GROUPS_COLUMN = `coalesce(
-  (select json_agg(json_build_object('groups', json_build_object('id', g.id, 'name', g.name)))
-     from contact_groups cg join groups g on g.id = cg.group_id
-    where cg.contact_id = c.id),
-  '[]'::json
-) as contact_groups`;
 const WITH_LAST_MESSAGE = `${BASE_COLUMNS}, c.last_message_at, c.last_message_text, c.last_message_direction`;
 
 /**
@@ -28,7 +22,7 @@ export async function GET() {
 
   async function load(columns: string) {
     return db.query<Record<string, unknown>>(
-      `select ${columns}, ${GROUPS_COLUMN} from contacts c where c.deleted_at is null order by c.id asc`,
+      `select ${columns}, ${CONTACT_GROUPS_COLUMN} from contacts c where c.deleted_at is null order by c.id asc`,
     );
   }
 

@@ -5,6 +5,8 @@ import { requireActionAuth } from "@/lib/auth";
 import { db, isMissingSchemaError } from "@/lib/db";
 import type { PortfolioAnalysis } from "@/lib/portfolio-types";
 import { scoreProspect, type ScoringInput } from "@/lib/prospect-scoring";
+import { loadContactHistory, type ContactHistory } from "@/lib/ai-context";
+import { todayAsISODate } from "@/lib/format";
 import {
   MAX_SCORE_REASON_CHARS,
   PROSPECT_SCORE_COLUMNS,
@@ -43,32 +45,9 @@ export async function suggestProspectScore(
   }
   if (!contact) return { error: "The contact could not be found." };
 
-  let messages: ScoringInput["messages"];
-  let notes: ScoringInput["meetingNotes"];
-  let followUps: ScoringInput["followUps"];
+  let history: ContactHistory;
   try {
-    [messages, notes, followUps] = await Promise.all([
-      db.query<ScoringInput["messages"][number]>(
-        `select direction, message_text, sent_at, created_at
-           from public.whatsapp_messages
-          where contact_id = $1 and deleted_at is null
-          order by sent_at asc`,
-        [id],
-      ),
-      db.query<ScoringInput["meetingNotes"][number]>(
-        `select note, created_at
-           from public.interactions
-          where contact_id = $1 and type = 'meeting' and deleted_at is null
-          order by created_at asc`,
-        [id],
-      ),
-      db.query<ScoringInput["followUps"][number]>(
-        `select due_date, message, is_done
-           from public.follow_ups
-          where contact_id = $1 and deleted_at is null`,
-        [id],
-      ),
-    ]);
+    history = await loadContactHistory(id);
   } catch {
     return { error: "Could not load the contact's messages, notes or follow-ups." };
   }
@@ -89,14 +68,7 @@ export async function suggestProspectScore(
 
   let result: { score: number; reason: string };
   try {
-    result = await scoreProspect({
-      todayIsoDate: new Date().toISOString().slice(0, 10),
-      contact,
-      messages,
-      meetingNotes: notes,
-      followUps,
-      portfolio,
-    });
+    result = await scoreProspect({ todayIsoDate: todayAsISODate(), contact, ...history, portfolio });
   } catch (err: unknown) {
     return { error: err instanceof Error ? err.message : "The score could not be generated." };
   }

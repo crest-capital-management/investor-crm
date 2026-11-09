@@ -28,7 +28,6 @@ import { useToast } from "@/components/toast-provider";
 import type { ContactSection } from "@/lib/section-filter";
 
 import { TAG_OPTIONS } from "@/lib/tags";
-export { TAG_OPTIONS };
 
 function toISODateString(d: Date) {
   const year = d.getFullYear();

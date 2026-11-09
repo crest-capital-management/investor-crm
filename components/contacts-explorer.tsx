@@ -16,9 +16,6 @@ import { buildSearchIndex, searchContacts } from "@/lib/contact-search";
 import { getPageRange, getTotalPages, PAGE_SIZE } from "@/lib/pagination";
 import { useAllRows } from "@/lib/use-all-rows";
 
-// Kept for the whole browser session, so coming back to Contacts is instant.
-const contactsCache: { rows: ContactRow[] | null } = { rows: null };
-
 /**
  * The Contacts list: search box, tag filter, table and paging. Once all
  * contacts are loaded, search/filter/paging run in the browser and update on
@@ -50,7 +47,7 @@ export function ContactsExplorer({
   const [page, setPage] = useState(initialPage);
   const deferredSearch = useDeferredValue(search);
 
-  const allContacts = useAllRows<ContactRow>("/api/contacts/index", "contacts", contactsCache, serverContacts);
+  const allContacts = useAllRows<ContactRow>("/api/contacts/index", "contacts", serverContacts);
   const serverIndex = useMemo(() => buildSearchIndex(serverContacts), [serverContacts]);
   const fullIndex = useMemo(() => (allContacts ? buildSearchIndex(allContacts) : null), [allContacts]);
   const sectionIndex = useMemo(

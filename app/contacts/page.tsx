@@ -8,6 +8,7 @@ import { ContactsExplorer } from "@/components/contacts-explorer";
 import { db } from "@/lib/db";
 import { PAGE_SIZE, getTotalPages, parsePage } from "@/lib/pagination";
 import { getUnreadCountsByContact } from "@/lib/unread";
+import { CONTACT_GROUPS_COLUMN } from "@/lib/contact-queries";
 import { ilikeAny, pageClause, param } from "@/lib/sql";
 import { INVESTOR_TAGS } from "@/lib/tags";
 import { loadSectionsInfo } from "@/lib/sections";
@@ -92,12 +93,7 @@ export default async function ContactsPage({
     contacts = await db.query<ContactRow>(
       `select c.id, c.name, c.phone, c.email, c.company, c.tags, c.date_saved, c.notes,
               c.last_message_at, c.last_message_text, c.last_message_direction,${sectionsInfo ? " c.section_id," : ""}
-              coalesce((
-                select json_agg(json_build_object('groups', json_build_object('id', g.id, 'name', g.name)))
-                  from public.contact_groups cg
-                  join public.groups g on g.id = cg.group_id
-                 where cg.contact_id = c.id
-              ), '[]'::json) as contact_groups
+              ${CONTACT_GROUPS_COLUMN}
          from public.contacts c
         where ${where}
         order by c.last_message_at desc nulls last, c.date_saved desc, c.id asc

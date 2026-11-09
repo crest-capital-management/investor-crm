@@ -1,6 +1,7 @@
 import { askClaude, parseClaudeJson } from "@/lib/claude";
 import { toIndianGrouping } from "@/lib/indian-numbers";
 import type { PortfolioAnalysis } from "@/lib/portfolio-types";
+import { chronological, clip as clipText, isInbound, type ContactHistory } from "@/lib/ai-context";
 
 // Gives up before the host would cut the request off, so the card shows a clear error.
 const SCORING_TIMEOUT_MS = 30_000;
@@ -18,7 +19,7 @@ const SCORE_SCHEMA = {
   additionalProperties: false,
 };
 
-export type ScoringInput = {
+export type ScoringInput = ContactHistory & {
   todayIsoDate: string;
   contact: {
     name: string;
@@ -27,29 +28,20 @@ export type ScoringInput = {
     notes: string | null;
     date_saved: string | null;
   };
-  messages: Array<{ direction: string | null; message_text: string | null; sent_at: string | null; created_at: string }>;
-  meetingNotes: Array<{ note: string; created_at: string }>;
-  followUps: Array<{ due_date: string; message: string; is_done: boolean }>;
   portfolio: PortfolioAnalysis | null;
 };
 
 export type ScoringResult = { score: number; reason: string };
 
-function clip(text: string) {
-  const clean = text.replace(/\s+/g, " ").trim();
-  return clean.length > MAX_TEXT_CHARS ? `${clean.slice(0, MAX_TEXT_CHARS)}...` : clean;
-}
+const clip = (text: string) => clipText(text, MAX_TEXT_CHARS);
 
 function formatMessages(messages: ScoringInput["messages"]) {
-  const recent = [...messages]
-    .sort((a, b) => new Date(a.sent_at || a.created_at).getTime() - new Date(b.sent_at || b.created_at).getTime())
-    .slice(-MAX_MESSAGES);
+  const recent = chronological(messages).slice(-MAX_MESSAGES);
   if (recent.length === 0) return "(no WhatsApp messages)";
-  const inbound = messages.filter((m) => m.direction === "in" || m.direction?.toLowerCase() === "inbound").length;
+  const inbound = messages.filter((m) => isInbound(m.direction)).length;
   const lines = recent.map((m) => {
-    const isInbound = m.direction === "in" || m.direction?.toLowerCase() === "inbound";
     const text = m.message_text?.trim() ? clip(m.message_text) : "[media / non-text message]";
-    return `[${m.sent_at || m.created_at}] ${isInbound ? "Contact" : "Team"}: ${text}`;
+    return `[${m.sent_at || m.created_at}] ${isInbound(m.direction) ? "Contact" : "Team"}: ${text}`;
   });
   return `${messages.length} messages in total, ${inbound} from the contact. Latest ${recent.length}:\n${lines.join("\n")}`;
 }

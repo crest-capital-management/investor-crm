@@ -13,9 +13,6 @@ import { buildSearchIndex, searchContacts } from "@/lib/contact-search";
 import { getPageRange, getTotalPages, PAGE_SIZE } from "@/lib/pagination";
 import { useAllRows } from "@/lib/use-all-rows";
 
-// Kept for the whole browser session, so coming back to Investors is instant.
-const investorsCache: { rows: InvestorTrackingRow[] | null } = { rows: null };
-
 /**
  * The Investors list: search box, table and paging. Once all investors are
  * loaded, search and paging run in the browser and update on every keystroke;
@@ -44,7 +41,7 @@ export function InvestorsExplorer({
   const [page, setPage] = useState(initialPage);
   const deferredSearch = useDeferredValue(search);
 
-  const allRows = useAllRows<InvestorTrackingRow>("/api/investors/index", "investors", investorsCache, serverRows);
+  const allRows = useAllRows<InvestorTrackingRow>("/api/investors/index", "investors", serverRows);
   const serverIndex = useMemo(() => buildSearchIndex(serverRows), [serverRows]);
   const fullIndex = useMemo(() => (allRows ? buildSearchIndex(allRows) : null), [allRows]);
   const sectionIndex = useMemo(

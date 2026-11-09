@@ -4,6 +4,7 @@ import { requireActionAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getAppSettings } from "@/lib/settings";
 import { getUnknownConversations } from "@/lib/unknown-numbers";
+import { truncate as truncateText } from "@/lib/format";
 
 export type NotificationItem = {
   id: string;
@@ -24,10 +25,7 @@ export type NotificationsResult = {
 
 const MAX_PER_KIND = 10;
 
-function truncate(value: string, max = 80) {
-  const trimmed = value.trim();
-  return trimmed.length > max ? `${trimmed.slice(0, max - 1)}…` : trimmed;
-}
+const truncate = (value: string) => truncateText(value, 80);
 
 export async function getNotifications(): Promise<NotificationsResult> {
   const { error: authError } = await requireActionAuth();

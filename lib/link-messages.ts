@@ -15,20 +15,18 @@ export async function linkUnmatchedMessages(
       const phone = normalizeToLocalPhone(contact.phone ?? "");
       if (phone) idByPhone.set(phone, contact.id);
     }
-    const phones = [...idByPhone.keys()];
+    const entries = [...idByPhone.entries()];
 
-    for (let i = 0; i < phones.length; i += 200) {
-      const data = await db.query<{ phone: string }>(
-        "select phone from whatsapp_messages where contact_id is null and phone = any($1::text[])",
-        [phones.slice(i, i + 200)],
+    // One statement per batch: each unmatched message gets the id of the contact with its phone.
+    for (let i = 0; i < entries.length; i += 200) {
+      const batch = entries.slice(i, i + 200);
+      await db.execute(
+        `update whatsapp_messages m
+            set contact_id = x.id
+           from unnest($1::text[], $2::uuid[]) as x(phone, id)
+          where m.contact_id is null and m.phone = x.phone`,
+        [batch.map(([phone]) => phone), batch.map(([, id]) => id)],
       );
-
-      for (const phone of new Set(data.map((row) => row.phone))) {
-        await db.execute(
-          "update whatsapp_messages set contact_id = $1 where contact_id is null and phone = $2",
-          [idByPhone.get(phone), phone],
-        );
-      }
     }
   } catch (err) {
     console.error("[link-messages] Could not link earlier WhatsApp messages:", err);

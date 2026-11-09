@@ -1,5 +1,6 @@
 import { db, isMissingSchemaError } from "@/lib/db";
 import type { ContactSection, SectionsInfo } from "@/lib/section-filter";
+import { isUuid } from "@/lib/validate";
 
 /**
  * The contact sections with their contact counts, in tab order. With
@@ -37,8 +38,6 @@ export async function loadSectionsInfo(options: { investorTags?: string[] } = {}
   }
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 /**
  * Puts newly saved contacts into a section: the chosen one, or the first section
  * when none (or an unknown one) was chosen. Does nothing before the sections
@@ -53,7 +52,7 @@ export async function assignNewContactsToSection(contactIds: string[], sectionId
                 (select id from public.contact_sections where id = $2::uuid),
                 (select id from public.contact_sections order by sort_order, lower(name) limit 1))
         where id = any($1::uuid[])`,
-      [contactIds, sectionId && UUID.test(sectionId) ? sectionId : null],
+      [contactIds, sectionId && isUuid(sectionId) ? sectionId : null],
     );
   } catch (err) {
     if (!isMissingSchemaError(err)) console.error("[sections] could not assign a section:", err instanceof Error ? err.message : err);

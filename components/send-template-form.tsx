@@ -16,11 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-function placeholdersOf(body: string): string[] {
-  return Array.from(new Set(Array.from(body.matchAll(/\{\{(\d+)\}\}/g), (m) => m[1]))).sort(
-    (a, b) => Number(a) - Number(b),
-  );
-}
+import { extractPlaceholders as placeholdersOf, fillPlaceholders } from "@/lib/template-placeholders";
 
 /**
  * Picks a template for one contact and fills its variables ({{1}} defaults to
@@ -85,12 +81,7 @@ export function SendTemplateForm({
     setValues(next);
   }
 
-  const preview = template
-    ? placeholders.reduce(
-        (text, ph) => text.replaceAll(`{{${ph}}}`, values[ph]?.trim() || `{{${ph}}}`),
-        template.body_text,
-      )
-    : "";
+  const preview = template ? fillPlaceholders(template.body_text, (ph) => values[ph]?.trim() || undefined) : "";
 
   // First click checks the variables and asks for confirmation; the second sends.
   function handleReview() {

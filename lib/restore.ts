@@ -1,5 +1,6 @@
 import { gunzipSync } from "node:zlib";
 import { db, type Queryable } from "@/lib/db";
+import { CRM_TABLES } from "@/lib/crm-tables";
 
 /**
  * Restoring a full backup (made by lib/backup.ts, or downloaded as JSON from
@@ -9,21 +10,7 @@ import { db, type Queryable } from "@/lib/db";
  */
 
 /** Insert order (parents before children); deletes run in reverse. */
-export const RESTORE_TABLES: Array<{ table: string; label: string; optional?: boolean }> = [
-  // Contact sections (azure/003_contact_sections.sql), before contacts which point at them.
-  { table: "contact_sections", label: "Sections", optional: true },
-  { table: "contacts", label: "Contacts" },
-  { table: "groups", label: "Groups" },
-  { table: "templates", label: "Templates" },
-  { table: "contact_groups", label: "Group memberships" },
-  { table: "interactions", label: "Meeting notes" },
-  { table: "follow_ups", label: "Follow-ups" },
-  { table: "broadcasts", label: "Broadcasts" },
-  { table: "broadcast_recipients", label: "Broadcast recipients", optional: true },
-  { table: "whatsapp_messages", label: "WhatsApp messages" },
-  { table: "portfolio_updates", label: "Portfolio updates" },
-  { table: "app_settings", label: "Settings", optional: true },
-];
+export const RESTORE_TABLES = CRM_TABLES;
 
 const INSERT_CHUNK_ROWS = 1000;
 // Far above any real backup; stops a bad file from using up the server's memory.

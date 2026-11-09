@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 
 import {
   addFollowUp,
@@ -197,7 +196,6 @@ export function ContactDetail({
 }: ContactDetailProps) {
   const isInvestor = variant === "investor";
   const noun = isInvestor ? "investor" : "contact";
-  const router = useRouter();
   const { toast } = useToast();
   const [summary, setSummary] = useState<string | null>(initialWhatsAppSummary);
   const [summaryGeneratedAt, setSummaryGeneratedAt] = useState<string | null>(initialWhatsAppSummaryGeneratedAt);
@@ -352,7 +350,6 @@ export function ContactDetail({
     setConfirmingCompleteFollowUp(null);
     toast("Follow-up completed and interaction recorded.");
     await refreshFollowUps();
-    router.refresh();
   }
 
   function startEditFollowUp(followUp: FollowUp) {
@@ -392,7 +389,6 @@ export function ContactDetail({
 
     setEditingFollowUp(null);
     await refreshFollowUps();
-    router.refresh();
     toast("Follow-up updated.");
   }
 
@@ -410,7 +406,6 @@ export function ContactDetail({
 
     setDeletingFollowUp(null);
     await refreshFollowUps();
-    router.refresh();
     toast("Follow-up deleted.");
   }
 
@@ -428,7 +423,6 @@ export function ContactDetail({
 
     setDeletingCompletedFollowUp(null);
     await refreshFollowUps();
-    router.refresh();
     toast("Follow-up deleted.");
   }
 
@@ -458,7 +452,6 @@ export function ContactDetail({
 
     setEditingMeetingNote(null);
     await refreshNotes();
-    router.refresh();
     toast("Meeting note updated.");
   }
 
@@ -476,7 +469,6 @@ export function ContactDetail({
 
     setDeletingMeetingNote(null);
     await refreshNotes();
-    router.refresh();
     toast("Meeting note deleted.");
   }
 
@@ -579,7 +571,6 @@ export function ContactDetail({
     setAddingFollowUp(false);
     resetFollowUpForm();
     await refreshFollowUps();
-    router.refresh();
     toast("Follow-up saved successfully");
   }
 
@@ -623,7 +614,6 @@ export function ContactDetail({
     setMeetingNote("");
     setAddingMeetingNote(false);
     await refreshNotes();
-    router.refresh();
     toast("Meeting note saved successfully");
   }
 

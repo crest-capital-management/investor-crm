@@ -7,10 +7,10 @@ import { db, isMissingSchemaError } from "@/lib/db";
 import { PROTECTED_TAGS, TAG_OPTIONS } from "@/lib/tags";
 import { parseTagCell } from "@/lib/tag-match";
 import { normalizeToLocalPhone } from "@/lib/whatsapp";
+import { isValidDate, isValidEmail } from "@/lib/validate";
 
 const CHUNK = 500;
 const MAX_CONTACTS = 5000;
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIGRATION_HINT =
   "The latest database update hasn't been run yet. Run 20261016000000_company_and_bulk_updates.sql on the database, then try again.";
 
@@ -126,15 +126,6 @@ type UpdateItem = {
   tags?: string[];
 };
 
-function isValidDate(value: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const date = new Date(`${value}T00:00:00Z`);
-  return (
-    date.getUTCFullYear() === Number(value.slice(0, 4)) &&
-    date.getUTCMonth() + 1 === Number(value.slice(5, 7)) &&
-    date.getUTCDate() === Number(value.slice(8, 10))
-  );
-}
 
 async function planUpdate(
   rows: ContactUpdateRow[],
@@ -196,7 +187,7 @@ async function planUpdate(
     const company = row.company?.trim() || undefined;
     const notes = row.notes?.trim() || undefined;
     const dateSaved = row.dateSaved?.trim() || undefined;
-    if (email && !EMAIL_REGEX.test(email)) return invalid(`Email "${row.email}" is not valid.`);
+    if (email && !isValidEmail(email)) return invalid(`Email "${row.email}" is not valid.`);
     if (dateSaved && !isValidDate(dateSaved)) return invalid(`Date "${row.dateSaved}" must be YYYY-MM-DD.`);
     const parsedTags = row.tag?.trim() ? parseTagCell(row.tag) : { tags: [] as string[] };
     if (parsedTags.unknown) return invalid(`Unknown tag "${parsedTags.unknown}".`);

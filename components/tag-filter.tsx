@@ -9,7 +9,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { TAG_OPTIONS } from "@/components/add-contact-dialog";
+import { TAG_OPTIONS } from "@/lib/tags";
 import { cn } from "@/lib/utils";
 
 export interface TagFilterProps {

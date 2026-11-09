@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { sendEmail } from "@/lib/resend";
 import { getAppSettings } from "@/lib/settings";
 import { getUnknownConversations } from "@/lib/unknown-numbers";
+import { todayAsISODate, truncate as truncateText } from "@/lib/format";
 
 export interface DueFollowUpRow {
   id: string;
@@ -23,10 +24,6 @@ export interface UnreadMessageRow {
 /** Max rows listed per section; the rest are summarised as "and N more". */
 const MAX_ROWS_PER_SECTION = 25;
 
-function todayAsISODate() {
-  return new Date().toISOString().slice(0, 10);
-}
-
 function escapeHtml(value: string) {
   return value
     .replace(/&/g, "&amp;")
@@ -36,10 +33,7 @@ function escapeHtml(value: string) {
     .replace(/'/g, "&#39;");
 }
 
-function truncate(value: string, max = 120) {
-  const trimmed = value.trim();
-  return trimmed.length > max ? `${trimmed.slice(0, max - 1)}…` : trimmed;
-}
+const truncate = (value: string) => truncateText(value, 120);
 
 function formatReceived(value: string) {
   const date = new Date(value);

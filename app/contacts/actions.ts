@@ -20,13 +20,14 @@ import {
   mediaStoragePathFromUrl,
   mediaUrlForPath,
 } from "@/lib/storage";
-import { param } from "@/lib/sql";
 import { TAG_OPTIONS } from "@/lib/tags";
 import { parseTagCell } from "@/lib/tag-match";
 import { parseExcelBuffer, type ParsedSpreadsheet } from "@/lib/parse-spreadsheet";
 import { linkUnmatchedMessages } from "@/lib/link-messages";
 import { insertOutboundMessage, type SavedMessage } from "@/lib/message-status";
 import { assignNewContactsToSection, sectionNameForPhone } from "@/lib/sections";
+import { extractPlaceholders, fillPlaceholders } from "@/lib/template-placeholders";
+import { isValidDate, isValidEmail } from "@/lib/validate";
 
 // Excel files are read into memory on the server, so keep uploads small (the request size cap is serverActions.bodySizeLimit in next.config.ts).
 const MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024;
@@ -41,28 +42,14 @@ function normalizePhone(value: string) {
   return normalizeToLocalPhone(value) ?? "";
 }
 
-async function fetchAllContactPhones(
-  options: { excludeId?: string; excludeDeleted?: boolean } = {}
-): Promise<string[]> {
-  const { excludeId, excludeDeleted = true } = options;
-
-  const params: unknown[] = [];
-  const conditions: string[] = [];
-  if (excludeDeleted) conditions.push("deleted_at is null");
-  if (excludeId) conditions.push(`id <> ${param(params, excludeId)}`);
-
-  const rows = await db.query<{ phone: string }>(
-    `select phone from public.contacts${conditions.length ? ` where ${conditions.join(" and ")}` : ""}`,
-    params,
+// Every path that writes contacts.phone (add, update, import) stores normalizePhone()
+// output, so duplicate checks can compare directly and use contacts_phone_idx.
+async function isPhoneTaken(phone: string): Promise<boolean> {
+  const row = await db.maybeOne<{ id: string }>(
+    "select id from public.contacts where phone = $1 and deleted_at is null limit 1",
+    [phone],
   );
-
-  return rows.map((row) => String(row.phone));
-}
-
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function isValidEmail(value: string) {
-  return EMAIL_REGEX.test(value);
+  return row !== null;
 }
 
 export async function addContact(formData: FormData) {
@@ -102,14 +89,14 @@ export async function addContact(formData: FormData) {
     return { error: "Date must use a valid YYYY-MM-DD date." };
   }
 
-  let existingPhones: string[];
+  let taken: boolean;
   try {
-    existingPhones = await fetchAllContactPhones();
+    taken = await isPhoneTaken(phone);
   } catch {
     return { error: "The contact could not be checked for duplicates." };
   }
 
-  if (existingPhones.some((existingPhone) => normalizePhone(existingPhone) === phone)) {
+  if (taken) {
     const sectionName = await sectionNameForPhone(phone);
     return { error: sectionName ? `This phone number is already saved, in the "${sectionName}" section.` : DUPLICATE_PHONE_ERROR };
   }
@@ -187,17 +174,6 @@ export async function updateContact(id: string, formData: FormData) {
   }
 
   if (duplicate) {
-    return { error: DUPLICATE_PHONE_ERROR };
-  }
-
-  let otherPhones: string[];
-  try {
-    otherPhones = await fetchAllContactPhones({ excludeId: id });
-  } catch {
-    return { error: "The contact could not be checked for duplicates." };
-  }
-
-  if (otherPhones.some((otherPhone) => normalizePhone(otherPhone) === phone)) {
     return { error: DUPLICATE_PHONE_ERROR };
   }
 
@@ -513,9 +489,7 @@ export async function sendWhatsAppTemplateToContact(
     return { error: `Template "${template.name}" is not approved by Meta yet.` };
   }
 
-  const placeholders = Array.from(
-    new Set(Array.from((template.body_text as string).matchAll(/\{\{(\d+)\}\}/g), (m) => m[1])),
-  ).sort((a, b) => Number(a) - Number(b));
+  const placeholders = extractPlaceholders(template.body_text);
   const values = params.map((value) => (value ?? "").trim());
   if (values.length !== placeholders.length || values.some((value) => !value)) {
     return { error: "Please fill in every variable before sending." };
@@ -536,10 +510,7 @@ export async function sendWhatsAppTemplateToContact(
     };
   }
 
-  let sentText = template.body_text as string;
-  placeholders.forEach((ph, index) => {
-    sentText = sentText.replaceAll(`{{${ph}}}`, values[index]);
-  });
+  const sentText = fillPlaceholders(template.body_text, (ph) => values[placeholders.indexOf(ph)]);
 
   const { error: insertError, message: savedMessage } = await insertOutboundMessage(
     { contact_id: contact.id, message_text: sentText },
@@ -999,16 +970,6 @@ export type ImportContactRow = {
   notes: string;
 };
 
-function isValidDate(value: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-
-  const date = new Date(`${value}T00:00:00Z`);
-  return (
-    date.getUTCFullYear() === Number(value.slice(0, 4)) &&
-    date.getUTCMonth() + 1 === Number(value.slice(5, 7)) &&
-    date.getUTCDate() === Number(value.slice(8, 10))
-  );
-}
 
 function validateImportRow(row: ImportContactRow) {
   if (!row.name || !row.phone) {
@@ -1094,16 +1055,20 @@ export async function importContacts(rowsRaw: string, sectionId?: string | null)
   const validRows = rows.filter((row) => !validateImportRow(row));
   const rejected = rows.length - validRows.length;
 
-  let existingPhonesList: string[];
+  let existingPhones: Set<string>;
   try {
-    // Matches the original behavior of this lookup: existing AND
+    // Only the phones in this file are looked up (indexed). Existing AND
     // soft-deleted contacts both count as "already taken" phone numbers.
-    existingPhonesList = await fetchAllContactPhones({ excludeDeleted: false });
+    const filePhones = [...new Set(validRows.map((row) => normalizePhone(row.phone)))];
+    const taken = await db.query<{ phone: string }>(
+      "select phone from public.contacts where phone = any($1::text[])",
+      [filePhones],
+    );
+    existingPhones = new Set(taken.map((row) => String(row.phone)));
   } catch {
     return { error: "Contacts could not be checked for duplicates." };
   }
 
-  const existingPhones = new Set(existingPhonesList.map((phone) => normalizePhone(phone)));
   // The first row for each new phone, with the tags of any later rows for that phone merged in.
   const seenPhones = new Map<string, { name: string; tags: string[] }>();
   const rowsToInsert: Array<ImportContactRow & { tags: string[] }> = [];

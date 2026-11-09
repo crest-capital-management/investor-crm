@@ -9,6 +9,7 @@ import {
   type BroadcastSendSummary,
   type SendBroadcastResult,
 } from "@/lib/broadcast-dispatch";
+import { isUuid } from "@/lib/validate";
 
 export type TargetType = "group" | "tag" | "manual";
 
@@ -76,9 +77,6 @@ export interface CreateScheduledBroadcastInput {
   variable_mappings?: Record<string, unknown> | null;
 }
 
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 function validateTemplatePayload(data?: {
   template_id?: string | null;
   variable_mappings?: Record<string, unknown> | null;
@@ -91,7 +89,7 @@ function validateTemplatePayload(data?: {
   if (data?.template_id !== undefined && data?.template_id !== null) {
     const trimmed = String(data.template_id).trim();
     if (trimmed) {
-      if (!UUID_REGEX.test(trimmed)) {
+      if (!isUuid(trimmed)) {
         return {
           error: "Invalid template ID format.",
           templateId: null,
@@ -320,7 +318,7 @@ export async function updateBroadcast(id: string, data: UpdateBroadcastInput) {
       }
     } else {
       const trimmed = String(data.template_id).trim();
-      if (!UUID_REGEX.test(trimmed)) {
+      if (!isUuid(trimmed)) {
         return { error: "Invalid template ID format." };
       }
       updatePayload.template_id = trimmed;

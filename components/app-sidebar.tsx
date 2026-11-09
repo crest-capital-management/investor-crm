@@ -48,9 +48,11 @@ export function AppSidebar() {
   const { isOpen, setIsOpen, close } = useSidebar();
   const [tagsOpen, setTagsOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const isPublic = isPublicPath(pathname);
 
+  // Depends on isPublic, not pathname, so moving between pages doesn't restart polling.
   useEffect(() => {
-    if (isPublicPath(pathname)) return;
+    if (isPublic) return;
 
     let cancelled = false;
     function refreshUnreadCount() {
@@ -70,7 +72,7 @@ export function AppSidebar() {
       stopPolling();
       window.removeEventListener(UNREAD_CHANGED_EVENT, refreshUnreadCount);
     };
-  }, [pathname]);
+  }, [isPublic]);
 
   useEffect(() => {
     close();
@@ -86,7 +88,7 @@ export function AppSidebar() {
     return () => window.removeEventListener("resize", handleResize);
   }, [close]);
 
-  if (isPublicPath(pathname)) {
+  if (isPublic) {
     return null;
   }
 
