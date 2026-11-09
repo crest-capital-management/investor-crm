@@ -20,7 +20,6 @@ import {
   mediaStoragePathFromUrl,
   mediaUrlForPath,
 } from "@/lib/storage";
-import { param } from "@/lib/sql";
 import { TAG_OPTIONS } from "@/lib/tags";
 import { parseTagCell } from "@/lib/tag-match";
 import { parseExcelBuffer, type ParsedSpreadsheet } from "@/lib/parse-spreadsheet";
@@ -41,22 +40,14 @@ function normalizePhone(value: string) {
   return normalizeToLocalPhone(value) ?? "";
 }
 
-async function fetchAllContactPhones(
-  options: { excludeId?: string; excludeDeleted?: boolean } = {}
-): Promise<string[]> {
-  const { excludeId, excludeDeleted = true } = options;
-
-  const params: unknown[] = [];
-  const conditions: string[] = [];
-  if (excludeDeleted) conditions.push("deleted_at is null");
-  if (excludeId) conditions.push(`id <> ${param(params, excludeId)}`);
-
-  const rows = await db.query<{ phone: string }>(
-    `select phone from public.contacts${conditions.length ? ` where ${conditions.join(" and ")}` : ""}`,
-    params,
+// Every path that writes contacts.phone (add, update, import) stores normalizePhone()
+// output, so duplicate checks can compare directly and use contacts_phone_idx.
+async function isPhoneTaken(phone: string): Promise<boolean> {
+  const row = await db.maybeOne<{ id: string }>(
+    "select id from public.contacts where phone = $1 and deleted_at is null limit 1",
+    [phone],
   );
-
-  return rows.map((row) => String(row.phone));
+  return row !== null;
 }
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -102,14 +93,14 @@ export async function addContact(formData: FormData) {
     return { error: "Date must use a valid YYYY-MM-DD date." };
   }
 
-  let existingPhones: string[];
+  let taken: boolean;
   try {
-    existingPhones = await fetchAllContactPhones();
+    taken = await isPhoneTaken(phone);
   } catch {
     return { error: "The contact could not be checked for duplicates." };
   }
 
-  if (existingPhones.some((existingPhone) => normalizePhone(existingPhone) === phone)) {
+  if (taken) {
     const sectionName = await sectionNameForPhone(phone);
     return { error: sectionName ? `This phone number is already saved, in the "${sectionName}" section.` : DUPLICATE_PHONE_ERROR };
   }
@@ -187,17 +178,6 @@ export async function updateContact(id: string, formData: FormData) {
   }
 
   if (duplicate) {
-    return { error: DUPLICATE_PHONE_ERROR };
-  }
-
-  let otherPhones: string[];
-  try {
-    otherPhones = await fetchAllContactPhones({ excludeId: id });
-  } catch {
-    return { error: "The contact could not be checked for duplicates." };
-  }
-
-  if (otherPhones.some((otherPhone) => normalizePhone(otherPhone) === phone)) {
     return { error: DUPLICATE_PHONE_ERROR };
   }
 
@@ -1094,16 +1074,20 @@ export async function importContacts(rowsRaw: string, sectionId?: string | null)
   const validRows = rows.filter((row) => !validateImportRow(row));
   const rejected = rows.length - validRows.length;
 
-  let existingPhonesList: string[];
+  let existingPhones: Set<string>;
   try {
-    // Matches the original behavior of this lookup: existing AND
+    // Only the phones in this file are looked up (indexed). Existing AND
     // soft-deleted contacts both count as "already taken" phone numbers.
-    existingPhonesList = await fetchAllContactPhones({ excludeDeleted: false });
+    const filePhones = [...new Set(validRows.map((row) => normalizePhone(row.phone)))];
+    const taken = await db.query<{ phone: string }>(
+      "select phone from public.contacts where phone = any($1::text[])",
+      [filePhones],
+    );
+    existingPhones = new Set(taken.map((row) => String(row.phone)));
   } catch {
     return { error: "Contacts could not be checked for duplicates." };
   }
 
-  const existingPhones = new Set(existingPhonesList.map((phone) => normalizePhone(phone)));
   // The first row for each new phone, with the tags of any later rows for that phone merged in.
   const seenPhones = new Map<string, { name: string; tags: string[] }>();
   const rowsToInsert: Array<ImportContactRow & { tags: string[] }> = [];

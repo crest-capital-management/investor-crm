@@ -4,9 +4,18 @@ import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 
 import { isPublicPath } from "@/lib/public-routes";
-import { MESSAGES_CHANGED_EVENT, UNREAD_CHANGED_EVENT } from "@/lib/unread-events";
+import {
+  MESSAGES_CHANGED_EVENT,
+  UNREAD_CHANGED_EVENT,
+  type MessagesChangedDetail,
+} from "@/lib/unread-events";
 
 const POLL_INTERVAL_MS = 5000;
+
+/** The message count and newest message time: the part of the pulse fingerprint that changes when messages arrive. */
+function messageSetKey(fingerprint: string): string {
+  return fingerprint.split("|").slice(0, 2).join("|");
+}
 
 /**
  * Checks every few seconds whether WhatsApp messages have changed and tells the
@@ -38,8 +47,12 @@ export function RealtimeBridge() {
         if (cancelled || typeof data.fingerprint !== "string") return;
         // The first check only records the starting point; later changes notify the app.
         if (lastFingerprint !== null && data.fingerprint !== lastFingerprint) {
-          window.dispatchEvent(new Event(MESSAGES_CHANGED_EVENT));
-          window.dispatchEvent(new Event(UNREAD_CHANGED_EVENT));
+          // The fingerprint starts "count|newest|…"; the rest is delivery-status counts.
+          const newMessages = messageSetKey(data.fingerprint) !== messageSetKey(lastFingerprint);
+          const detail: MessagesChangedDetail = { newMessages };
+          window.dispatchEvent(new CustomEvent(MESSAGES_CHANGED_EVENT, { detail }));
+          // Unread counts only change when messages arrive, not when a sent one is delivered or read.
+          if (newMessages) window.dispatchEvent(new Event(UNREAD_CHANGED_EVENT));
         }
         lastFingerprint = data.fingerprint;
       } catch {

@@ -70,51 +70,58 @@ export default async function InvestorDetailPage({
     }
   }
 
-  const { data: notes, error: notesError } = await load(() =>
-    db.query<MeetingNote>(
-      `select id, note, created_at from public.interactions
-       where contact_id = $1 and type = 'meeting' and deleted_at is null
-       order by created_at desc`,
-      [id],
+  // The sections don't depend on each other, so they load in parallel.
+  const [
+    { data: notes, error: notesError },
+    { data: followUps, error: followUpsError },
+    { data: whatsappMessages, error: whatsAppMessagesError },
+    { data: portfolioUpdates, error: portfolioUpdatesError },
+    { data: prospectScore, error: prospectScoreError },
+    unreadCounts,
+    section,
+  ] = await Promise.all([
+    load(() =>
+      db.query<MeetingNote>(
+        `select id, note, created_at from public.interactions
+         where contact_id = $1 and type = 'meeting' and deleted_at is null
+         order by created_at desc`,
+        [id],
+      ),
     ),
-  );
-
-  const { data: followUps, error: followUpsError } = await load(() =>
-    db.query<FollowUp>(
-      `select id, due_date, message, is_done, created_at from public.follow_ups
-       where contact_id = $1 and deleted_at is null
-       order by is_done asc, due_date asc, created_at asc`,
-      [id],
+    load(() =>
+      db.query<FollowUp>(
+        `select id, due_date, message, is_done, created_at from public.follow_ups
+         where contact_id = $1 and deleted_at is null
+         order by is_done asc, due_date asc, created_at asc`,
+        [id],
+      ),
     ),
-  );
-
-  const { data: whatsappMessages, error: whatsAppMessagesError } = await load(() =>
-    db.query<WhatsAppMessage>(
-      `select * from public.whatsapp_messages
-       where contact_id = $1 and deleted_at is null
-       order by sent_at asc`,
-      [id],
+    load(() =>
+      db.query<WhatsAppMessage>(
+        `select * from public.whatsapp_messages
+         where contact_id = $1 and deleted_at is null
+         order by sent_at asc`,
+        [id],
+      ),
     ),
-  );
-
-  const { data: portfolioUpdates, error: portfolioUpdatesError } = await load(() =>
-    db.query<PortfolioUpdate>(
-      `select ${PORTFOLIO_UPDATE_COLUMNS} from public.portfolio_updates
-       where contact_id = $1 and deleted_at is null
-       order by created_at desc`,
-      [id],
+    load(() =>
+      db.query<PortfolioUpdate>(
+        `select ${PORTFOLIO_UPDATE_COLUMNS} from public.portfolio_updates
+         where contact_id = $1 and deleted_at is null
+         order by created_at desc`,
+        [id],
+      ),
     ),
-  );
-
-  // Read separately so the page still opens before the prospect score migration has been run.
-  const { data: prospectScore, error: prospectScoreError } = await load(() =>
-    db.maybeOne<ProspectScore>(
-      `select ${PROSPECT_SCORE_COLUMNS} from public.contacts where id = $1`,
-      [id],
+    // Read separately so the page still opens before the prospect score migration has been run.
+    load(() =>
+      db.maybeOne<ProspectScore>(
+        `select ${PROSPECT_SCORE_COLUMNS} from public.contacts where id = $1`,
+        [id],
+      ),
     ),
-  );
-
-  const [unreadCounts, section] = await Promise.all([getUnreadCountsByContact(), loadContactSection(id)]);
+    getUnreadCountsByContact(),
+    loadContactSection(id),
+  ]);
 
   return (
     <InvestorDetail
