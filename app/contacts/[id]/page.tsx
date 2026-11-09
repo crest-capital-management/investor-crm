@@ -57,43 +57,42 @@ export default async function ContactDetailPage({
     }
   }
 
-  const { data: notes, error: notesError } = await load<MeetingNote>(
-    `select id, note, created_at from public.interactions
-      where contact_id = $1 and type = 'meeting' and deleted_at is null
-      order by created_at desc`,
-  );
-
-  const { data: followUps, error: followUpsError } = await load<FollowUp>(
-    `select id, due_date, message, is_done, created_at from public.follow_ups
-      where contact_id = $1 and deleted_at is null
-      order by is_done asc, due_date asc, created_at asc`,
-  );
-
-  const { data: whatsappMessages, error: whatsAppMessagesError } = await load<WhatsAppMessage>(
-    `select * from public.whatsapp_messages
-      where contact_id = $1 and deleted_at is null
-      order by sent_at asc`,
-  );
-
-  const { data: portfolioUpdates, error: portfolioUpdatesError } = await load<PortfolioUpdate>(
-    `select ${PORTFOLIO_UPDATE_COLUMNS} from public.portfolio_updates
-      where contact_id = $1 and deleted_at is null
-      order by created_at desc`,
-  );
-
-  // Read separately so the page still opens before the prospect score migration has been run.
-  let prospectScore: ProspectScore | null = null;
-  let prospectScoreError: unknown = null;
-  try {
-    prospectScore = await db.maybeOne<ProspectScore>(
-      `select ${PROSPECT_SCORE_COLUMNS} from public.contacts where id = $1`,
-      [id],
-    );
-  } catch (error) {
-    prospectScoreError = error;
-  }
-
-  const [unreadCounts, section] = await Promise.all([getUnreadCountsByContact(), loadContactSection(id)]);
+  // The sections don't depend on each other, so they load in parallel.
+  const [
+    { data: notes, error: notesError },
+    { data: followUps, error: followUpsError },
+    { data: whatsappMessages, error: whatsAppMessagesError },
+    { data: portfolioUpdates, error: portfolioUpdatesError },
+    { data: prospectScoreRows, error: prospectScoreError },
+    unreadCounts,
+    section,
+  ] = await Promise.all([
+    load<MeetingNote>(
+      `select id, note, created_at from public.interactions
+        where contact_id = $1 and type = 'meeting' and deleted_at is null
+        order by created_at desc`,
+    ),
+    load<FollowUp>(
+      `select id, due_date, message, is_done, created_at from public.follow_ups
+        where contact_id = $1 and deleted_at is null
+        order by is_done asc, due_date asc, created_at asc`,
+    ),
+    load<WhatsAppMessage>(
+      `select * from public.whatsapp_messages
+        where contact_id = $1 and deleted_at is null
+        order by sent_at asc`,
+    ),
+    load<PortfolioUpdate>(
+      `select ${PORTFOLIO_UPDATE_COLUMNS} from public.portfolio_updates
+        where contact_id = $1 and deleted_at is null
+        order by created_at desc`,
+    ),
+    // Read separately so the page still opens before the prospect score migration has been run.
+    load<ProspectScore>(`select ${PROSPECT_SCORE_COLUMNS} from public.contacts where id = $1`),
+    getUnreadCountsByContact(),
+    loadContactSection(id),
+  ]);
+  const prospectScore: ProspectScore | null = prospectScoreRows[0] ?? null;
 
   return (
     <ContactDetail

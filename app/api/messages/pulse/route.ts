@@ -8,6 +8,8 @@ export const dynamic = "force-dynamic";
  * A tiny fingerprint of the WhatsApp message table (how many messages, the newest
  * one, and how many have been delivered or read). The browser polls this every few
  * seconds and only reloads the chat lists when the fingerprint changes.
+ * Keep the count and newest time first: components/realtime-bridge.tsx reads
+ * those two parts to tell new messages apart from delivery-status changes.
  */
 export async function GET() {
   // Checked from the signed session cookie (no database call), since this runs every few seconds per open tab.
