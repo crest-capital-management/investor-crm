@@ -460,26 +460,12 @@ async function sendToRecipient(
   ) => {
     const sentAt = status === "sent" ? new Date().toISOString() : null;
     try {
-      if (wamid) {
-        try {
-          await db.execute(
-            `update broadcast_recipients
-                set status = $2, error = $3, sent_at = $4, wamid = $5
-              where id = $1`,
-            [recipient.id, status, error, sentAt, wamid],
-          );
-          return;
-        } catch (err: unknown) {
-          // Until the add_wamid_to_broadcast_recipients migration is run, the column
-          // doesn't exist; record the outcome without it rather than losing it.
-          if (!(err instanceof Error && /wamid/i.test(err.message))) throw err;
-        }
-      }
+      // wamid is only set when WhatsApp returned a message ID; otherwise it is left as it was.
       await db.execute(
         `update broadcast_recipients
-            set status = $2, error = $3, sent_at = $4
+            set status = $2, error = $3, sent_at = $4, wamid = coalesce($5, wamid)
           where id = $1`,
-        [recipient.id, status, error, sentAt],
+        [recipient.id, status, error, sentAt, wamid ?? null],
       );
     } catch (err: unknown) {
       console.error("[broadcast] Could not record the outcome for a recipient:", err);

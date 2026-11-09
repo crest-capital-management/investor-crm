@@ -1,8 +1,13 @@
--- CREST CRM schema for the Azure PostgreSQL database (Phase 1).
+-- CREST CRM schema for the Azure PostgreSQL database: the whole database in
+-- one file (CRM tables, logins in crm_users, and contact sections).
 --
--- Generated 2026-11-04 from the live Supabase database (PostgreSQL 17.6),
--- read from its catalog, so it includes the foreign-key ON DELETE rules, CHECK
--- constraints and indexes that the baseline migration does not capture.
+-- The CRM tables were generated 2026-11-04 from the old Supabase database
+-- (PostgreSQL 17.6), read from its catalog, so they include the foreign-key
+-- ON DELETE rules, CHECK constraints and indexes. crm_users and
+-- contact_sections were added on Azure (formerly 002_crm_users.sql and
+-- 003_contact_sections.sql) and are at the end of this file.
+--
+-- After applying it, create the owner's login with `node azure/set-password.js`.
 --
 -- Left out on purpose (Supabase-only, or replaced by code):
 --   row-level security and its 11 policies, is_crm_owner() (auth.uid()),
@@ -352,5 +357,44 @@ $function$;
 
 -- Triggers.
 CREATE TRIGGER whatsapp_messages_touch_contact AFTER INSERT OR UPDATE OF contact_id ON public.whatsapp_messages FOR EACH ROW EXECUTE FUNCTION touch_contact_last_message();
+
+-- Logins (formerly azure/002_crm_users.sql). One row per person who can sign
+-- in; the owner's id is CRM_OWNER_ID. Passwords are stored only as bcrypt
+-- hashes; set one with `node azure/set-password.js`.
+create table public.crm_users (
+  id uuid not null default gen_random_uuid(),
+  email text not null,
+  name text,
+  password_hash text not null,
+  created_at timestamp with time zone not null default now(),
+  password_updated_at timestamp with time zone not null default now(),
+  last_login_at timestamp with time zone,
+  constraint crm_users_pkey primary key (id),
+  constraint crm_users_email_lower check (email = lower(email)),
+  constraint crm_users_password_hash_bcrypt check (password_hash like '$2%')
+);
+
+create unique index crm_users_email_unique on public.crm_users (email);
+
+-- Contact sections (formerly azure/003_contact_sections.sql): each contact
+-- belongs to one section, shown as tabs on the Contacts and Investors pages.
+create table public.contact_sections (
+  id uuid not null default gen_random_uuid(),
+  name text not null,
+  sort_order integer not null default 0,
+  created_at timestamp with time zone not null default now(),
+  constraint contact_sections_pkey primary key (id),
+  constraint contact_sections_name_not_blank check (btrim(name) <> '')
+);
+
+create unique index contact_sections_name_unique on public.contact_sections (lower(name));
+
+alter table public.contacts
+  add column section_id uuid references public.contact_sections(id) on delete restrict;
+
+create index contacts_section_id_idx on public.contacts (section_id);
+
+-- Starting sections; rename them in the app (Contacts -> Manage sections).
+insert into public.contact_sections (name, sort_order) values ('Tab 1', 1), ('Tab 2', 2);
 
 commit;

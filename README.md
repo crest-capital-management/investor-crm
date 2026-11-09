@@ -27,7 +27,7 @@ Live at https://investor-crm.crest-capital.com (Azure server, behind nginx, app 
 
 ## Database
 
-The schema is `azure/schema.sql`, then `azure/002_crm_users.sql`, then `azure/003_contact_sections.sql`, applied in that order. `supabase/migrations/` is history from before the move to Azure and is not applied any more.
+The whole schema is `azure/schema.sql` (one transaction, for an empty database). After applying it, create the owner's login with `node azure/set-password.js`. The old Supabase migrations are in git history only.
 
 ## Scheduled jobs
 
@@ -37,7 +37,7 @@ A cron job on the server sends `POST` with `Authorization: Bearer <SCHEDULER_SEC
 - `/api/follow-ups/trigger` daily at 10:00 IST (reminder email)
 - `/api/backup/trigger` daily at 03:00 IST (backup to the `backups` container)
 
-See `azure/SWITCHOVER.md` for the exact crontab. `netlify/` holds the old Netlify scheduled functions, kept only as a fallback until the Netlify site is removed.
+See `azure/SWITCHOVER.md` for the exact crontab.
 
 ## Local development
 

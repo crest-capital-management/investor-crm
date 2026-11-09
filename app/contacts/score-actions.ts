@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireActionAuth } from "@/lib/auth";
-import { db, isMissingSchemaError } from "@/lib/db";
+import { db } from "@/lib/db";
 import type { PortfolioAnalysis } from "@/lib/portfolio-types";
 import { scoreProspect, type ScoringInput } from "@/lib/prospect-scoring";
 import { loadContactHistory, type ContactHistory } from "@/lib/ai-context";
@@ -12,12 +12,6 @@ import {
   PROSPECT_SCORE_COLUMNS,
   type ProspectScore,
 } from "@/lib/prospect-score-types";
-
-const MISSING_COLUMN_ERROR = "Prospect score isn't set up yet. Run the latest database migration (prospect score) first.";
-
-function isMissingColumn(error: unknown) {
-  return isMissingSchemaError(error) || /ai_score|manual_score/.test((error as { message?: string } | null)?.message ?? "");
-}
 
 function revalidateContact(contactId: string) {
   revalidatePath("/contacts");
@@ -82,8 +76,8 @@ export async function suggestProspectScore(
         returning ${PROSPECT_SCORE_COLUMNS}`,
       [id, result.score, result.reason, new Date().toISOString()],
     );
-  } catch (error) {
-    return { error: isMissingColumn(error) ? MISSING_COLUMN_ERROR : "The score could not be saved." };
+  } catch {
+    return { error: "The score could not be saved." };
   }
 
   revalidateContact(id);
@@ -115,8 +109,8 @@ export async function setManualScore(
         returning ${PROSPECT_SCORE_COLUMNS}`,
       [id, score, cleanReason || null, new Date().toISOString()],
     );
-  } catch (error) {
-    return { error: isMissingColumn(error) ? MISSING_COLUMN_ERROR : "The score could not be saved." };
+  } catch {
+    return { error: "The score could not be saved." };
   }
 
   revalidateContact(id);
@@ -140,8 +134,8 @@ export async function clearManualScore(
         returning ${PROSPECT_SCORE_COLUMNS}`,
       [id],
     );
-  } catch (error) {
-    return { error: isMissingColumn(error) ? MISSING_COLUMN_ERROR : "The override could not be removed." };
+  } catch {
+    return { error: "The override could not be removed." };
   }
 
   revalidateContact(id);

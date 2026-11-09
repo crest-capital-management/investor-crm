@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 
-import { db, isMissingSchemaError } from "@/lib/db";
+import { db } from "@/lib/db";
 import { getOwnerSessionId } from "@/lib/auth";
 import { csvCell } from "@/lib/csv";
 import { CONTACT_GROUPS_COLUMN } from "@/lib/contact-queries";
@@ -22,7 +22,6 @@ type ContactExportRow = {
 };
 
 const COLUMNS = `c.id, c.name, c.phone, c.email, c.company, c.tags, c.notes, c.date_saved, ${CONTACT_GROUPS_COLUMN}`;
-// Contact section (azure/003_contact_sections.sql); left out if that change isn't applied yet.
 const SECTION_COLUMN = "(select s.name from contact_sections s where s.id = c.section_id) as section_name";
 const HEADER = ["Name", "Phone", "Email", "Company", "Tags", "Groups", "Section", "Notes", "Date Saved"];
 const MAX_IDS = 20000;
@@ -60,13 +59,7 @@ async function loadContacts(ids: string[] | null): Promise<ContactExportRow[]> {
           `select ${columns} from contacts c where c.deleted_at is null order by c.name asc, c.id asc`,
         );
 
-  let rows: ContactExportRow[];
-  try {
-    rows = await query(`${COLUMNS}, ${SECTION_COLUMN}`);
-  } catch (err) {
-    if (!isMissingSchemaError(err)) throw err;
-    rows = await query(COLUMNS);
-  }
+  const rows = await query(`${COLUMNS}, ${SECTION_COLUMN}`);
   if (!ids) return rows;
 
   const byId = new Map<string, ContactExportRow>();

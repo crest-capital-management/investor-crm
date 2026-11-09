@@ -1,47 +1,39 @@
-import { db, isMissingSchemaError } from "@/lib/db";
+import { db } from "@/lib/db";
 import type { ContactSection, SectionsInfo } from "@/lib/section-filter";
 import { isUuid } from "@/lib/validate";
 
 /**
  * The contact sections with their contact counts, in tab order. With
- * investorsOnly, the counts cover investors only (for the Investors page).
- * Returns null until azure/003_contact_sections.sql has been applied, so the
- * pages simply show no tabs then.
+ * investorTags, the counts cover investors only (for the Investors page).
  */
-export async function loadSectionsInfo(options: { investorTags?: string[] } = {}): Promise<SectionsInfo | null> {
+export async function loadSectionsInfo(options: { investorTags?: string[] } = {}): Promise<SectionsInfo> {
   const params: unknown[] = [];
   let extra = "";
   if (options.investorTags) {
     params.push(options.investorTags);
     extra = " and c.tags && $1::text[]";
   }
-  try {
-    const [sections, totals] = await Promise.all([
-      db.query<{ id: string; name: string; count: number }>(
-        `select s.id, s.name, count(c.id)::int as count
-           from public.contact_sections s
-           left join public.contacts c on c.section_id = s.id and c.deleted_at is null${extra}
-          group by s.id, s.name, s.sort_order
-          order by s.sort_order, lower(s.name)`,
-        params,
-      ),
-      db.one<{ total: number; none: number }>(
-        `select count(*)::int as total, count(*) filter (where c.section_id is null)::int as none
-           from public.contacts c where c.deleted_at is null${extra}`,
-        params,
-      ),
-    ]);
-    return { sections, total: totals.total, noSection: totals.none };
-  } catch (err) {
-    if (isMissingSchemaError(err)) return null;
-    throw err;
-  }
+  const [sections, totals] = await Promise.all([
+    db.query<{ id: string; name: string; count: number }>(
+      `select s.id, s.name, count(c.id)::int as count
+         from public.contact_sections s
+         left join public.contacts c on c.section_id = s.id and c.deleted_at is null${extra}
+        group by s.id, s.name, s.sort_order
+        order by s.sort_order, lower(s.name)`,
+      params,
+    ),
+    db.one<{ total: number; none: number }>(
+      `select count(*)::int as total, count(*) filter (where c.section_id is null)::int as none
+         from public.contacts c where c.deleted_at is null${extra}`,
+      params,
+    ),
+  ]);
+  return { sections, total: totals.total, noSection: totals.none };
 }
 
 /**
  * Puts newly saved contacts into a section: the chosen one, or the first section
- * when none (or an unknown one) was chosen. Does nothing before the sections
- * database change is applied; never fails the save it follows.
+ * when none (or an unknown one) was chosen. Never fails the save it follows.
  */
 export async function assignNewContactsToSection(contactIds: string[], sectionId: string | null | undefined): Promise<void> {
   if (contactIds.length === 0) return;
@@ -55,7 +47,7 @@ export async function assignNewContactsToSection(contactIds: string[], sectionId
       [contactIds, sectionId && isUuid(sectionId) ? sectionId : null],
     );
   } catch (err) {
-    if (!isMissingSchemaError(err)) console.error("[sections] could not assign a section:", err instanceof Error ? err.message : err);
+    console.error("[sections] could not assign a section:", err instanceof Error ? err.message : err);
   }
 }
 
@@ -77,7 +69,7 @@ export async function sectionNameForPhone(phone: string): Promise<string | null>
 
 export type ContactSectionInfo = { sectionId: string | null; sections: ContactSection[] };
 
-/** A contact's section and the list to choose from, or null before the database change is applied. */
+/** A contact's section and the list to choose from, or null if they could not be loaded. */
 export async function loadContactSection(contactId: string): Promise<ContactSectionInfo | null> {
   try {
     const [row, sections] = await Promise.all([
