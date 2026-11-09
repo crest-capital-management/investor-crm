@@ -1,4 +1,5 @@
 import { askClaude, parseClaudeJson } from "@/lib/claude";
+import { chronological, isInbound } from "@/lib/ai-context";
 
 export type ChatMessageForSummary = {
   direction: string;
@@ -8,11 +9,9 @@ export type ChatMessageForSummary = {
 };
 
 function formatHistory(messages: ChatMessageForSummary[]) {
-  return [...messages]
-    .sort((a, b) => new Date(a.sent_at || a.created_at).getTime() - new Date(b.sent_at || b.created_at).getTime())
+  return chronological(messages)
     .map((m) => {
-      const isInbound = m.direction === "in" || m.direction?.toLowerCase() === "inbound";
-      const label = isInbound ? "Contact (Inbound)" : "Team (Outbound)";
+      const label = isInbound(m.direction) ? "Contact (Inbound)" : "Team (Outbound)";
       const text = m.message_text && m.message_text.trim() ? m.message_text.trim() : "[Media / non-text message]";
       return `[${m.sent_at || m.created_at}] ${label}: ${text}`;
     })

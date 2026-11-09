@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { requireActionAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { generateFollowUpSuggestion } from "@/lib/contact-ai";
+import { todayAsISODate } from "@/lib/format";
+import { isValidDate } from "@/lib/validate";
 
 export type FollowUp = {
   id: string;
@@ -13,19 +15,11 @@ export type FollowUp = {
   created_at: string;
 };
 
-function isValidDate(value: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-
-  const date = new Date(`${value}T00:00:00Z`);
-  return (
-    date.getUTCFullYear() === Number(value.slice(0, 4)) &&
-    date.getUTCMonth() + 1 === Number(value.slice(5, 7)) &&
-    date.getUTCDate() === Number(value.slice(8, 10))
-  );
-}
-
-function todayAsISODate() {
-  return new Date().toISOString().slice(0, 10);
+/** Pages that show a contact's follow-ups. */
+function revalidateFollowUpPages(contactId: string) {
+  revalidatePath("/investors");
+  revalidatePath(`/investors/${contactId}`);
+  revalidatePath(`/contacts/${contactId}`);
 }
 
 /** The contact row the follow-up actions check for (null when it doesn't exist or the lookup failed). */
@@ -179,9 +173,7 @@ export async function addFollowUp(
     return { error: "The follow-up could not be saved." };
   }
 
-  revalidatePath("/investors");
-  revalidatePath(`/investors/${normalizedContactId}`);
-  revalidatePath(`/contacts/${normalizedContactId}`);
+  revalidateFollowUpPages(normalizedContactId);
   return { success: true };
 }
 
@@ -232,9 +224,7 @@ export async function markFollowUpAsDone(followUpId: string, contactId: string) 
   }
   if (!recorded) return { error: "Failed to mark follow-up as done." };
 
-  revalidatePath("/investors");
-  revalidatePath(`/investors/${normalizedContactId}`);
-  revalidatePath(`/contacts/${normalizedContactId}`);
+  revalidateFollowUpPages(normalizedContactId);
   return { success: true };
 }
 
@@ -282,9 +272,7 @@ export async function editFollowUp(
     return { error: "The follow-up could not be updated." };
   }
 
-  revalidatePath("/investors");
-  revalidatePath(`/investors/${normalizedContactId}`);
-  revalidatePath(`/contacts/${normalizedContactId}`);
+  revalidateFollowUpPages(normalizedContactId);
   return { success: true };
 }
 
@@ -320,9 +308,7 @@ export async function deleteFollowUp(followUpId: string, contactId: string) {
     return { error: "The follow-up could not be deleted." };
   }
 
-  revalidatePath("/investors");
-  revalidatePath(`/investors/${normalizedContactId}`);
-  revalidatePath(`/contacts/${normalizedContactId}`);
+  revalidateFollowUpPages(normalizedContactId);
   return { success: true };
 }
 
@@ -361,9 +347,7 @@ export async function deleteCompletedFollowUp(followUpId: string, contactId: str
     return { error: "The completed follow-up could not be deleted." };
   }
 
-  revalidatePath("/investors");
-  revalidatePath(`/investors/${normalizedContactId}`);
-  revalidatePath(`/contacts/${normalizedContactId}`);
+  revalidateFollowUpPages(normalizedContactId);
   return { success: true };
 }
 

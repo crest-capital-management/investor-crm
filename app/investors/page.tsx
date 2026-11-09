@@ -8,6 +8,7 @@ import { PAGE_SIZE, getTotalPages, parsePage } from "@/lib/pagination";
 import { db, isMissingSchemaError } from "@/lib/db";
 import { ilikeAny, pageClause } from "@/lib/sql";
 import { getUnreadCountsByContact } from "@/lib/unread";
+import { CONTACT_GROUPS_COLUMN } from "@/lib/contact-queries";
 import { loadSectionsInfo } from "@/lib/sections";
 import { ALL_SECTIONS, parseSectionParam, sectionCondition, type SectionsInfo } from "@/lib/section-filter";
 
@@ -71,13 +72,7 @@ export default async function InvestorsPage({
       const params = [...filterParams];
       return db.query<ContactRow>(
         `select c.id, c.name, c.phone, c.email, c.company, c.tags, c.date_saved, c.notes,${sectionsInfo ? " c.section_id," : ""}
-           coalesce((
-             select json_agg(json_build_object('groups', case when g.id is null then null
-                                              else json_build_object('id', g.id, 'name', g.name) end))
-             from public.contact_groups cg
-             left join public.groups g on g.id = cg.group_id
-             where cg.contact_id = c.id
-           ), '[]'::json) as contact_groups
+           ${CONTACT_GROUPS_COLUMN}
          from public.contacts c
          where ${filter}
          order by ${orderBy}

@@ -3,6 +3,8 @@ import ExcelJS from "exceljs";
 
 import { db, isMissingSchemaError } from "@/lib/db";
 import { getOwnerSessionId } from "@/lib/auth";
+import { csvCell } from "@/lib/csv";
+import { CONTACT_GROUPS_COLUMN } from "@/lib/contact-queries";
 
 export const dynamic = "force-dynamic";
 
@@ -19,26 +21,11 @@ type ContactExportRow = {
   section_name?: string | null;
 };
 
-// Same shape PostgREST gave for contact_groups(groups(name)): [{ groups: { name } }].
-const COLUMNS = `c.id, c.name, c.phone, c.email, c.company, c.tags, c.notes, c.date_saved,
-  coalesce(
-    (select json_agg(json_build_object('groups', json_build_object('name', g.name)))
-       from contact_groups cg join groups g on g.id = cg.group_id
-      where cg.contact_id = c.id),
-    '[]'::json
-  ) as contact_groups`;
+const COLUMNS = `c.id, c.name, c.phone, c.email, c.company, c.tags, c.notes, c.date_saved, ${CONTACT_GROUPS_COLUMN}`;
 // Contact section (azure/003_contact_sections.sql); left out if that change isn't applied yet.
 const SECTION_COLUMN = "(select s.name from contact_sections s where s.id = c.section_id) as section_name";
 const HEADER = ["Name", "Phone", "Email", "Company", "Tags", "Groups", "Section", "Notes", "Date Saved"];
 const MAX_IDS = 20000;
-
-// Quotes the value for CSV and neutralises spreadsheet formulas (a cell that
-// starts with = + - @ would otherwise be executed when opened in Excel).
-function csvCell(value: string | null | undefined) {
-  let text = value ?? "";
-  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
-  return `"${text.replace(/"/g, '""')}"`;
-}
 
 function groupNames(contact: ContactExportRow): string {
   return (contact.contact_groups ?? [])

@@ -24,7 +24,7 @@ const MAPPING_SOURCE_LABELS: Record<string, string> = {
   email: "Email",
   static: "Custom Text",
 };
-import { TAG_OPTIONS } from "@/components/add-contact-dialog";
+import { TAG_OPTIONS } from "@/lib/tags";
 import {
   createBroadcastDraft,
   createScheduledBroadcast,
@@ -47,26 +47,15 @@ import { CalendarIcon, Clock, Search, Users, FileText, Variable, Eye, X } from "
 import { startOfToday } from "date-fns";
 import {
   extractPlaceholders,
-} from "@/components/template-editor";
+  fillPlaceholders,
+  SUPPORTED_CONTACT_FIELDS,
+  type SupportedContactField,
+  type VariableMapping,
+  type VariableMappings,
+  type VariableMappingType,
+} from "@/lib/template-placeholders";
 
-export type VariableMappingType = "contact_field" | "static";
-export type SupportedContactField = "first_name" | "name" | "phone" | "email";
-
-export interface ContactFieldMapping {
-  type: "contact_field";
-  field: SupportedContactField;
-  fallback?: string;
-}
-
-export interface StaticMapping {
-  type: "static";
-  value: string;
-}
-
-export type VariableMapping = ContactFieldMapping | StaticMapping;
-export type VariableMappings = Record<string, VariableMapping>;
-
-export const SAMPLE_PREVIEW_CONTACT: Record<SupportedContactField, string> = {
+const SAMPLE_PREVIEW_CONTACT: Record<SupportedContactField, string> = {
   first_name: "Rahul",
   name: "Rahul Sharma",
   phone: "+91 98765 43210",
@@ -112,28 +101,14 @@ function createDefaultMappings(
   return mappings;
 }
 
-function computeResolvedMessage(
-  body: string,
-  mappings: VariableMappings,
-  placeholders: string[]
-): string {
-  let resolved = body;
-  for (const ph of placeholders) {
+/** The message as the sample contact would receive it; unmapped placeholders stay visible. */
+function computeResolvedMessage(body: string, mappings: VariableMappings): string {
+  return fillPlaceholders(body, (ph) => {
     const mapping = mappings[ph];
-    let val = `{{${ph}}}`;
-    if (mapping) {
-      if (mapping.type === "static") {
-        val = mapping.value || `{{${ph}}}`;
-      } else if (mapping.type === "contact_field") {
-        val =
-          SAMPLE_PREVIEW_CONTACT[mapping.field] ||
-          mapping.fallback ||
-          `{{${ph}}}`;
-      }
-    }
-    resolved = resolved.replaceAll(`{{${ph}}}`, val);
-  }
-  return resolved;
+    if (!mapping) return undefined;
+    if (mapping.type === "static") return mapping.value || undefined;
+    return SAMPLE_PREVIEW_CONTACT[mapping.field] || mapping.fallback || undefined;
+  });
 }
 
 export interface BroadcastEditorProps {
@@ -301,11 +276,7 @@ export function BroadcastEditor({
       const initialMappings = createDefaultMappings(placeholders);
       setVariableMappings(initialMappings);
 
-      const initialResolved = computeResolvedMessage(
-        tmpl.body_text,
-        initialMappings,
-        placeholders
-      );
+      const initialResolved = computeResolvedMessage(tmpl.body_text, initialMappings);
       setMessageText(initialResolved);
     } else {
       setTemplateMode("custom");
@@ -335,11 +306,7 @@ export function BroadcastEditor({
     }
     const nextMappings = { ...variableMappings, [ph]: next };
     setVariableMappings(nextMappings);
-    const updated = computeResolvedMessage(
-      templateSourceBody,
-      nextMappings,
-      detectedPlaceholders
-    );
+    const updated = computeResolvedMessage(templateSourceBody, nextMappings);
     setMessageText(updated);
     if (messageError) setMessageError(null);
   }
@@ -358,11 +325,7 @@ export function BroadcastEditor({
     };
     const nextMappings = { ...variableMappings, [ph]: next };
     setVariableMappings(nextMappings);
-    const updated = computeResolvedMessage(
-      templateSourceBody,
-      nextMappings,
-      detectedPlaceholders
-    );
+    const updated = computeResolvedMessage(templateSourceBody, nextMappings);
     setMessageText(updated);
     if (messageError) setMessageError(null);
   }
@@ -377,11 +340,7 @@ export function BroadcastEditor({
       };
       const nextMappings = { ...variableMappings, [ph]: next };
       setVariableMappings(nextMappings);
-      const updated = computeResolvedMessage(
-        templateSourceBody,
-        nextMappings,
-        detectedPlaceholders
-      );
+      const updated = computeResolvedMessage(templateSourceBody, nextMappings);
       setMessageText(updated);
     }
   }
@@ -394,11 +353,7 @@ export function BroadcastEditor({
     };
     const nextMappings = { ...variableMappings, [ph]: next };
     setVariableMappings(nextMappings);
-    const updated = computeResolvedMessage(
-      templateSourceBody,
-      nextMappings,
-      detectedPlaceholders
-    );
+    const updated = computeResolvedMessage(templateSourceBody, nextMappings);
     setMessageText(updated);
     if (messageError) setMessageError(null);
   }
@@ -611,13 +566,7 @@ export function BroadcastEditor({
             return;
           }
         } else if (mapping.type === "contact_field") {
-          const validFields: SupportedContactField[] = [
-            "first_name",
-            "name",
-            "phone",
-            "email",
-          ];
-          if (!validFields.includes(mapping.field)) {
+          if (!SUPPORTED_CONTACT_FIELDS.includes(mapping.field)) {
             setMessageError(`Please select a valid contact field for {{${ph}}}.`);
             return;
           }

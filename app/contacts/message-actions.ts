@@ -4,6 +4,8 @@ import { requireActionAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { draftMessage, type DraftInput } from "@/lib/message-drafting";
 import { isReplyWindowOpen } from "@/lib/reply-window";
+import { loadContactHistory, type ContactHistory } from "@/lib/ai-context";
+import { todayAsISODate } from "@/lib/format";
 
 /**
  * Drafts a personalised message for a contact. Nothing is saved or sent: the
@@ -28,46 +30,16 @@ export async function generatePersonalisedMessage(
   }
   if (!contact) return { error: "The contact could not be found." };
 
-  let messages: DraftInput["messages"];
-  let notes: DraftInput["meetingNotes"];
-  let followUps: DraftInput["followUps"];
+  let history: ContactHistory;
   let windowOpen: boolean;
   try {
-    [messages, notes, followUps, windowOpen] = await Promise.all([
-      db.query<DraftInput["messages"][number]>(
-        `select direction, message_text, sent_at, created_at
-           from public.whatsapp_messages
-          where contact_id = $1 and deleted_at is null
-          order by sent_at asc`,
-        [id],
-      ),
-      db.query<DraftInput["meetingNotes"][number]>(
-        `select note, created_at
-           from public.interactions
-          where contact_id = $1 and type = 'meeting' and deleted_at is null
-          order by created_at asc`,
-        [id],
-      ),
-      db.query<DraftInput["followUps"][number]>(
-        `select due_date, message, is_done
-           from public.follow_ups
-          where contact_id = $1 and deleted_at is null`,
-        [id],
-      ),
-      isReplyWindowOpen(id),
-    ]);
+    [history, windowOpen] = await Promise.all([loadContactHistory(id), isReplyWindowOpen(id)]);
   } catch {
     return { error: "Could not load the contact's messages, notes or follow-ups." };
   }
 
   try {
-    const message = await draftMessage({
-      todayIsoDate: new Date().toISOString().slice(0, 10),
-      contact,
-      messages,
-      meetingNotes: notes,
-      followUps,
-    });
+    const message = await draftMessage({ todayIsoDate: todayAsISODate(), contact, ...history });
     return { message, windowOpen };
   } catch (err: unknown) {
     return { error: err instanceof Error ? err.message : "The message could not be generated." };

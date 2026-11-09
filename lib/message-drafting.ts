@@ -1,5 +1,6 @@
 import { askClaude, parseClaudeJson } from "@/lib/claude";
 import { toIndianGrouping } from "@/lib/indian-numbers";
+import { chronological, clip as clipText, isInbound, type ContactHistory } from "@/lib/ai-context";
 
 // Gives up before the host would cut the request off, so the card shows a clear error.
 const DRAFT_TIMEOUT_MS = 30_000;
@@ -15,7 +16,7 @@ const DRAFT_SCHEMA = {
   additionalProperties: false,
 };
 
-export type DraftInput = {
+export type DraftInput = ContactHistory & {
   todayIsoDate: string;
   contact: {
     name: string;
@@ -23,24 +24,12 @@ export type DraftInput = {
     tags: string[] | null;
     notes: string | null;
   };
-  messages: Array<{ direction: string | null; message_text: string | null; sent_at: string | null; created_at: string }>;
-  meetingNotes: Array<{ note: string; created_at: string }>;
-  followUps: Array<{ due_date: string; message: string; is_done: boolean }>;
 };
 
-function clip(text: string) {
-  const clean = text.replace(/\s+/g, " ").trim();
-  return clean.length > MAX_TEXT_CHARS ? `${clean.slice(0, MAX_TEXT_CHARS)}...` : clean;
-}
-
-function isInbound(direction: string | null) {
-  return direction === "in" || direction?.toLowerCase() === "inbound";
-}
+const clip = (text: string) => clipText(text, MAX_TEXT_CHARS);
 
 function formatMessages(messages: DraftInput["messages"]) {
-  const recent = [...messages]
-    .sort((a, b) => new Date(a.sent_at || a.created_at).getTime() - new Date(b.sent_at || b.created_at).getTime())
-    .slice(-MAX_MESSAGES);
+  const recent = chronological(messages).slice(-MAX_MESSAGES);
   if (recent.length === 0) return "(no WhatsApp messages yet)";
   return recent
     .map((m) => {

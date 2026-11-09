@@ -1,3 +1,5 @@
+import { downloadBlob } from "@/lib/csv";
+
 /**
  * Downloads contacts as a CSV or Excel file. Pass `ids` to export just those
  * contacts (selected, or the current search and filter results); leave it out
@@ -34,13 +36,6 @@ export async function downloadContactsExport(options: {
     response.headers.get("Content-Disposition")?.match(/filename="([^"]+)"/)?.[1] ??
     `crest-contacts.${options.format}`;
   const count = Number(response.headers.get("X-Contact-Count") ?? 0);
-  const url = URL.createObjectURL(await response.blob());
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  downloadBlob(await response.blob(), filename);
   return { count };
 }

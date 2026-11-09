@@ -1,22 +1,7 @@
 import { gzipSync } from "node:zlib";
 import { db } from "@/lib/db";
 import { listBackupFiles, removeBackupFiles, saveBackupFile } from "@/lib/storage";
-
-// Each table is read in a stable order.
-const BACKUP_TABLES: Array<{ table: string; orderBy: string[]; optional?: boolean }> = [
-  { table: "contact_sections", orderBy: ["id"], optional: true },
-  { table: "contacts", orderBy: ["id"] },
-  { table: "groups", orderBy: ["id"] },
-  { table: "contact_groups", orderBy: ["contact_id", "group_id"] },
-  { table: "interactions", orderBy: ["id"] },
-  { table: "follow_ups", orderBy: ["id"] },
-  { table: "templates", orderBy: ["id"] },
-  { table: "broadcasts", orderBy: ["id"] },
-  { table: "broadcast_recipients", orderBy: ["id"], optional: true },
-  { table: "whatsapp_messages", orderBy: ["id"] },
-  { table: "portfolio_updates", orderBy: ["id"] },
-  { table: "app_settings", orderBy: ["id"], optional: true },
-];
+import { CRM_TABLES } from "@/lib/crm-tables";
 
 /** Daily backups older than this are deleted. */
 export const BACKUP_RETENTION_DAYS = 30;
@@ -30,9 +15,9 @@ export interface CrmBackup {
 /** Every CRM table, including soft-deleted rows. Throws if a required table fails. */
 export async function buildCrmBackup(): Promise<CrmBackup> {
   const data: Record<string, unknown[]> = {};
-  for (const { table, orderBy, optional } of BACKUP_TABLES) {
+  for (const { table, orderBy, optional } of CRM_TABLES) {
     try {
-      // Table and column names come from the fixed list above, never from user input.
+      // Table and column names come from the fixed list in lib/crm-tables.ts, never from user input.
       data[table] = await db.query(`select * from public.${table} order by ${orderBy.join(", ")}`);
     } catch (err) {
       if (!optional) throw err;
