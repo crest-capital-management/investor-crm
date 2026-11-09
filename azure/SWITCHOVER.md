@@ -1,5 +1,10 @@
 # CREST CRM: switch-over to the Azure server
 
+> **Done on 5 Nov 2026; kept as a record.** The copy scripts it mentions
+> (`azure/copy-data.js`, `azure/copy-files.js`) and the Netlify functions were
+> removed from the repository afterwards; they are still in git history. The
+> cron lines below are the live setup.
+
 Goal: the team uses only **https://investor-crm.crest-capital.com** (Azure server, port 3002),
 with data in `crest_crm`, logins in `crm_users`, and files in Azure Blob Storage. Netlify and
 Supabase are retired.

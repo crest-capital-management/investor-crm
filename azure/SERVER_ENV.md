@@ -46,4 +46,3 @@ Not needed on the server: `DATABASE_SSL_NO_VERIFY` (the database is on the same 
   - `/api/broadcasts/trigger` every 5 minutes,
   - `/api/follow-ups/trigger` daily at 10:00 IST,
   - `/api/backup/trigger` daily at 03:00 IST.
-- **Data refresh before going live:** `crest_crm` holds a copy of the live data from 4 Nov 2026; copy again right before switching (`azure/copy-data.js`).

@@ -111,12 +111,6 @@ export const db: Db = {
   },
 };
 
-/** True for a Postgres "relation/column does not exist" error, so callers can show a "run the migration" hint. */
-export function isMissingSchemaError(error: unknown): boolean {
-  const code = (error as { code?: string } | null)?.code;
-  return code === "42P01" || code === "42703";
-}
-
 /** True for a unique-constraint violation (for example a duplicate phone or wamid). */
 export function isUniqueViolation(error: unknown): boolean {
   return (error as { code?: string } | null)?.code === "23505";

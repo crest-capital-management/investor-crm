@@ -5,7 +5,7 @@ import type { ContactRow } from "@/components/contact-details-dialog";
 import type { InvestorTrackingRow } from "@/components/investor-tracking-table";
 import { INVESTOR_TAGS } from "@/lib/tags";
 import { PAGE_SIZE, getTotalPages, parsePage } from "@/lib/pagination";
-import { db, isMissingSchemaError } from "@/lib/db";
+import { db } from "@/lib/db";
 import { ilikeAny, pageClause } from "@/lib/sql";
 import { getUnreadCountsByContact } from "@/lib/unread";
 import { CONTACT_GROUPS_COLUMN } from "@/lib/contact-queries";
@@ -82,14 +82,8 @@ export default async function InvestorsPage({
     };
 
     // Most recent chat first, like WhatsApp; then A to Z. "id" is a tie-breaker so
-    // rows don't shuffle between pages. Until the chat-list migration is run the
-    // last-message column doesn't exist, so fall back to A to Z.
-    try {
-      contacts = await loadContacts("c.last_message_at desc nulls last, c.name asc, c.id asc");
-    } catch (err) {
-      if (!isMissingSchemaError(err)) throw err;
-      contacts = await loadContacts("c.name asc, c.id asc");
-    }
+    // rows don't shuffle between pages.
+    contacts = await loadContacts("c.last_message_at desc nulls last, c.name asc, c.id asc");
 
     const contactIds = contacts.map((contact) => contact.id);
 

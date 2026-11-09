@@ -59,7 +59,7 @@ export type ContactRow = {
   date_saved: string | null;
   notes?: string | null;
   company?: string | null;
-  /** Latest WhatsApp message with this contact (set by the chat-list migration). */
+  /** Latest WhatsApp message with this contact (kept up to date by a database trigger). */
   last_message_at?: string | null;
   last_message_text?: string | null;
   last_message_direction?: string | null;

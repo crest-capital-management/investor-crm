@@ -1,7 +1,7 @@
 "use server";
 
 import { requireActionAuth } from "@/lib/auth";
-import { db, isMissingSchemaError } from "@/lib/db";
+import { db } from "@/lib/db";
 import { analyzePortfolioUpdate, portfolioFileKind } from "@/lib/portfolio-analysis";
 import {
   MAX_PORTFOLIO_FILE_BYTES,
@@ -17,13 +17,6 @@ import {
 } from "@/lib/storage";
 
 const MAX_PASTED_CHARS = 100_000;
-const MISSING_TABLE_ERROR =
-  "Portfolio updates aren't set up yet. Run the latest database migration (portfolio_updates) first.";
-
-function isMissingTable(error: unknown) {
-  return isMissingSchemaError(error) || /portfolio_updates/.test((error as { message?: string } | null)?.message ?? "");
-}
-
 async function findContact(id: string): Promise<{ id: string } | null> {
   try {
     return await db.maybeOne<{ id: string }>("select id from public.contacts where id = $1", [id]);
@@ -78,8 +71,8 @@ export async function createPortfolioUpdate(
       [id, path, fileName, mimeType || null, size],
     );
     return { id: data.id };
-  } catch (error) {
-    return { error: isMissingTable(error) ? MISSING_TABLE_ERROR : "The update could not be saved." };
+  } catch {
+    return { error: "The update could not be saved." };
   }
 }
 
@@ -117,9 +110,9 @@ export async function createPortfolioUpdateFromText(
       [id, cleanTitle || null, path, fileName, Buffer.byteLength(body, "utf8")],
     );
     return { id: data.id };
-  } catch (error) {
+  } catch {
     await removePortfolioFile(path);
-    return { error: isMissingTable(error) ? MISSING_TABLE_ERROR : "The update could not be saved." };
+    return { error: "The update could not be saved." };
   }
 }
 

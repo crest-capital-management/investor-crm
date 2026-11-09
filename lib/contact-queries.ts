@@ -1,6 +1,6 @@
 import type { QueryResultRow } from "pg";
 
-import { db, isMissingSchemaError } from "@/lib/db";
+import { db } from "@/lib/db";
 import { PORTFOLIO_UPDATE_COLUMNS, type PortfolioUpdate } from "@/lib/portfolio-types";
 import { PROSPECT_SCORE_COLUMNS, type ProspectScore } from "@/lib/prospect-score-types";
 import { loadContactSection, type ContactSectionInfo } from "@/lib/sections";
@@ -97,7 +97,6 @@ export async function loadContactDetail(id: string): Promise<ContactDetailData |
         where contact_id = $1 and deleted_at is null
         order by created_at desc`,
     ),
-    // A separate query, so the page still opens before the prospect score migration has been run.
     load<ProspectScore>(`select ${PROSPECT_SCORE_COLUMNS} from public.contacts where id = $1`),
     getUnreadCountsByContact(),
     loadContactSection(id),
@@ -117,17 +116,9 @@ export async function loadContactDetail(id: string): Promise<ContactDetailData |
     initialWhatsAppSummary: contact.whatsapp_summary ?? null,
     initialWhatsAppSummaryGeneratedAt: contact.whatsapp_summary_generated_at ?? null,
     initialPortfolioUpdates: portfolioUpdates.error ? [] : portfolioUpdates.data,
-    portfolioUpdatesError: portfolioUpdates.error
-      ? isMissingSchemaError(portfolioUpdates.error)
-        ? "Portfolio updates aren't set up yet. Run the latest database migration (portfolio_updates) first."
-        : "Portfolio updates could not be loaded."
-      : null,
+    portfolioUpdatesError: portfolioUpdates.error ? "Portfolio updates could not be loaded." : null,
     initialProspectScore: prospectScore.error || !score ? undefined : score,
-    prospectScoreError: prospectScore.error
-      ? isMissingSchemaError(prospectScore.error)
-        ? "Prospect score isn't set up yet. Run the latest database migration (prospect score) first."
-        : "The prospect score could not be loaded."
-      : null,
+    prospectScoreError: prospectScore.error ? "The prospect score could not be loaded." : null,
     initialUnreadCount: unreadCounts[contact.id] ?? 0,
   };
 }

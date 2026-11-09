@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { requireActionAuth } from "@/lib/auth";
-import { db, isMissingSchemaError } from "@/lib/db";
+import { db } from "@/lib/db";
 import { PROTECTED_TAGS, TAG_OPTIONS } from "@/lib/tags";
 import { parseTagCell } from "@/lib/tag-match";
 import { normalizeToLocalPhone } from "@/lib/whatsapp";
@@ -11,15 +11,6 @@ import { isValidDate, isValidEmail } from "@/lib/validate";
 
 const CHUNK = 500;
 const MAX_CONTACTS = 5000;
-const MIGRATION_HINT =
-  "The latest database update hasn't been run yet. Run 20261016000000_company_and_bulk_updates.sql on the database, then try again.";
-
-function isMissingFunction(error: unknown) {
-  const { code, message } = (error ?? {}) as { code?: string; message?: string };
-  // 42883 = the SQL function doesn't exist yet.
-  return code === "42883" || isMissingSchemaError(error) || Boolean(message && /bulk_(change_contact_tags|update_contacts)|company/i.test(message));
-}
-
 // ================= Bulk tag change =================
 
 export type BulkTagMode = "add" | "remove" | "replace";
@@ -55,9 +46,7 @@ export async function bulkChangeTags(
     } catch (error) {
       console.error("[bulkChangeTags] failed:", error instanceof Error ? error.message : error);
       return {
-        error: isMissingFunction(error)
-          ? MIGRATION_HINT
-          : updated > 0
+        error: updated > 0
           ? `Stopped part-way: ${updated} contacts were changed before an error. Please try again for the rest.`
           : "The tags could not be changed. Please try again.",
       };
@@ -139,8 +128,8 @@ async function planUpdate(
         where deleted_at is null
         order by id asc`,
     );
-  } catch (err) {
-    return { error: isMissingFunction(err) ? MIGRATION_HINT : "The contacts could not be loaded." };
+  } catch {
+    return { error: "The contacts could not be loaded." };
   }
 
   const byPhone = new Map<string, ExistingContact>();
@@ -306,9 +295,7 @@ export async function applyContactUpdate(
     } catch (error) {
       console.error("[applyContactUpdate] failed:", error instanceof Error ? error.message : error);
       return {
-        error: isMissingFunction(error)
-          ? MIGRATION_HINT
-          : updated > 0
+        error: updated > 0
           ? `Stopped part-way: ${updated} contacts were updated before an error. Upload the file again; contacts already updated will show as unchanged.`
           : "The contacts could not be updated. Please try again.",
       };

@@ -13,7 +13,7 @@ export interface UnknownConversation {
 
 /**
  * Numbers that messaged on WhatsApp but aren't saved as contacts, newest
- * first. Returns [] on error (e.g. before the phone column migration is run).
+ * first. Returns [] if the lookup fails.
  */
 export async function getUnknownConversations(): Promise<UnknownConversation[]> {
   type Row = {

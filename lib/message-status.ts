@@ -1,4 +1,4 @@
-import { db, isMissingSchemaError, isUniqueViolation } from "@/lib/db";
+import { db, isUniqueViolation } from "@/lib/db";
 
 /** Delivery states in order; a message never moves backwards. */
 const STATUS_RANK: Record<string, number> = { sent: 1, delivered: 2, read: 3, failed: 4 };
@@ -44,11 +44,6 @@ export function describeDeliveryError(
   return code !== undefined ? `${base} (code ${code})` : base;
 }
 
-/**
- * Saves a message we sent, with WhatsApp's message ID so its delivery status
- * can be matched later. Until the delivery-status migration is run, the new
- * columns don't exist; then the message is saved without them.
- */
 /** The columns the chat needs to show a message right after it is saved. */
 const SAVED_COLUMNS = "id, direction, message_text, media_url, sent_at, created_at, status, status_error";
 export type SavedMessage = {
@@ -62,6 +57,10 @@ export type SavedMessage = {
   status_error?: string | null;
 };
 
+/**
+ * Saves a message we sent, with WhatsApp's message ID (when there is one) so
+ * its delivery status can be matched later.
+ */
 export async function insertOutboundMessage(
   row: {
     contact_id: string;
@@ -91,7 +90,7 @@ export async function insertOutboundMessage(
     } catch (err) {
       // The webhook already saved this message (an echo arrived first): nothing to add.
       if (isUniqueViolation(err)) return { error: null };
-      if (!isMissingSchemaError(err)) return { error: { message: errorMessage(err) } };
+      return { error: { message: errorMessage(err) } };
     }
   }
 
