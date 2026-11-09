@@ -3,13 +3,11 @@
 import { revalidatePath } from "next/cache";
 
 import { requireActionAuth } from "@/lib/auth";
-import { db, isMissingSchemaError, isUniqueViolation } from "@/lib/db";
+import { db, isUniqueViolation } from "@/lib/db";
 import { isUuid } from "@/lib/validate";
 
 const MAX_NAME_LENGTH = 40;
 const MAX_CONTACTS = 5000;
-const NOT_SET_UP =
-  "Sections are not set up in the database yet (azure/003_contact_sections.sql has not been applied).";
 
 type Result = { success: true } | { error: string };
 
@@ -26,7 +24,6 @@ function cleanName(name: string): string | { error: string } {
 }
 
 function failure(err: unknown, fallback: string): { error: string } {
-  if (isMissingSchemaError(err)) return { error: NOT_SET_UP };
   if (isUniqueViolation(err)) return { error: "A section with that name already exists." };
   console.error("[sections]", err instanceof Error ? err.message : err);
   return { error: fallback };

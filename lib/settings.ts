@@ -22,9 +22,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
 };
 
 /**
- * Loads the settings row. Falls back to defaults if the row or the table
- * does not exist yet (e.g. the migration has not been applied), so the rest
- * of the app keeps working exactly as before.
+ * Loads the settings row. Falls back to the defaults if there is no row yet
+ * or it can't be read, so the rest of the app keeps working.
  */
 export async function getAppSettings(): Promise<AppSettings> {
   type Row = {

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { sendButtonAutoReply } from "@/lib/auto-reply";
 import crypto from "crypto";
-import { db, isMissingSchemaError, isUniqueViolation } from "@/lib/db";
+import { db, isUniqueViolation } from "@/lib/db";
 import { safeEqual } from "@/lib/secure-compare";
 import { storeInboundWhatsAppMedia } from "@/lib/inbound-media";
 import { applyDeliveryStatus, describeDeliveryError } from "@/lib/message-status";
@@ -519,36 +519,16 @@ async function processSingleMessage({
     profile_name: profileName?.trim() || null,
     wamid: messageId ?? null,
   };
-  let current: Record<string, unknown> = row;
   let insertError: unknown = null;
-  const insertCurrent = async () => {
-    // Column names come from the fixed row object above, never from user input.
-    const columns = Object.keys(current);
-    try {
-      await db.execute(
-        `insert into whatsapp_messages (${columns.join(", ")}) values (${columns.map((_, i) => `$${i + 1}`).join(", ")})`,
-        columns.map((column) => current[column]),
-      );
-      insertError = null;
-    } catch (err) {
-      insertError = err;
-    }
-  };
-  await insertCurrent();
-
-  // Until the later migrations are applied, some columns may not exist; drop
-  // only the missing one rather than losing the message.
-  for (let attempt = 0; attempt < 4 && insertError && !isUniqueViolation(insertError); attempt++) {
-    if (!isMissingSchemaError(insertError)) break;
-    const message = (insertError as Error).message ?? "";
-    const missing = ["wamid", "profile_name", "phone"].find(
-      (column) => column in current && new RegExp(column, "i").test(message),
+  // Column names come from the fixed row object above, never from user input.
+  const columns = Object.keys(row) as Array<keyof typeof row>;
+  try {
+    await db.execute(
+      `insert into whatsapp_messages (${columns.join(", ")}) values (${columns.map((_, i) => `$${i + 1}`).join(", ")})`,
+      columns.map((column) => row[column]),
     );
-    if (!missing) break;
-    const { [missing]: dropped, ...rest } = current;
-    void dropped;
-    current = rest;
-    await insertCurrent();
+  } catch (err) {
+    insertError = err;
   }
 
   // A second copy of the same message lost the race to the first: nothing to do.

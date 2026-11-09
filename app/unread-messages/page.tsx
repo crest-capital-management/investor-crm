@@ -43,9 +43,7 @@ export default async function UnreadMessagesPage({
       <div className="p-4 sm:p-6 lg:p-8">
         <h1 className="text-2xl font-semibold">Unread Messages</h1>
         <p className="mt-2 text-destructive">
-          Unable to load unread messages. If this is the first time using this page, run
-          the migration <code>20260930000000_add_unread_messages.sql</code> on the
-          database.
+          Unable to load unread messages. Please refresh the page or try again in a minute.
         </p>
       </div>
     );

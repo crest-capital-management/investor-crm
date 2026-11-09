@@ -242,8 +242,7 @@ export async function runReminderDispatch({
     contact_name: row.contact_name || "Unknown investor",
   }));
 
-  // If the unread_conversations() migration has not been applied, or the
-  // lookup fails, still send the follow-up digest rather than nothing.
+  // If the unread lookup fails, still send the follow-up digest rather than nothing.
   const unreadRaw = unreadResult;
 
   const unread: UnreadMessageRow[] = [];

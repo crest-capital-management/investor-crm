@@ -6,8 +6,8 @@ import { INVESTOR_TAGS } from "@/lib/tags";
 
 export const dynamic = "force-dynamic";
 
-const BASE_COLUMNS = "id, name, phone, email, company, tags, date_saved, notes";
-const WITH_LAST_MESSAGE = `${BASE_COLUMNS}, last_message_at, last_message_text, last_message_direction`;
+const COLUMNS =
+  "id, name, phone, email, company, tags, date_saved, notes, last_message_at, last_message_text, last_message_direction, section_id";
 
 type Row = Record<string, unknown>;
 
@@ -21,26 +21,11 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  async function loadInvestors(columns: string) {
-    return db.query<Row>(
-      `select ${columns} from contacts where tags && $1::text[] and deleted_at is null order by id asc`,
+  try {
+    const investors = await db.query<Row>(
+      `select ${COLUMNS} from contacts where tags && $1::text[] and deleted_at is null order by id asc`,
       [INVESTOR_TAGS],
     );
-  }
-
-  try {
-    let investors: Row[];
-    try {
-      investors = await loadInvestors(`${WITH_LAST_MESSAGE}, section_id`);
-    } catch {
-      try {
-        // section_id doesn't exist until azure/003_contact_sections.sql is applied.
-        investors = await loadInvestors(WITH_LAST_MESSAGE);
-      } catch {
-        // The last-message columns don't exist until the chat-list migration is run.
-        investors = await loadInvestors(BASE_COLUMNS);
-      }
-    }
 
     // The latest interaction and the earliest pending follow-up per contact.
     const [interactions, followUps] = await Promise.all([
