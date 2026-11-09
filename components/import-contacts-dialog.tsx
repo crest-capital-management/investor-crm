@@ -38,6 +38,8 @@ import {
 import { Download, FileText, Loader2, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { parseCsv, type CsvData } from "@/lib/parse-csv";
+import { downloadCsv } from "@/lib/csv";
+import { isValidDate, isValidEmail } from "@/lib/validate";
 import { parseTagCell } from "@/lib/tag-match";
 import type { ContactSection } from "@/lib/section-filter";
 
@@ -55,22 +57,10 @@ const CONTACT_FIELDS: Array<{ value: ContactField; label: string; required: bool
   { value: "notes", label: "Notes", required: false },
 ];
 
-function isValidDate(value: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const date = new Date(`${value}T00:00:00Z`);
-  return (
-    date.getUTCFullYear() === Number(value.slice(0, 4)) &&
-    date.getUTCMonth() + 1 === Number(value.slice(5, 7)) &&
-    date.getUTCDate() === Number(value.slice(8, 10))
-  );
-}
-
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 function validateRow(row: ImportContactRow) {
   if (!row.name || !row.phone) return "Name and phone are required.";
   if (!/^\d{7,15}$/.test(row.phone)) return "Phone must contain 7-15 digits.";
-  if (row.email && !EMAIL_REGEX.test(row.email)) return "Please enter a valid email address.";
+  if (row.email && !isValidEmail(row.email)) return "Please enter a valid email address.";
   if (row.dateSaved && !isValidDate(row.dateSaved)) return "Date Saved must use YYYY-MM-DD.";
   const unknownTag = row.tag ? parseTagCell(row.tag).unknown : undefined;
   if (unknownTag) return `Unknown tag "${unknownTag}". Use one of the CRM's tags.`;
@@ -282,50 +272,29 @@ export function ImportContactsDialog({
     });
   }
 
-  function escapeCsvCell(value: string): string {
-    return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
-  }
-
-  function downloadCsv(filenameSuffix: string, headerLine: string, lines: string[]) {
-    const blob = new Blob([[headerLine, ...lines].join("\n")], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
+  function downloadReport(filenameSuffix: string, rows: string[][]) {
     const baseName = (selectedFile?.name ?? "contacts").replace(/\.(csv|xlsx|xls)$/i, "");
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${baseName}-${filenameSuffix}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadCsv(rows, `${baseName}-${filenameSuffix}.csv`);
   }
 
   function downloadInvalidRows() {
     if (!csv || !invalidRows) return;
 
-    const headerLine = ["Row #", ...csv.headers, "Error"].map(escapeCsvCell).join(",");
-    const lines = mappedRows.reduce<string[]>((acc, row, index) => {
+    const rows = mappedRows.reduce<string[][]>((acc, row, index) => {
       if (!row.error) return acc;
       const cells = csv.rows[index] ?? [];
-      acc.push(
-        [String(index + 1), ...csv.headers.map((_, columnIndex) => cells[columnIndex] ?? ""), row.error]
-          .map(escapeCsvCell)
-          .join(",")
-      );
+      acc.push([String(index + 1), ...csv.headers.map((_, columnIndex) => cells[columnIndex] ?? ""), row.error]);
       return acc;
     }, []);
 
-    downloadCsv("invalid-rows", headerLine, lines);
+    downloadReport("invalid-rows", [["Row #", ...csv.headers, "Error"], ...rows]);
   }
 
   function downloadDuplicateRows() {
     if (!importSummary?.duplicateRows.length) return;
 
-    const headerLine = ["Name", "Phone", "Email", "Reason"].map(escapeCsvCell).join(",");
-    const lines = importSummary.duplicateRows.map((row) =>
-      [row.name, row.phone, row.email ?? "", row.reason].map(escapeCsvCell).join(",")
-    );
-
-    downloadCsv("skipped-duplicates", headerLine, lines);
+    const rows = importSummary.duplicateRows.map((row) => [row.name, row.phone, row.email ?? "", row.reason]);
+    downloadReport("skipped-duplicates", [["Name", "Phone", "Email", "Reason"], ...rows]);
   }
 
   async function handleImport() {

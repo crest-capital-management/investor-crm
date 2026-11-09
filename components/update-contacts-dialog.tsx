@@ -26,6 +26,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/toast-provider";
 import { parseCsv, type CsvData } from "@/lib/parse-csv";
+import { downloadCsv } from "@/lib/csv";
 import { suggestTag, matchTag, splitTagCell } from "@/lib/tag-match";
 import { TAG_OPTIONS } from "@/lib/tags";
 
@@ -194,16 +195,10 @@ export function UpdateContactsDialog() {
   }
 
   function downloadSkipped(kind: string, lines: string[][]) {
-    const cell = (value: string) => (/[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value);
-    const text = [["Row #", "Phone", "Reason"], ...lines].map((line) => line.map(cell).join(",")).join("\n");
-    const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8;" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${fileName.replace(/\.(csv|xlsx|xls)$/i, "") || "update"}-skipped-${kind}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadCsv(
+      [["Row #", "Phone", "Reason"], ...lines],
+      `${fileName.replace(/\.(csv|xlsx|xls)$/i, "") || "update"}-skipped-${kind}.csv`,
+    );
   }
 
   async function handleCheck() {

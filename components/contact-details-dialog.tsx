@@ -12,7 +12,7 @@ import {
   getContactGroupOptions,
   updateContact,
 } from "@/app/contacts/actions";
-import { TAG_OPTIONS } from "@/components/add-contact-dialog";
+import { TAG_OPTIONS } from "@/lib/tags";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/toast-provider";
 import {

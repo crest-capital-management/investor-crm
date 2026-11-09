@@ -4,10 +4,10 @@ import { revalidatePath } from "next/cache";
 
 import { requireActionAuth } from "@/lib/auth";
 import { db, isMissingSchemaError, isUniqueViolation } from "@/lib/db";
+import { isUuid } from "@/lib/validate";
 
 const MAX_NAME_LENGTH = 40;
 const MAX_CONTACTS = 5000;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NOT_SET_UP =
   "Sections are not set up in the database yet (azure/003_contact_sections.sql has not been applied).";
 
@@ -55,7 +55,7 @@ export async function createSection(name: string): Promise<Result> {
 export async function renameSection(id: string, name: string): Promise<Result> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
-  if (!UUID.test(id)) return { error: "Unknown section." };
+  if (!isUuid(id)) return { error: "Unknown section." };
   const clean = cleanName(name);
   if (typeof clean !== "string") return clean;
 
@@ -73,7 +73,7 @@ export async function renameSection(id: string, name: string): Promise<Result> {
 export async function deleteSection(id: string): Promise<Result> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
-  if (!UUID.test(id)) return { error: "Unknown section." };
+  if (!isUuid(id)) return { error: "Unknown section." };
 
   try {
     const result = await db.tx(async (tx) => {
@@ -104,9 +104,9 @@ export async function moveContactsToSection(
 ): Promise<{ success: true; updated: number } | { error: string }> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
-  if (sectionId !== null && !UUID.test(sectionId)) return { error: "Unknown section." };
+  if (sectionId !== null && !isUuid(sectionId)) return { error: "Unknown section." };
 
-  const ids = [...new Set(contactIds.map((id) => String(id).trim()).filter((id) => UUID.test(id)))];
+  const ids = [...new Set(contactIds.map((id) => String(id).trim()).filter((id) => isUuid(id)))];
   if (ids.length === 0) return { error: "No contacts were selected." };
   if (ids.length > MAX_CONTACTS) return { error: `Please select at most ${MAX_CONTACTS} contacts at a time.` };
 

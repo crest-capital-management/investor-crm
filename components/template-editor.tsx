@@ -21,6 +21,7 @@ import {
   type TemplateData,
 } from "@/app/templates/actions";
 import { FileText, Variable, CheckCircle2, Clock } from "lucide-react";
+import { extractPlaceholders } from "@/lib/template-placeholders";
 
 export interface TemplateEditorProps {
   mode: "create" | "edit";
@@ -46,24 +47,9 @@ const CATEGORIES: { label: string; value: TemplateCategory; description: string 
 ];
 
 /**
- * Extracts all unique placeholder indices {{N}} from text, returned as ordered string numbers ["1", "2", ...].
- */
-export function extractPlaceholders(text: string): string[] {
-  const matches = text.matchAll(/\{\{(\d+)\}\}/g);
-  const found = new Set<string>();
-  for (const match of matches) {
-    if (match[1]) {
-      found.add(match[1]);
-    }
-  }
-  // Sort numerically: 1, 2, 3...
-  return Array.from(found).sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
-}
-
-/**
  * Validates whether placeholders in text are sequentially numbered starting from 1 with no gaps.
  */
-export function validatePlaceholdersSequential(placeholders: string[]): string | null {
+function validatePlaceholdersSequential(placeholders: string[]): string | null {
   if (placeholders.length === 0) return null;
 
   for (let i = 0; i < placeholders.length; i++) {

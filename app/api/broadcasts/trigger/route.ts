@@ -1,28 +1,5 @@
-import { NextResponse } from "next/server";
-import { safeEqual } from "@/lib/secure-compare";
 import { dispatchDueBroadcasts } from "@/lib/broadcast-dispatch";
+import { schedulerRoute } from "@/lib/scheduler-route";
 
-export async function POST(request: Request) {
-  const authHeader = request.headers.get("authorization");
-  const expectedSecret = process.env.SCHEDULER_SECRET;
-
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const token = authHeader.slice(7).trim();
-
-  // Return identical generic response if SCHEDULER_SECRET is missing or token mismatches
-  if (!expectedSecret || !safeEqual(token, expectedSecret)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  try {
-    const summary = await dispatchDueBroadcasts();
-    return NextResponse.json(summary);
-  } catch (error: unknown) {
-    const message =
-      error instanceof Error ? error.message : "Failed to process broadcasts";
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
-}
+/** Sends scheduled broadcasts that are due; called every 5 minutes by the server's cron job. */
+export const POST = schedulerRoute(dispatchDueBroadcasts, "Failed to process broadcasts");

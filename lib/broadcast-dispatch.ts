@@ -6,6 +6,13 @@ import {
   sendWhatsAppTemplateMessage,
 } from "@/lib/whatsapp";
 import { insertOutboundMessage } from "@/lib/message-status";
+import {
+  extractPlaceholders,
+  fillPlaceholders,
+  SUPPORTED_CONTACT_FIELDS,
+  type SupportedContactField,
+  type VariableMappings,
+} from "@/lib/template-placeholders";
 
 /** Stored on broadcasts.send_summary once a broadcast has been sent. */
 export interface BroadcastSendSummary {
@@ -43,42 +50,13 @@ async function contactsWithOpenReplyWindow(contactIds: string[]): Promise<Set<st
   }
 }
 
-type SupportedContactField = "first_name" | "name" | "phone" | "email";
-const ALLOWED_CONTACT_FIELDS = new Set<SupportedContactField>([
-  "first_name",
-  "name",
-  "phone",
-  "email",
-]);
-
-interface ValidatedMappingContactField {
-  type: "contact_field";
-  field: SupportedContactField;
-  fallback?: string;
-}
-
-interface ValidatedMappingStatic {
-  type: "static";
-  value: string;
-}
-
-type ValidatedMapping = ValidatedMappingContactField | ValidatedMappingStatic;
-
-function extractNumericPlaceholders(text: string): string[] {
-  const matches = new Set<string>();
-  const regex = /\{\{(\d+)\}\}/g;
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(text)) !== null) {
-    matches.add(match[1]);
-  }
-  return Array.from(matches).sort((a, b) => Number(a) - Number(b));
-}
+const ALLOWED_CONTACT_FIELDS = new Set<SupportedContactField>(SUPPORTED_CONTACT_FIELDS);
 
 function validateTemplateMappingsForSend(
   templateBody: string,
   rawMappings: unknown
-): { error: string | null; mappings: Record<string, ValidatedMapping> } {
-  const placeholders = extractNumericPlaceholders(templateBody);
+): { error: string | null; mappings: VariableMappings } {
+  const placeholders = extractPlaceholders(templateBody);
   if (placeholders.length === 0) {
     return { error: null, mappings: {} };
   }
@@ -95,7 +73,7 @@ function validateTemplateMappingsForSend(
   }
 
   const mapObj = rawMappings as Record<string, unknown>;
-  const validated: Record<string, ValidatedMapping> = {};
+  const validated: VariableMappings = {};
 
   for (const ph of placeholders) {
     const entry = mapObj[ph];
@@ -178,13 +156,13 @@ function resolveBroadcastMessageForContact({
   contact,
 }: {
   templateBody: string;
-  mappings: Record<string, ValidatedMapping>;
+  mappings: VariableMappings;
   contact: { name: string; phone: string; email?: string | null };
 }): { message: string | null; params: string[]; error: string | null } {
-  const placeholders = extractNumericPlaceholders(templateBody);
-  let resolved = templateBody;
+  const placeholders = extractPlaceholders(templateBody);
   // Values in placeholder order, for sending a Meta template.
   const params: string[] = [];
+  const values: Record<string, string> = {};
 
   for (const ph of placeholders) {
     const mapping = mappings[ph];
@@ -197,7 +175,7 @@ function resolveBroadcastMessageForContact({
     }
 
     if (mapping.type === "static") {
-      resolved = resolved.replaceAll(`{{${ph}}}`, mapping.value);
+      values[ph] = mapping.value;
       params.push(mapping.value);
     } else if (mapping.type === "contact_field") {
       const fieldVal = resolveContactField(contact, mapping.field);
@@ -215,12 +193,12 @@ function resolveBroadcastMessageForContact({
         }
       }
 
-      resolved = resolved.replaceAll(`{{${ph}}}`, finalVal);
+      values[ph] = finalVal;
       params.push(finalVal);
     }
   }
 
-  return { message: resolved, params, error: null };
+  return { message: fillPlaceholders(templateBody, (ph) => values[ph]), params, error: null };
 }
 
 
@@ -267,7 +245,7 @@ interface PreparedBroadcast {
   targetType: string;
   targetIds: string[];
   templateBody: string | null;
-  mappings: Record<string, ValidatedMapping>;
+  mappings: VariableMappings;
   /** Set for templates synced from Meta: sent as a real WhatsApp template. */
   metaTemplate: { name: string; language: string } | null;
 }
@@ -300,7 +278,7 @@ async function prepareBroadcast(
   }
 
   let templateBody: string | null = null;
-  let mappings: Record<string, ValidatedMapping> = {};
+  let mappings: VariableMappings = {};
   let metaTemplate: PreparedBroadcast["metaTemplate"] = null;
 
   if (broadcast.template_id) {

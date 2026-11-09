@@ -26,6 +26,8 @@ import { parseExcelBuffer, type ParsedSpreadsheet } from "@/lib/parse-spreadshee
 import { linkUnmatchedMessages } from "@/lib/link-messages";
 import { insertOutboundMessage, type SavedMessage } from "@/lib/message-status";
 import { assignNewContactsToSection, sectionNameForPhone } from "@/lib/sections";
+import { extractPlaceholders, fillPlaceholders } from "@/lib/template-placeholders";
+import { isValidDate, isValidEmail } from "@/lib/validate";
 
 // Excel files are read into memory on the server, so keep uploads small (the request size cap is serverActions.bodySizeLimit in next.config.ts).
 const MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024;
@@ -48,12 +50,6 @@ async function isPhoneTaken(phone: string): Promise<boolean> {
     [phone],
   );
   return row !== null;
-}
-
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function isValidEmail(value: string) {
-  return EMAIL_REGEX.test(value);
 }
 
 export async function addContact(formData: FormData) {
@@ -493,9 +489,7 @@ export async function sendWhatsAppTemplateToContact(
     return { error: `Template "${template.name}" is not approved by Meta yet.` };
   }
 
-  const placeholders = Array.from(
-    new Set(Array.from((template.body_text as string).matchAll(/\{\{(\d+)\}\}/g), (m) => m[1])),
-  ).sort((a, b) => Number(a) - Number(b));
+  const placeholders = extractPlaceholders(template.body_text);
   const values = params.map((value) => (value ?? "").trim());
   if (values.length !== placeholders.length || values.some((value) => !value)) {
     return { error: "Please fill in every variable before sending." };
@@ -516,10 +510,7 @@ export async function sendWhatsAppTemplateToContact(
     };
   }
 
-  let sentText = template.body_text as string;
-  placeholders.forEach((ph, index) => {
-    sentText = sentText.replaceAll(`{{${ph}}}`, values[index]);
-  });
+  const sentText = fillPlaceholders(template.body_text, (ph) => values[placeholders.indexOf(ph)]);
 
   const { error: insertError, message: savedMessage } = await insertOutboundMessage(
     { contact_id: contact.id, message_text: sentText },
@@ -979,16 +970,6 @@ export type ImportContactRow = {
   notes: string;
 };
 
-function isValidDate(value: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-
-  const date = new Date(`${value}T00:00:00Z`);
-  return (
-    date.getUTCFullYear() === Number(value.slice(0, 4)) &&
-    date.getUTCMonth() + 1 === Number(value.slice(5, 7)) &&
-    date.getUTCDate() === Number(value.slice(8, 10))
-  );
-}
 
 function validateImportRow(row: ImportContactRow) {
   if (!row.name || !row.phone) {
