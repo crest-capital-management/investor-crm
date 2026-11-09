@@ -8,9 +8,10 @@ import { insertOutboundMessage } from "@/lib/message-status";
  * and opens a 24-hour window, so the reply can be a normal file message.
  *
  * To change the PDF, replace the file in /public and keep the same name (or
- * change `file` here). The file is sent from the live site's own address.
+ * change `file` here). The file is sent from the live site's own address:
+ * URL if set, otherwise NEXTAUTH_URL (which login needs anyway).
  */
-const SITE_URL = process.env.URL || "https://investor-crm.netlify.app";
+const SITE_URL = (process.env.URL || process.env.NEXTAUTH_URL || "").replace(/\/+$/, "");
 
 const BUTTON_AUTO_REPLIES: {
   buttonTitle: string;
@@ -47,6 +48,10 @@ export async function sendButtonAutoReply(
 
   const rule = BUTTON_AUTO_REPLIES.find((r) => r.buttonTitle.toLowerCase() === title);
   if (!rule) return;
+  if (!SITE_URL) {
+    console.error("[WhatsApp Webhook] Auto-reply skipped: neither URL nor NEXTAUTH_URL is set.");
+    return;
+  }
 
   // Only for our approved template: the tapped message must be one we sent.
   if (!args.repliedToId) return;

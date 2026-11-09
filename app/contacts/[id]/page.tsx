@@ -111,7 +111,7 @@ export default async function ContactDetailPage({
       portfolioUpdatesError={
         portfolioUpdatesError
           ? isMissingSchemaError(portfolioUpdatesError)
-            ? "Portfolio updates aren't set up yet. Run the latest Supabase migration (portfolio_updates) first."
+            ? "Portfolio updates aren't set up yet. Run the latest database migration (portfolio_updates) first."
             : "Portfolio updates could not be loaded."
           : null
       }
@@ -119,7 +119,7 @@ export default async function ContactDetailPage({
       prospectScoreError={
         prospectScoreError
           ? isMissingSchemaError(prospectScoreError)
-            ? "Prospect score isn't set up yet. Run the latest Supabase migration (prospect score) first."
+            ? "Prospect score isn't set up yet. Run the latest database migration (prospect score) first."
             : "The prospect score could not be loaded."
           : null
       }

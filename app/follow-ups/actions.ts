@@ -1,16 +1,16 @@
 "use server";
 
-import { requireOwnerAction } from "@/lib/auth";
+import { requireActionAuth } from "@/lib/auth";
 import { runReminderDispatch } from "@/lib/follow-up-reminders";
 
 /**
  * Authenticated wrapper for manually testing the reminder email from the UI
  * (e.g. a "Send test reminder" button on the dashboard). This is separate
  * from the /api/follow-ups/trigger route, which is for an unattended
- * scheduler call (netlify/functions/send-daily-reminder.mts, 10:00 AM IST).
+ * scheduler call (the server's cron job, 10:00 AM IST).
  */
 export async function sendTestFollowUpReminder() {
-  const { error: authError } = await requireOwnerAction();
+  const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
 
   const summary = await runReminderDispatch({ ignoreEnabledSwitch: true });

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { safeEqual } from "@/lib/secure-compare";
 import { saveDailyBackup } from "@/lib/backup";
 
-/** Nightly backup, called by netlify/functions/daily-backup.mts. */
+/** Nightly backup, called by the server's cron job (see azure/SWITCHOVER.md). */
 export async function POST(request: Request) {
   const authHeader = request.headers.get("authorization");
   const expectedSecret = process.env.SCHEDULER_SECRET;

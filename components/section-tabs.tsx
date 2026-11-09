@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Settings2 } from "lucide-react";
-import { cn } from "cn";
+import { cn } from "@/lib/utils";
 
 import { ManageSectionsDialog } from "@/components/manage-sections-dialog";
 import { Button } from "@/components/ui/button";

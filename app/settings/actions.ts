@@ -45,7 +45,7 @@ export async function saveAppSettings(settings: AppSettings) {
   } catch {
     return {
       error:
-        "Settings could not be saved. If you have not yet run the app_settings migration in Supabase, run it first.",
+        "Settings could not be saved. If you have not yet run the app_settings migration on the database, run it first.",
     };
   }
 

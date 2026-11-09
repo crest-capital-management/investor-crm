@@ -44,8 +44,8 @@ export default async function UnreadMessagesPage({
         <h1 className="text-2xl font-semibold">Unread Messages</h1>
         <p className="mt-2 text-destructive">
           Unable to load unread messages. If this is the first time using this page, run
-          the migration <code>20260930000000_add_unread_messages.sql</code> in the
-          Supabase SQL Editor.
+          the migration <code>20260930000000_add_unread_messages.sql</code> on the
+          database.
         </p>
       </div>
     );

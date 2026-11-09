@@ -28,7 +28,7 @@ import { linkUnmatchedMessages } from "@/lib/link-messages";
 import { insertOutboundMessage, type SavedMessage } from "@/lib/message-status";
 import { assignNewContactsToSection, sectionNameForPhone } from "@/lib/sections";
 
-// The live host (Netlify) rejects requests over about 6MB, so keep these under that.
+// Excel files are read into memory on the server, so keep uploads small (the request size cap is serverActions.bodySizeLimit in next.config.ts).
 const MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024;
 
 const DUPLICATE_PHONE_ERROR =

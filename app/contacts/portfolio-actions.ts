@@ -18,7 +18,7 @@ import {
 
 const MAX_PASTED_CHARS = 100_000;
 const MISSING_TABLE_ERROR =
-  "Portfolio updates aren't set up yet. Run the latest Supabase migration (portfolio_updates) first.";
+  "Portfolio updates aren't set up yet. Run the latest database migration (portfolio_updates) first.";
 
 function isMissingTable(error: unknown) {
   return isMissingSchemaError(error) || /portfolio_updates/.test((error as { message?: string } | null)?.message ?? "");
