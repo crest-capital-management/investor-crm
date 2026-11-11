@@ -19,7 +19,7 @@ type FollowUpRow = {
   message: string;
 };
 
-type Status = "pending" | "overdue";
+type Status = "today" | "pending" | "overdue";
 
 function formatDueDate(dueDate: string) {
   const [year, month, day] = String(dueDate).slice(0, 10).split("-").map(Number);
@@ -37,7 +37,7 @@ export default async function FollowUpsPage({
   searchParams: Promise<{ status?: string }>;
 }) {
   const { status: statusParam } = await searchParams;
-  const status: Status = statusParam === "overdue" ? "overdue" : "pending";
+  const status: Status = statusParam === "overdue" || statusParam === "today" ? statusParam : "pending";
   await requireAuthFast();
 
   const todayStr = new Date().toISOString().slice(0, 10);
@@ -51,15 +51,16 @@ export default async function FollowUpsPage({
        from public.follow_ups f
        left join public.contacts c on c.id = f.contact_id and c.deleted_at is null
        where f.is_done = false and f.deleted_at is null
-         ${status === "overdue" ? "and f.due_date < $1::date" : ""}
+         ${status === "overdue" ? "and f.due_date < $1::date" : status === "today" ? "and f.due_date = $1::date" : ""}
        order by f.due_date asc`,
-      status === "overdue" ? [todayStr] : [],
+      status === "pending" ? [] : [todayStr],
     );
   } catch (err) {
     loadError = err instanceof Error ? err.message : "Follow-ups could not be loaded.";
   }
 
   const tabs: Array<{ key: Status; label: string }> = [
+    { key: "today", label: "Today" },
     { key: "pending", label: "Pending" },
     { key: "overdue", label: "Overdue" },
   ];
@@ -75,7 +76,11 @@ export default async function FollowUpsPage({
       </Link>
       <h1 className="text-2xl font-semibold">Follow-ups</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        {status === "overdue" ? "Follow-ups past their due date." : "All follow-ups awaiting completion."}
+        {status === "overdue"
+          ? "Follow-ups past their due date."
+          : status === "today"
+            ? "Follow-ups due today."
+            : "All follow-ups awaiting completion."}
       </p>
 
       <div className="mt-4 flex gap-2">
@@ -99,7 +104,11 @@ export default async function FollowUpsPage({
         <p className="mt-6 text-destructive">Error loading follow-ups: {loadError}</p>
       ) : rows.length === 0 ? (
         <div className="mt-6 rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">
-          {status === "overdue" ? "No overdue follow-ups. All caught up." : "No pending follow-ups."}
+          {status === "overdue"
+            ? "No overdue follow-ups. All caught up."
+            : status === "today"
+              ? "No follow-ups due today."
+              : "No pending follow-ups."}
         </div>
       ) : (
         <div className="mt-6 flex flex-col gap-3">
