@@ -9,6 +9,10 @@ import ExcelJS from "exceljs";
 export type ParsedSpreadsheet = {
   headers: string[];
   rows: string[][];
+  /** Every sheet in the workbook, in order, so the user can pick which one to use. */
+  sheetNames: string[];
+  /** The sheet these rows came from. */
+  sheet: string;
 };
 
 export function cellValueToString(value: ExcelJS.CellValue): string {
@@ -37,13 +41,29 @@ export function cellValueToString(value: ExcelJS.CellValue): string {
   return String(value).trim();
 }
 
+function sheetRows(worksheet: ExcelJS.Worksheet): string[][] {
+  const allRows: string[][] = [];
+  worksheet.eachRow({ includeEmpty: false }, (row) => {
+    const values = row.values as ExcelJS.CellValue[];
+    const cells: string[] = [];
+    for (let col = 1; col < values.length; col += 1) {
+      cells.push(cellValueToString(values[col]));
+    }
+    allRows.push(cells);
+  });
+  return allRows.filter((row) => row.some((cell) => cell.trim() !== ""));
+}
+
 /**
- * Reads the first worksheet of an Excel file buffer and returns its header
- * row plus data rows, skipping fully blank rows. Throws on unreadable files
- * or files without at least a header and one data row.
+ * Reads one worksheet of an Excel file buffer and returns its header row plus
+ * data rows, skipping fully blank rows, along with the names of all sheets.
+ * Without `sheetName` it uses the first sheet that has contact rows. A sheet
+ * picked by name that is empty returns no rows (so the user can pick another).
+ * Throws on unreadable files or workbooks with no contact rows at all.
  */
 export async function parseExcelBuffer(
-  buffer: Buffer
+  buffer: Buffer,
+  sheetName?: string
 ): Promise<ParsedSpreadsheet> {
   const workbook = new ExcelJS.Workbook();
 
@@ -55,27 +75,31 @@ export async function parseExcelBuffer(
     );
   }
 
-  const worksheet = workbook.worksheets[0];
-  if (!worksheet) {
+  if (workbook.worksheets.length === 0) {
     throw new Error("The Excel file does not contain any sheets.");
   }
+  const sheetNames = workbook.worksheets.map((sheet) => sheet.name);
 
-  const allRows: string[][] = [];
-  worksheet.eachRow({ includeEmpty: false }, (row) => {
-    const values = row.values as ExcelJS.CellValue[];
-    const cells: string[] = [];
-    for (let col = 1; col < values.length; col += 1) {
-      cells.push(cellValueToString(values[col]));
+  let name: string;
+  let nonEmptyRows: string[][];
+  if (sheetName !== undefined) {
+    const worksheet = workbook.getWorksheet(sheetName);
+    if (!worksheet) throw new Error(`The sheet "${sheetName}" was not found in this file.`);
+    name = worksheet.name;
+    nonEmptyRows = sheetRows(worksheet);
+  } else {
+    name = sheetNames[0];
+    nonEmptyRows = sheetRows(workbook.worksheets[0]);
+    if (nonEmptyRows.length < 2) {
+      const firstWithData = workbook.worksheets.find((sheet) => sheetRows(sheet).length >= 2);
+      if (!firstWithData) throw new Error("The Excel file does not contain any contact rows.");
+      name = firstWithData.name;
+      nonEmptyRows = sheetRows(firstWithData);
     }
-    allRows.push(cells);
-  });
-
-  const nonEmptyRows = allRows.filter((row) =>
-    row.some((cell) => cell.trim() !== "")
-  );
+  }
 
   if (nonEmptyRows.length < 2) {
-    throw new Error("The Excel file does not contain any contact rows.");
+    return { headers: [], rows: [], sheetNames, sheet: name };
   }
 
   const [headerRow, ...dataRows] = nonEmptyRows;
@@ -83,5 +107,5 @@ export async function parseExcelBuffer(
     (header, index) => header || `Column ${index + 1}`
   );
 
-  return { headers, rows: dataRows };
+  return { headers, rows: dataRows, sheetNames, sheet: name };
 }

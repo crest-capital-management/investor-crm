@@ -22,6 +22,8 @@ export interface ContactOption {
   id: string;
   name: string;
   phone: string;
+  /** The contact's section (e.g. a team member's list); absent if sections are not set up. */
+  section_id?: string | null;
 }
 
 export interface TemplateOption {

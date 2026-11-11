@@ -3,10 +3,10 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { requireAuthFast } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { loadBroadcastContactChoices } from "@/lib/sections";
 import { BroadcastEditor } from "@/components/broadcast-editor";
 import type {
   GroupOption,
-  ContactOption,
   TemplateOption,
 } from "@/app/broadcasts/actions";
 
@@ -18,13 +18,9 @@ export default async function NewBroadcastPage() {
   await requireAuthFast();
 
   // A failed lookup leaves that picker empty, as before.
-  const [groups, contacts, templates] = await Promise.all([
+  const [groups, contactChoices, templates] = await Promise.all([
     db.query<GroupOption>("select id, name from groups order by name asc").catch(() => []),
-    db
-      .query<ContactOption>(
-        "select id, name, phone from contacts where deleted_at is null order by name asc, id asc",
-      )
-      .catch(() => []),
+    loadBroadcastContactChoices(),
     db
       .query<TemplateOption>(
         `select id, name, category, body_text, variables, approved_at, meta_template_id
@@ -57,7 +53,8 @@ export default async function NewBroadcastPage() {
         <BroadcastEditor
           mode="create"
           groups={groups}
-          contacts={contacts}
+          contacts={contactChoices.contacts}
+          sections={contactChoices.sections}
           templates={templates}
         />
       </div>

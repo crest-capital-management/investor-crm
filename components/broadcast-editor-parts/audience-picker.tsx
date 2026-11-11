@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { TAG_OPTIONS } from "@/lib/tags";
 import { cn } from "@/lib/utils";
+import { ALL_SECTIONS, NO_SECTION, inSection, type ContactSection } from "@/lib/section-filter";
 
 /** A "Select All" checkbox that shows a dash when only some items are selected. */
 function SelectAllCheckbox({
@@ -72,6 +73,7 @@ export function AudiencePicker({
   selectedTags,
   onSelectedTagsChange,
   contacts,
+  sections = [],
   selectedContactIds,
   onSelectedContactIdsChange,
   targetError,
@@ -86,6 +88,7 @@ export function AudiencePicker({
   selectedTags: string[];
   onSelectedTagsChange: (update: (current: string[]) => string[]) => void;
   contacts: ContactOption[];
+  sections?: ContactSection[];
   selectedContactIds: string[];
   onSelectedContactIdsChange: (update: (current: string[]) => string[]) => void;
   targetError: string | null;
@@ -93,6 +96,8 @@ export function AudiencePicker({
   isReadOnly: boolean;
 }) {
   const [contactSearch, setContactSearch] = useState("");
+  // Narrow the contact list to one section (e.g. one team member's contacts).
+  const [sectionFilter, setSectionFilter] = useState(ALL_SECTIONS);
 
   // Groups
   const allGroupsSelected = groups.length > 0 && selectedGroupIds.length === groups.length;
@@ -128,6 +133,7 @@ export function AudiencePicker({
 
   // Manual: "Select All" applies to the contacts matching the search.
   const filteredContacts = contacts.filter((c) => {
+    if (!inSection(c, sectionFilter)) return false;
     const q = contactSearch.toLowerCase().trim();
     if (!q) return true;
     return c.name.toLowerCase().includes(q) || (c.phone && c.phone.toLowerCase().includes(q));
@@ -275,6 +281,28 @@ export function AudiencePicker({
         {/* Manual Mode */}
         {targetType === "manual" && (
           <div className="mt-2 flex flex-col gap-2">
+            {sections.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter contacts by section">
+                {[{ id: ALL_SECTIONS, name: "All" }, ...sections, { id: NO_SECTION, name: "No section" }].map((option) => {
+                  const count = contacts.filter((c) => inSection(c, option.id)).length;
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => setSectionFilter(option.id)}
+                      className={cn(
+                        "cursor-pointer rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                        sectionFilter === option.id
+                          ? "border-foreground bg-foreground text-background"
+                          : "bg-background text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      {option.name} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+            )}
             <div className="relative max-w-md">
               <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
               <Input
@@ -294,7 +322,7 @@ export function AudiencePicker({
                 ariaLabel="Select all matching contacts"
               >
                 Select All
-                {contactSearch.trim() ? ` (${filteredContacts.length} matching)` : ""}
+                {contactSearch.trim() || sectionFilter !== ALL_SECTIONS ? ` (${filteredContacts.length} shown)` : ""}
               </SelectAllCheckbox>
               <span className="text-xs text-muted-foreground">
                 {selectedContactIds.length} of {contacts.length} selected
@@ -328,7 +356,7 @@ export function AudiencePicker({
                 })
               ) : (
                 <div className="p-6 text-center text-xs text-muted-foreground">
-                  {contactSearch ? "No matching contacts found." : "No contacts available."}
+                  {contactSearch || sectionFilter !== ALL_SECTIONS ? "No matching contacts found." : "No contacts available."}
                 </div>
               )}
             </div>

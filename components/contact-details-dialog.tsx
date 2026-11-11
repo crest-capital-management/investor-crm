@@ -143,9 +143,19 @@ export function ContactDetailsDialog({
     setNotes(contact.notes ?? "");
   }
 
+  // When the contact changes elsewhere (e.g. edited on its own page, then the list
+  // refreshes), pull in the new values so this dialog never shows stale tags.
+  // Skipped while editing so a refresh can't wipe what the user is typing.
+  const [syncedContact, setSyncedContact] = useState(contact);
+  if (contact !== syncedContact) {
+    setSyncedContact(contact);
+    if (!editing) loadContact();
+  }
+
   function handleOpenChange(next: boolean) {
     setOpen(next);
     if (next) {
+      loadContact();
       setEditing(startInEditMode);
     } else {
       setEditing(false);
@@ -189,6 +199,7 @@ export function ContactDetailsDialog({
       return;
     }
     setCurrentContact((existing) => ({ ...existing, tags: result.tags ?? existing.tags }));
+    setTag((result.tags ?? currentContact.tags)?.[0] ?? "");
     setSelectedTagToAdd("");
     setTagDialogOpen(false);
     toast("Tag added successfully");
@@ -205,6 +216,7 @@ export function ContactDetailsDialog({
       return;
     }
     setCurrentContact((existing) => ({ ...existing, tags: result.tags ?? existing.tags }));
+    setTag((result.tags ?? currentContact.tags)?.[0] ?? "");
     toast("Tag removed");
     router.refresh();
   }
@@ -409,6 +421,25 @@ export function ContactDetailsDialog({
                       ))}
                     </SelectContent>
                   </Select>
+                  {currentContact.tags?.length ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {currentContact.tags.map((contactTag) => (
+                        <span key={contactTag} className="inline-flex items-center gap-1 rounded-full bg-muted py-1 pl-2.5 pr-1.5 text-xs font-medium text-muted-foreground">
+                          {contactTag}
+                          <button
+                            type="button"
+                            onClick={() => setTagToRemove(contactTag)}
+                            disabled={removingTag !== null}
+                            aria-label={`Remove tag ${contactTag}`}
+                            title="Remove this tag"
+                            className="rounded-full p-0.5 hover:bg-foreground/10 hover:text-foreground disabled:opacity-50"
+                          >
+                            <X className="size-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
 
                 <DateSavedPicker
