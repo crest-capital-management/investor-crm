@@ -119,7 +119,7 @@ function AnalysisPanel({ update }: { update: PortfolioUpdate }) {
   const changes = analysis.changes_vs_previous;
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="rounded-md border p-3">
           <p className="text-xs uppercase tracking-wide text-muted-foreground">AUM</p>
           <p className="mt-1 text-lg font-semibold">{analysis.aum.display ? toIndianGrouping(analysis.aum.display) : "—"}</p>
@@ -141,7 +141,7 @@ function AnalysisPanel({ update }: { update: PortfolioUpdate }) {
       </div>
       {analysis.summary && <p className="text-sm">{toIndianGrouping(analysis.summary)}</p>}
       {changes?.notes && <p className="text-sm text-muted-foreground">Change: {toIndianGrouping(changes.notes)}</p>}
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <HoldingsTable title="Top 5 gainers" holdings={analysis.top_gainers} />
         <HoldingsTable title="Bottom 5 losers" holdings={analysis.top_losers} />
       </div>
