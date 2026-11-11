@@ -196,11 +196,11 @@ export function ContactsTable({
       )}
 
       <div className="min-h-0 flex-1 overflow-auto rounded-lg border bg-background">
-        <div className="min-w-[760px]">
+        <div className="lg:min-w-[760px]">
           <table className="w-full border-collapse text-sm">
             <thead className="sticky top-0 z-10 bg-background">
               <tr className="border-b bg-background text-left text-muted-foreground">
-                <th className="w-12 px-5 py-2.5 sm:py-3 font-medium">
+                <th className="w-12 px-3 py-2.5 sm:py-3 md:px-5 font-medium">
                   <input
                     ref={selectAllRef}
                     type="checkbox"
@@ -210,13 +210,13 @@ export function ContactsTable({
                     className="size-4 cursor-pointer accent-primary"
                   />
                 </th>
-                <th className="w-[17%] px-5 py-2.5 sm:py-3 font-medium">Name</th>
-                <th className="w-[16%] px-5 py-2.5 sm:py-3 font-medium">Company</th>
-                <th className="w-[13%] px-5 py-2.5 sm:py-3 font-medium">Phone</th>
-                <th className="w-[19%] px-5 py-2.5 sm:py-3 font-medium">Email</th>
-                <th className="w-[17%] px-5 py-2.5 sm:py-3 font-medium">Tags</th>
-                <th className="w-[16%] px-5 py-2.5 sm:py-3 font-medium">Groups</th>
-                {showSections && <th className="px-5 py-2.5 sm:py-3 font-medium">Section</th>}
+                <th className="w-[17%] px-3 py-2.5 sm:py-3 md:px-5 font-medium">Name</th>
+                <th className="hidden w-[16%] px-3 py-2.5 sm:py-3 md:px-5 font-medium md:table-cell">Company</th>
+                <th className="hidden w-[13%] px-3 py-2.5 sm:py-3 md:table-cell md:px-5 font-medium">Phone</th>
+                <th className="hidden w-[19%] px-3 py-2.5 sm:py-3 md:px-5 font-medium lg:table-cell">Email</th>
+                <th className="hidden w-[17%] px-3 py-2.5 sm:py-3 md:table-cell md:px-5 font-medium">Tags</th>
+                <th className="hidden w-[16%] px-3 py-2.5 sm:py-3 md:px-5 font-medium lg:table-cell">Groups</th>
+                {showSections && <th className="hidden px-3 py-2.5 sm:py-3 md:px-5 font-medium lg:table-cell">Section</th>}
               </tr>
             </thead>
 
@@ -225,7 +225,7 @@ export function ContactsTable({
                 contacts.map((contact) => (
                   <ContactDetailsDialog key={contact.id} contact={contact}>
                     <tr className="cursor-pointer border-b last:border-b-0 hover:bg-muted/20">
-                      <td className="px-5 py-2.5 sm:py-4">
+                      <td className="px-3 py-2.5 sm:py-4 md:px-5">
                         <input
                           type="checkbox"
                           checked={selectedIds.has(contact.id)}
@@ -236,13 +236,13 @@ export function ContactsTable({
                           className="size-4 cursor-pointer accent-primary"
                         />
                       </td>
-                      <td className="px-5 py-2.5 sm:py-4 font-medium">
+                      <td className="px-3 py-2.5 sm:py-4 md:px-5 font-medium">
                         <span className="inline-flex items-center gap-2">
                           {contact.name}
                           <UnreadBadge count={unreadCounts[contact.id]} />
                         </span>
                         {contact.last_message_at && (
-                          <span className="mt-0.5 flex max-w-[16rem] items-center gap-2 text-xs font-normal text-muted-foreground">
+                          <span className="mt-0.5 flex max-w-[8rem] items-center md:max-w-[10rem] lg:max-w-[16rem] gap-2 text-xs font-normal text-muted-foreground">
                             <span className="truncate">
                               {contact.last_message_direction === "out" ? "You: " : ""}
                               {contact.last_message_text || "Attachment"}
@@ -250,19 +250,30 @@ export function ContactsTable({
                             <span className="shrink-0 opacity-70">{formatChatTime(contact.last_message_at)}</span>
                           </span>
                         )}
+                        {/* Phones show phone and tags under the name, since those columns are hidden. */}
+                        <span className="mt-0.5 block text-xs font-normal text-muted-foreground md:hidden">{contact.phone}</span>
+                        {contact.tags?.length ? (
+                          <span className="mt-1 flex flex-wrap gap-1 md:hidden">
+                            {contact.tags.map((tag) => (
+                              <span key={tag} className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                                {tag}
+                              </span>
+                            ))}
+                          </span>
+                        ) : null}
                       </td>
-                      <td className="px-5 py-2.5 sm:py-4 text-muted-foreground">
+                      <td className="hidden px-3 py-2.5 sm:py-4 md:px-5 text-muted-foreground md:table-cell">
                         {contact.company ? <span className="text-foreground">{contact.company}</span> : "—"}
                       </td>
-                      <td className="px-5 py-2.5 sm:py-4">{contact.phone}</td>
-                      <td className="px-5 py-2.5 sm:py-4 text-muted-foreground">
+                      <td className="hidden px-3 py-2.5 sm:py-4 md:table-cell md:px-5">{contact.phone}</td>
+                      <td className="hidden px-3 py-2.5 sm:py-4 md:px-5 text-muted-foreground lg:table-cell">
                         {contact.email ? (
                           <span className="text-foreground">{contact.email}</span>
                         ) : (
                           "—"
                         )}
                       </td>
-                      <td className="px-5 py-2.5 sm:py-4">
+                      <td className="hidden px-3 py-2.5 sm:py-4 md:table-cell md:px-5">
                         {contact.tags?.length ? (
                           <div className="flex flex-wrap gap-1.5">
                             {contact.tags.map((tag) => (
@@ -278,7 +289,7 @@ export function ContactsTable({
                           <span className="text-muted-foreground">—</span>
                         )}
                       </td>
-                      <td className="px-5 py-2.5 sm:py-4">
+                      <td className="hidden px-3 py-2.5 sm:py-4 md:px-5 lg:table-cell">
                         {contact.contact_groups?.length ? (
                           <div className="flex flex-wrap gap-1.5">
                             {contact.contact_groups.map((contactGroup) => {
@@ -300,7 +311,7 @@ export function ContactsTable({
                         )}
                       </td>
                       {showSections && (
-                        <td className="whitespace-nowrap px-5 py-2.5 sm:py-4 text-muted-foreground">
+                        <td className="hidden whitespace-nowrap px-3 py-2.5 sm:py-4 md:px-5 text-muted-foreground lg:table-cell">
                           {(contact.section_id && sectionNames.get(contact.section_id)) || "—"}
                         </td>
                       )}

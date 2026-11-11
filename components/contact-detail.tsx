@@ -90,13 +90,13 @@ export function ContactDetail({
         </ContactDetailsDialog>
       </div>
 
-      <div className="mt-6 mb-8 grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-        <div className="space-y-4">
+      <div className="mt-6 mb-8 grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+        <div className="min-w-0 space-y-4">
           <ContactInfoCard contact={contact} isInvestor={isInvestor} section={section} />
 
           <ProspectScoreSection contactId={contact.id} initialScore={initialProspectScore} error={prospectScoreError} />
         </div>
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           <FollowUpsSection
             contactId={contact.id}
             isInvestor={isInvestor}

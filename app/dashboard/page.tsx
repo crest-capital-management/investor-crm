@@ -414,8 +414,8 @@ export default async function DashboardPage() {
             Overview of your investor pipeline and latest follow-ups.
           </p>
         </div>
-        <div className="mt-4 flex items-center gap-3 sm:mt-0">
-          <div className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-3 py-1.5 text-xs font-medium text-muted-foreground">
+        <div className="mt-4 flex flex-wrap items-center gap-2 sm:mt-0 sm:justify-end sm:gap-3">
+          <div className="flex shrink-0 items-center whitespace-nowrap gap-1.5 rounded-lg border border-border bg-muted/40 px-3 py-1.5 text-xs font-medium text-muted-foreground">
             <Calendar className="size-3.5" />
             <span>{bannerDate}</span>
           </div>

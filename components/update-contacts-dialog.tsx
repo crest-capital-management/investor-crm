@@ -318,7 +318,7 @@ export function UpdateContactsDialog() {
               <>
                 <div>
                   <p className="text-sm font-medium">What is in each column?</p>
-                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
                     {csv.headers.map((header, index) => (
                       <div key={`${header}-${index}`} className="flex items-center gap-2 rounded-md border p-2">
                         <div className="min-w-0 flex-1">
