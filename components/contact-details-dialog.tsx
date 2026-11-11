@@ -421,6 +421,25 @@ export function ContactDetailsDialog({
                       ))}
                     </SelectContent>
                   </Select>
+                  {currentContact.tags?.length ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {currentContact.tags.map((contactTag) => (
+                        <span key={contactTag} className="inline-flex items-center gap-1 rounded-full bg-muted py-1 pl-2.5 pr-1.5 text-xs font-medium text-muted-foreground">
+                          {contactTag}
+                          <button
+                            type="button"
+                            onClick={() => setTagToRemove(contactTag)}
+                            disabled={removingTag !== null}
+                            aria-label={`Remove tag ${contactTag}`}
+                            title="Remove this tag"
+                            className="rounded-full p-0.5 hover:bg-foreground/10 hover:text-foreground disabled:opacity-50"
+                          >
+                            <X className="size-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
 
                 <DateSavedPicker
