@@ -14,6 +14,7 @@ import {
   Tag as TagIcon,
   ChevronDown,
   MessageCircle,
+  CalendarClock,
 } from "lucide-react";
 import { useSidebar } from "@/components/sidebar-provider";
 import { TAG_OPTIONS } from "@/lib/tags";
@@ -35,6 +36,7 @@ const navItems = [
   { href: "/unread-messages", label: "Unread Messages", icon: MessageCircle },
   { href: "/groups", label: "Groups", icon: Folder },
   { href: "/investors", label: "Investors", icon: TrendingUp },
+  { href: "/follow-ups", label: "Follow-ups", icon: CalendarClock },
   { href: "/broadcasts", label: "Broadcasts", icon: Megaphone },
   { href: "/templates", label: "Templates", icon: FileText },
 ];
