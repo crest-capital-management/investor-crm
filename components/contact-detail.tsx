@@ -45,8 +45,8 @@ type ContactDetailProps = {
 /**
  * The contact (or investor) detail screen. Each section manages its own data;
  * this component only lays them out:
- *   left:  details, prospect score, message draft, follow-ups
- *   right: portfolio updates, meeting notes, WhatsApp chat
+ *   left:  details, prospect score
+ *   right: follow-ups, portfolio updates, meeting notes, WhatsApp chat, message draft
  */
 export function ContactDetail({
   variant = "contact",
@@ -95,17 +95,15 @@ export function ContactDetail({
           <ContactInfoCard contact={contact} isInvestor={isInvestor} section={section} />
 
           <ProspectScoreSection contactId={contact.id} initialScore={initialProspectScore} error={prospectScoreError} />
-
-          <MessageDraftSection contactId={contact.id} contactName={contact.name} />
-
+        </div>
+        <div className="space-y-4">
           <FollowUpsSection
             contactId={contact.id}
             isInvestor={isInvestor}
             initialFollowUps={initialFollowUps}
             followUpsError={followUpsError}
           />
-        </div>
-        <div className="space-y-4">
+
           <PortfolioUpdatesSection
             contactId={contact.id}
             initialUpdates={initialPortfolioUpdates}
@@ -128,6 +126,8 @@ export function ContactDetail({
             initialSummaryGeneratedAt={initialWhatsAppSummaryGeneratedAt}
             unreadCount={initialUnreadCount}
           />
+
+          <MessageDraftSection contactId={contact.id} contactName={contact.name} />
         </div>
       </div>
     </div>
