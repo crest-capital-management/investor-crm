@@ -58,6 +58,7 @@ type WeekBucket = {
   end: Date;
   created: number;
   completed: number;
+  overdue: number;
 };
 
 function getEightWeekBuckets(now: Date): WeekBucket[] {
@@ -81,6 +82,7 @@ function getEightWeekBuckets(now: Date): WeekBucket[] {
       end: safeEnd,
       created: 0,
       completed: 0,
+      overdue: 0,
     });
   }
   return buckets;
@@ -153,7 +155,7 @@ export default async function DashboardPage() {
   let contacts: ContactItem[] = [];
   let pendingFollowUps: FollowUpRecord[] = [];
   let interactions: InteractionRecord[] = [];
-  let createdTrend: Array<{ id: string; created_at: string }> = [];
+  let createdTrend: Array<{ id: string; created_at: string; is_done: boolean; due_date: string }> = [];
   let completedTrend: Array<{ id: string; created_at: string }> = [];
   let allInteractions: Array<{ contact_id: string; created_at: string }> = [];
   let pendingCount = 0;
@@ -186,8 +188,8 @@ export default async function DashboardPage() {
          order by created_at desc
          limit 8`,
       ),
-      db.query<{ id: string; created_at: string }>(
-        `select id, created_at from public.follow_ups
+      db.query<{ id: string; created_at: string; is_done: boolean; due_date: string }>(
+        `select id, created_at, is_done, due_date::text as due_date from public.follow_ups
          where deleted_at is null and created_at >= $1`,
         [eightWeeksAgoIso],
       ),
@@ -260,6 +262,7 @@ export default async function DashboardPage() {
   const summaryCards = [
     {
       label: "Total Contacts",
+      href: "/contacts",
       value: totalContacts,
       subtext: "In CRM database",
       icon: Users,
@@ -267,6 +270,7 @@ export default async function DashboardPage() {
     },
     {
       label: "Investors",
+      href: "/investors",
       value: investorCount,
       subtext: `${totalContacts ? Math.round((investorCount / totalContacts) * 100) : 0}% of contact base`,
       icon: TrendingUp,
@@ -274,6 +278,7 @@ export default async function DashboardPage() {
     },
     {
       label: "Pending Follow-ups",
+      href: "/follow-ups?status=pending",
       value: pendingCount,
       subtext: "Awaiting completion",
       icon: Clock,
@@ -281,6 +286,7 @@ export default async function DashboardPage() {
     },
     {
       label: "Overdue Follow-ups",
+      href: "/follow-ups?status=overdue",
       value: overdueCount,
       subtext: overdueCount > 0 ? "Requires attention" : "All caught up",
       icon: AlertCircle,
@@ -288,6 +294,7 @@ export default async function DashboardPage() {
     },
     {
       label: "Recent Interactions",
+      href: "/contacts",
       value: recentInteractionsCount,
       subtext: "Last 30 days",
       icon: MessageSquare,
@@ -307,6 +314,7 @@ export default async function DashboardPage() {
     for (const b of weekBuckets) {
       if (time >= b.start.getTime() && time < b.end.getTime()) {
         b.created++;
+        if (!item.is_done && String(item.due_date).slice(0, 10) < todayStr) b.overdue++;
         break;
       }
     }
@@ -326,6 +334,7 @@ export default async function DashboardPage() {
     week: b.label,
     created: b.created,
     completed: b.completed,
+    overdue: b.overdue,
   }));
 
   // --- Analytics: Widget 2: Tag Distribution ---
@@ -436,12 +445,22 @@ export default async function DashboardPage() {
                 <span className="text-xs font-medium text-muted-foreground">
                   {card.label}
                 </span>
-                <Icon
-                  className={cn(
-                    "h-4 w-4 text-muted-foreground",
-                    card.highlight && "text-destructive"
-                  )}
-                />
+                <div className="flex items-center gap-2">
+                  <Icon
+                    className={cn(
+                      "h-4 w-4 text-muted-foreground",
+                      card.highlight && "text-destructive"
+                    )}
+                  />
+                  <Link
+                    href={card.href}
+                    aria-label={`Open ${card.label}`}
+                    title={`Open ${card.label}`}
+                    className="rounded-md p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  >
+                    <ArrowUpRight className="h-4 w-4" />
+                  </Link>
+                </div>
               </div>
               <div className="mt-2">
                 <p

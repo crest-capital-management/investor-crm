@@ -249,7 +249,8 @@ export function FollowUpsSection({
               {followUps.map((followUp) => (
                 <div
                   key={followUp.id}
-                  className="flex flex-col gap-2 border-b pb-4 last:border-b-0 last:pb-0 sm:flex-row sm:items-start sm:justify-between"
+                  id={`followup-${followUp.id}`}
+                  className="scroll-mt-24 target:rounded-md target:bg-accent/40 flex flex-col gap-2 border-b pb-4 last:border-b-0 last:pb-0 sm:flex-row sm:items-start sm:justify-between"
                 >
                   <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex items-center gap-2">

@@ -35,6 +35,7 @@ export type FollowUpTrendPoint = {
   week: string;
   created: number;
   completed: number;
+  overdue: number;
 };
 
 export type TagDistributionPoint = {
@@ -110,7 +111,7 @@ export function FollowUpTrendChart({ data }: { data: FollowUpTrendPoint[] }) {
     return <div className="h-64 w-full animate-pulse rounded-lg bg-muted/20" />;
   }
 
-  const hasData = data.some((d) => d.created > 0 || d.completed > 0);
+  const hasData = data.some((d) => d.created > 0 || d.completed > 0 || d.overdue > 0);
 
   return (
     <div className="flex h-full flex-col">
@@ -177,6 +178,13 @@ export function FollowUpTrendChart({ data }: { data: FollowUpTrendPoint[] }) {
                   dataKey="completed"
                   name="Completed"
                   fill="#10b981"
+                  radius={[4, 4, 0, 0]}
+                  maxBarSize={22}
+                />
+                <Bar
+                  dataKey="overdue"
+                  name="Overdue"
+                  fill="#ef4444"
                   radius={[4, 4, 0, 0]}
                   maxBarSize={22}
                 />
