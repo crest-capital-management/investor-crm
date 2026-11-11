@@ -143,9 +143,19 @@ export function ContactDetailsDialog({
     setNotes(contact.notes ?? "");
   }
 
+  // When the contact changes elsewhere (e.g. edited on its own page, then the list
+  // refreshes), pull in the new values so this dialog never shows stale tags.
+  // Skipped while editing so a refresh can't wipe what the user is typing.
+  const [syncedContact, setSyncedContact] = useState(contact);
+  if (contact !== syncedContact) {
+    setSyncedContact(contact);
+    if (!editing) loadContact();
+  }
+
   function handleOpenChange(next: boolean) {
     setOpen(next);
     if (next) {
+      loadContact();
       setEditing(startInEditMode);
     } else {
       setEditing(false);
@@ -189,6 +199,7 @@ export function ContactDetailsDialog({
       return;
     }
     setCurrentContact((existing) => ({ ...existing, tags: result.tags ?? existing.tags }));
+    setTag((result.tags ?? currentContact.tags)?.[0] ?? "");
     setSelectedTagToAdd("");
     setTagDialogOpen(false);
     toast("Tag added successfully");
@@ -205,6 +216,7 @@ export function ContactDetailsDialog({
       return;
     }
     setCurrentContact((existing) => ({ ...existing, tags: result.tags ?? existing.tags }));
+    setTag((result.tags ?? currentContact.tags)?.[0] ?? "");
     toast("Tag removed");
     router.refresh();
   }

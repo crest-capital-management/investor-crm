@@ -14,6 +14,7 @@ export const TAG_OPTIONS: string[] = [
   "GRI / Real Estate",
   "Friends",
   "Family Office",
+  "Existing Distribution Investor",
 ];
 
 // Contacts with either of these tags are the ones shown on the Investors page.
@@ -42,4 +43,5 @@ export const TAG_COLORS: Record<string, string> = {
   "GRI / Real Estate": "#22c55e",
   "Friends": "#eab308",
   "Family Office": "#f43f5e",
+  "Existing Distribution Investor": "#14b8a6",
 };
