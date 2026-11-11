@@ -42,6 +42,7 @@ import { downloadCsv } from "@/lib/csv";
 import { isValidDate, isValidEmail } from "@/lib/validate";
 import { parseTagCell } from "@/lib/tag-match";
 import type { ContactSection } from "@/lib/section-filter";
+import { SheetPicker } from "@/components/sheet-picker";
 
 type ContactField = keyof ImportContactRow;
 type Mapping = Record<number, ContactField | "skip">;
@@ -99,6 +100,9 @@ export function ImportContactsDialog({
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [csv, setCsv] = useState<CsvData | null>(null);
+  // For Excel files with several sheets: all sheet names, and the one being used.
+  const [sheetNames, setSheetNames] = useState<string[]>([]);
+  const [sheet, setSheet] = useState("");
   const [mapping, setMapping] = useState<Mapping>({});
   const [error, setError] = useState<string | null>(null);
   const [parsing, setParsing] = useState(false);
@@ -142,6 +146,8 @@ export function ImportContactsDialog({
   function resetState() {
     setSelectedFile(null);
     setCsv(null);
+    setSheetNames([]);
+    setSheet("");
     setMapping({});
     setError(null);
     setParsing(false);
@@ -210,13 +216,18 @@ export function ImportContactsDialog({
 
     setSelectedFile(file);
     setCsv(null);
+    setSheetNames([]);
+    setSheet("");
     setMapping({});
     setError(null);
     setParsing(true);
     try {
-      const parsedCsv = isCsv
-        ? parseCsv(await file.text())
-        : await parseExcelOnServer(file);
+      const parsedExcel = isCsv ? null : await parseExcelOnServer(file);
+      const parsedCsv: CsvData = parsedExcel ?? parseCsv(await file.text());
+      if (parsedExcel) {
+        setSheetNames(parsedExcel.sheetNames);
+        setSheet(parsedExcel.sheet);
+      }
       setCsv(parsedCsv);
       setMapping(detectInitialMapping(parsedCsv.headers));
       setWorkspaceOpen(true);
@@ -229,10 +240,29 @@ export function ImportContactsDialog({
     }
   }
 
-  async function parseExcelOnServer(file: File): Promise<CsvData> {
-    const result = await parseExcelFile(file);
+  async function parseExcelOnServer(file: File, sheetName?: string) {
+    const result = await parseExcelFile(file, sheetName);
     if ("error" in result) throw new Error(result.error);
     return result;
+  }
+
+  /** Reads a different sheet of the same Excel file and starts the column mapping again. */
+  async function changeSheet(nextSheet: string) {
+    if (!selectedFile) return;
+    setParsing(true);
+    setError(null);
+    try {
+      const parsed = await parseExcelOnServer(selectedFile, nextSheet);
+      setSheetNames(parsed.sheetNames);
+      setSheet(parsed.sheet);
+      setCsv(parsed);
+      setMapping(detectInitialMapping(parsed.headers));
+      setRowFilter("all");
+    } catch (changeError) {
+      toast(changeError instanceof Error ? changeError.message : "The sheet could not be read.", "error");
+    } finally {
+      setParsing(false);
+    }
   }
 
   async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
@@ -435,8 +465,13 @@ export function ImportContactsDialog({
             <div>
               <h1 className="text-2xl font-semibold">Import Contacts</h1>
               <p className="mt-1 text-sm text-muted-foreground">
-                {importSummary ? "Import complete." : "Review your CSV and map columns before importing."}
+                {importSummary ? "Import complete." : "Review your file and map columns before importing."}
               </p>
+              {!importSummary && (
+                <div className="mt-3">
+                  <SheetPicker sheetNames={sheetNames} value={sheet} onChange={changeSheet} disabled={parsing || importing} />
+                </div>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {importSummary ? (

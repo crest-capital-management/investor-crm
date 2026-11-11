@@ -1165,7 +1165,7 @@ export type ParseExcelFileResult = ParsedSpreadsheet | { error: string };
  * { headers, rows } shape the client already uses for CSV, so it can reuse
  * the existing column-mapping and validation UI.
  */
-export async function parseExcelFile(file: File): Promise<ParseExcelFileResult> {
+export async function parseExcelFile(file: File, sheetName?: string): Promise<ParseExcelFileResult> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
 
@@ -1176,7 +1176,7 @@ export async function parseExcelFile(file: File): Promise<ParseExcelFileResult> 
 
   try {
     const buffer = Buffer.from(await file.arrayBuffer());
-    return await parseExcelBuffer(buffer);
+    return await parseExcelBuffer(buffer, sheetName);
   } catch (err: unknown) {
     return {
       error: err instanceof Error ? err.message : "The Excel file could not be read.",

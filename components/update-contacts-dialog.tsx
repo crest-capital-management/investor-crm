@@ -29,6 +29,7 @@ import { parseCsv, type CsvData } from "@/lib/parse-csv";
 import { downloadCsv } from "@/lib/csv";
 import { suggestTag, matchTag, splitTagCell } from "@/lib/tag-match";
 import { TAG_OPTIONS } from "@/lib/tags";
+import { SheetPicker } from "@/components/sheet-picker";
 
 type Field = keyof ContactUpdateRow;
 type Mapping = Record<number, Field | "skip">;
@@ -78,6 +79,10 @@ export function UpdateContactsDialog() {
   const [open, setOpen] = useState(false);
   const [csv, setCsv] = useState<CsvData | null>(null);
   const [fileName, setFileName] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  // For Excel files with several sheets: all sheet names, and the one being used.
+  const [sheetNames, setSheetNames] = useState<string[]>([]);
+  const [sheet, setSheet] = useState("");
   const [mapping, setMapping] = useState<Mapping>({});
   const [tagMode, setTagMode] = useState<TagUpdateMode>("add");
   // What the user chose for tag text in the file that isn't an exact CRM tag: a CRM tag, or "skip".
@@ -93,6 +98,9 @@ export function UpdateContactsDialog() {
   function reset() {
     setCsv(null);
     setFileName("");
+    setFile(null);
+    setSheetNames([]);
+    setSheet("");
     setMapping({});
     setTagMode("add");
     setTagChoices({});
@@ -105,7 +113,8 @@ export function UpdateContactsDialog() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  async function handleFile(file: File) {
+  async function handleFile(chosen: File, sheetName?: string) {
+    const file = chosen;
     const lower = file.name.toLowerCase();
     if (!lower.endsWith(".csv") && !lower.endsWith(".xlsx") && !lower.endsWith(".xls")) {
       setError("Please choose a CSV or Excel (.xlsx, .xls) file.");
@@ -119,10 +128,17 @@ export function UpdateContactsDialog() {
       if (lower.endsWith(".csv")) {
         data = parseCsv(await file.text());
       } else {
-        const parsed = await parseExcelFile(file);
+        const parsed = await parseExcelFile(file, sheetName);
         if ("error" in parsed) throw new Error(parsed.error);
         data = parsed;
+        setSheetNames(parsed.sheetNames);
+        setSheet(parsed.sheet);
       }
+      if (lower.endsWith(".csv")) {
+        setSheetNames([]);
+        setSheet("");
+      }
+      setFile(file);
       setCsv(data);
       setFileName(file.name);
       setTagChoices({});
@@ -284,6 +300,16 @@ export function UpdateContactsDialog() {
                 <span className="ml-3 text-sm text-muted-foreground">
                   {fileName} · {csv?.rows.length ?? 0} rows
                 </span>
+              )}
+              {file && (
+                <div className="mt-3">
+                  <SheetPicker
+                    sheetNames={sheetNames}
+                    value={sheet}
+                    onChange={(next) => { setPreview(null); void handleFile(file, next); }}
+                    disabled={reading}
+                  />
+                </div>
               )}
               <p className="mt-1 text-xs text-muted-foreground">Up to 5 MB. The first row must be the column titles.</p>
             </div>
