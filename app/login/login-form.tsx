@@ -41,7 +41,7 @@ export default function LoginForm() {
   }
 
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-2">
+    <div className="grid min-h-full flex-1 grid-cols-1 grid-rows-[auto_1fr] lg:grid-cols-2 lg:grid-rows-1">
       {/* Left side: Premium branding */}
       <div className="flex flex-col justify-center border-b border-border bg-background px-6 py-4 sm:p-12 short:py-3 lg:border-b-0 lg:border-r lg:p-16 xl:p-24">
         <div className="mx-auto w-full max-w-md sm:space-y-8">
@@ -72,7 +72,7 @@ export default function LoginForm() {
       </div>
 
       {/* Right side: Login form */}
-      <div className="flex min-h-0 items-center justify-center bg-muted/40 px-4 py-6 short:py-2 sm:py-8">
+      <div className="flex items-center justify-center bg-muted/40 px-4 py-6 short:py-2 sm:py-8">
         <Card className="w-full max-w-md border-border/80 shadow-xs">
           <CardHeader className="space-y-1.5 pb-3 short:pb-1">
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground short:hidden">
