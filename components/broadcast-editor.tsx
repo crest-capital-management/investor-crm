@@ -42,11 +42,14 @@ import {
   type VariableMappingType,
 } from "@/lib/template-placeholders";
 import { cn } from "@/lib/utils";
+import type { ContactSection } from "@/lib/section-filter";
 
 export interface BroadcastEditorProps {
   mode: "create" | "edit";
   groups: GroupOption[];
   contacts: ContactOption[];
+  /** Contact sections (e.g. Nixon, Girish) to narrow the manual contact list. */
+  sections?: ContactSection[];
   templates?: TemplateOption[];
   existingBroadcast?: BroadcastData | null;
 }
@@ -61,6 +64,7 @@ export function BroadcastEditor({
   mode,
   groups = [],
   contacts = [],
+  sections = [],
   templates = [],
   existingBroadcast,
 }: BroadcastEditorProps) {
@@ -535,6 +539,7 @@ export function BroadcastEditor({
         selectedTags={selectedTags}
         onSelectedTagsChange={setSelectedTags}
         contacts={contacts}
+        sections={sections}
         selectedContactIds={selectedContactIds}
         onSelectedContactIdsChange={setSelectedContactIds}
         targetError={targetError}

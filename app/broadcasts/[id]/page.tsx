@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { requireAuthFast } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { loadBroadcastContactChoices } from "@/lib/sections";
 import { BroadcastEditor } from "@/components/broadcast-editor";
 import {
   BroadcastDeliveryResultsPanel,
@@ -14,7 +15,6 @@ import { getBroadcastDeliveryResults } from "@/lib/broadcast-delivery";
 import { RetryFailedBroadcastButton } from "@/components/retry-failed-broadcast-button";
 import type {
   GroupOption,
-  ContactOption,
   TemplateOption,
   BroadcastData,
 } from "@/app/broadcasts/actions";
@@ -32,16 +32,12 @@ export default async function BroadcastDetailPage({ params }: PageProps) {
   await requireAuthFast();
 
   // A failed lookup leaves that picker empty, as before; a failed broadcast lookup is "not found".
-  const [broadcastRow, groups, contacts, templates] = await Promise.all([
+  const [broadcastRow, groups, contactChoices, templates] = await Promise.all([
     db
       .maybeOne<BroadcastData>("select * from broadcasts where id = $1 and deleted_at is null", [id])
       .catch(() => null),
     db.query<GroupOption>("select id, name from groups order by name asc").catch(() => []),
-    db
-      .query<ContactOption>(
-        "select id, name, phone from contacts where deleted_at is null order by name asc, id asc",
-      )
-      .catch(() => []),
+    loadBroadcastContactChoices(),
     db
       .query<TemplateOption>(
         `select id, name, category, body_text, variables, approved_at, meta_template_id
@@ -135,7 +131,8 @@ export default async function BroadcastDetailPage({ params }: PageProps) {
           mode="edit"
           existingBroadcast={broadcast}
           groups={groups}
-          contacts={contacts}
+          contacts={contactChoices.contacts}
+          sections={contactChoices.sections}
           templates={templates}
         />
       </div>

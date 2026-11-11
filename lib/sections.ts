@@ -32,6 +32,32 @@ export async function loadSectionsInfo(options: { investorTags?: string[] } = {}
 }
 
 /**
+ * Contacts for the broadcast audience picker, each with its section, plus the
+ * sections to filter by. Falls back to no sections if they are not set up yet.
+ */
+export async function loadBroadcastContactChoices(): Promise<{
+  contacts: Array<{ id: string; name: string; phone: string; section_id: string | null }>;
+  sections: ContactSection[];
+}> {
+  try {
+    const [contacts, sections] = await Promise.all([
+      db.query<{ id: string; name: string; phone: string; section_id: string | null }>(
+        "select id, name, phone, section_id from contacts where deleted_at is null order by name asc, id asc",
+      ),
+      db.query<ContactSection>("select id, name from public.contact_sections order by sort_order, lower(name)"),
+    ]);
+    return { contacts, sections };
+  } catch {
+    const contacts = await db
+      .query<{ id: string; name: string; phone: string }>(
+        "select id, name, phone from contacts where deleted_at is null order by name asc, id asc",
+      )
+      .catch(() => []);
+    return { contacts: contacts.map((contact) => ({ ...contact, section_id: null })), sections: [] };
+  }
+}
+
+/**
  * Puts newly saved contacts into a section: the chosen one, or the first section
  * when none (or an unknown one) was chosen. Never fails the save it follows.
  */
