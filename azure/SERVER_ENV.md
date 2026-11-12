@@ -13,7 +13,7 @@ the app any more and can be removed from the server.
 | Name | Value |
 |---|---|
 | `AZURE_CONNECTION_STRING` | `postgresql://crest:<db password>@localhost:5432/crest_crm` (the CRM's own database, not `crest`) |
-| `CRM_OWNER_ID` | The owner's user id (Aditya has it; same value as in his `.env.local`) |
+| `CRM_OWNER_ID` | Optional now: only used as the id of the first login created by `azure/set-password.js`. Any account in `crm_users` can sign in. |
 | `WHATSAPP_ACCESS_TOKEN` | Same as Netlify |
 | `WHATSAPP_PHONE_NUMBER_ID` | Same as Netlify |
 | `WHATSAPP_BUSINESS_ACCOUNT_ID` | Same as Netlify |
