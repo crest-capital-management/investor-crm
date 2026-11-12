@@ -4,19 +4,12 @@ import { authOptions } from "@/lib/auth-options";
 import { db } from "@/lib/db";
 
 /**
- * The CRM has a single owner. Row-level security used to enforce that inside
- * the database (public.is_crm_owner()); the app now talks to PostgreSQL
- * directly, which bypasses those rules, so every guard below checks the signed-in
- * user's id against CRM_OWNER_ID itself. A missing setting denies everyone.
+ * Anyone who signed in with an account in public.crm_users is a CRM user, with
+ * full access for now (roles per user are planned). Logins are only created by
+ * someone with database access (azure/set-password.js) and the session is a
+ * signed cookie, so a valid session is enough: every guard below checks it.
+ * (The CRM used to accept only the account whose id was CRM_OWNER_ID.)
  */
-export function isOwnerId(userId: string | null | undefined): boolean {
-  const ownerId = process.env.CRM_OWNER_ID?.trim().toLowerCase();
-  if (!ownerId) {
-    console.error("[auth] CRM_OWNER_ID is not set, so nobody can be treated as the owner.");
-    return false;
-  }
-  return Boolean(userId) && userId!.toLowerCase() === ownerId;
-}
 
 export type CrmUser = {
   id: string;
@@ -27,14 +20,14 @@ export type CrmUser = {
 };
 
 /**
- * The signed-in owner's id, or null. The session is a signed cookie checked on
+ * The signed-in user's id, or null. The session is a signed cookie checked on
  * this server (no database or network call), so it is cheap enough for API
  * routes that are polled every few seconds.
  */
 export async function getOwnerSessionId(): Promise<string | null> {
   const session = await getServerSession(authOptions);
   const id = session?.user?.id;
-  return id && isOwnerId(id) ? id : null;
+  return id || null;
 }
 
 /**
