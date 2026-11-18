@@ -6,7 +6,6 @@ import {
   blindIndex,
   decryptField,
   decryptJson,
-  decryptRows,
   encryptField,
   encryptJson,
   isEncrypted,
@@ -51,75 +50,70 @@ console.log("Encryption self-test");
 
 await test("no keys loaded -> clear error", () => {
   setKeyring(null);
-  assert.throws(() => encryptField("x", "contacts.name"), /not loaded/);
+  assert.throws(() => encryptField("x"), /not loaded/);
 });
 
 setKeyring(ring1);
 
 await test("round trip (ASCII, Hindi, emoji, long text)", () => {
   for (const text of ["Rahul Sharma", "राहुल शर्मा", "👋 hello", "x".repeat(20000)]) {
-    const encrypted = encryptField(text, "contacts.name");
+    const encrypted = encryptField(text);
     assert.ok(isEncrypted(encrypted));
     assert.ok(encrypted.startsWith("enc:v1:k1:"));
-    assert.equal(decryptField(encrypted, "contacts.name"), text);
+    assert.equal(decryptField(encrypted), text);
   }
 });
 
 await test("random IV: same text encrypts differently each time", () => {
-  assert.notEqual(encryptField("same", "contacts.name"), encryptField("same", "contacts.name"));
+  assert.notEqual(encryptField("same"), encryptField("same"));
 });
 
 await test("null / undefined / empty pass through", () => {
-  assert.equal(encryptField(null, "contacts.name"), null);
-  assert.equal(encryptField(undefined, "contacts.name"), null);
-  assert.equal(encryptField("", "contacts.name"), "");
-  assert.equal(decryptField(null, "contacts.name"), null);
-  assert.equal(decryptField("", "contacts.name"), "");
+  assert.equal(encryptField(null), null);
+  assert.equal(encryptField(undefined), null);
+  assert.equal(encryptField(""), "");
+  assert.equal(decryptField(null), null);
+  assert.equal(decryptField(""), "");
 });
 
 await test("plain text (not migrated yet) is read as it is", () => {
-  assert.equal(decryptField("9876543210", "contacts.phone"), "9876543210");
-  assert.equal(decryptField("enc:v1:looks-like-but-is-not", "contacts.phone"), "enc:v1:looks-like-but-is-not");
+  assert.equal(decryptField("9876543210"), "9876543210");
+  assert.equal(decryptField("enc:v1:looks-like-but-is-not"), "enc:v1:looks-like-but-is-not");
 });
 
 await test("already-encrypted value is not encrypted twice", () => {
-  const once = encryptField("a", "contacts.name");
-  assert.equal(encryptField(once, "contacts.name"), once);
+  const once = encryptField("a");
+  assert.equal(encryptField(once), once);
 });
 
 await test("tampered ciphertext, tag or IV -> throws", () => {
-  const value = encryptField("secret note", "contacts.notes");
+  const value = encryptField("secret note");
   for (const part of [3, 4, 5]) {
-    assert.throws(() => decryptField(damage(value, part), "contacts.notes"), /could not be decrypted/);
+    assert.throws(() => decryptField(damage(value, part)), /could not be decrypted/);
   }
 });
 
-await test("value moved to another column -> throws", () => {
-  const value = encryptField("9876543210", "contacts.phone");
-  assert.throws(() => decryptField(value, "broadcast_recipients.phone"), /could not be decrypted/);
-});
-
 await test("unknown key id -> throws with the key name", () => {
-  const value = encryptField("x", "contacts.name").replace("enc:v1:k1:", "enc:v1:k9:");
-  assert.throws(() => decryptField(value, "contacts.name"), /needs key "k9"/);
+  const value = encryptField("x").replace("enc:v1:k1:", "enc:v1:k9:");
+  assert.throws(() => decryptField(value), /needs key "k9"/);
 });
 
 await test("rotation: old values still read, new values use the new key", () => {
-  const old = encryptField("before rotation", "contacts.name");
+  const old = encryptField("before rotation");
   setKeyring(ring2);
-  assert.equal(decryptField(old, "contacts.name"), "before rotation");
-  assert.ok(encryptField("after", "contacts.name").startsWith("enc:v1:k2:"));
+  assert.equal(decryptField(old), "before rotation");
+  assert.ok(encryptField("after").startsWith("enc:v1:k2:"));
   setKeyring(ring1);
 });
 
 await test("JSON round trip, and legacy jsonb / text[] pass through", () => {
   const analysis = { summary: "ok", holdings: [{ name: "HDFC", weight: 0.2 }] };
-  assert.deepEqual(decryptJson(encryptJson(analysis, "portfolio_updates.analysis"), "portfolio_updates.analysis"), analysis);
-  assert.deepEqual(decryptJson(encryptJson(["Investor", "HNI"], "contacts.tags"), "contacts.tags"), ["Investor", "HNI"]);
-  assert.deepEqual(decryptJson(analysis, "portfolio_updates.analysis"), analysis);
-  assert.deepEqual(decryptJson(["Investor"], "contacts.tags"), ["Investor"]);
-  assert.deepEqual(decryptJson('{"a":1}', "portfolio_updates.analysis"), { a: 1 });
-  assert.equal(encryptJson(null, "contacts.tags"), null);
+  assert.deepEqual(decryptJson(encryptJson(analysis)), analysis);
+  assert.deepEqual(decryptJson(encryptJson(["Investor", "HNI"])), ["Investor", "HNI"]);
+  assert.deepEqual(decryptJson(analysis), analysis);
+  assert.deepEqual(decryptJson(["Investor"]), ["Investor"]);
+  assert.deepEqual(decryptJson('{"a":1}'), { a: 1 });
+  assert.equal(encryptJson(null), null);
 });
 
 await test("blind index: deterministic, keyed, kinds kept apart", () => {
@@ -134,11 +128,6 @@ await test("blind index: deterministic, keyed, kinds kept apart", () => {
   setKeyring(otherRing);
   assert.notEqual(blindIndex("phone", "9876543210"), a);
   setKeyring(ring1);
-});
-
-await test("decryptRows decrypts only the listed columns", () => {
-  const rows = [{ id: "1", name: encryptField("Asha", "contacts.name"), phone: "plain" }];
-  assert.deepEqual(decryptRows(rows, "contacts", ["name"]), [{ id: "1", name: "Asha", phone: "plain" }]);
 });
 
 await test("key parsing rejects bad input", () => {

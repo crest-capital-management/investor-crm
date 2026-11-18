@@ -4,9 +4,10 @@
  * - AES-256-GCM with a random 12-byte IV per value. The stored text is
  *     enc:v1:<keyId>:<iv base64>:<tag base64>:<ciphertext base64>
  *   so old keys keep working after a rotation (keyId says which key to use).
- * - The table and column ("contacts.phone") are bound to each value as
- *   additional authenticated data, so a value copied into another column
- *   fails to decrypt instead of showing up in the wrong place.
+ * - Values are self-describing, so lib/db.ts decrypts every text value it
+ *   reads automatically: queries, joins and SQL functions need no changes to
+ *   read encrypted columns. Only writes call encryptField. For the same reason
+ *   a value is not bound to its column (a trigger or function may copy it).
  * - Values that are not in that format are returned as they are when read
  *   (rows not migrated yet, old backups), so code can switch to these
  *   helpers before the data is encrypted.
@@ -17,9 +18,6 @@
  * import this file directly with Node.
  */
 import crypto from "node:crypto";
-
-/** "table.column", e.g. "contacts.phone". */
-export type FieldName = `${string}.${string}`;
 
 export interface Keyring {
   /** Id of the key new values are encrypted with. */
@@ -104,23 +102,22 @@ export function keyFingerprint(key: Buffer): string {
 
 // ------------------------------------------------------------ text encryption
 
-function aad(field: FieldName): Buffer {
-  return Buffer.from(`v1|${field}`, "utf8");
-}
+// Fixed associated data: ties every value to this format and app.
+const AAD = Buffer.from("crest-crm|v1", "utf8");
 
 export function isEncrypted(value: unknown): value is string {
   return typeof value === "string" && CIPHERTEXT_PATTERN.test(value);
 }
 
 /** Encrypts a text value. null/undefined -> null, "" stays "", already-encrypted values are returned unchanged. */
-export function encryptField(value: string | null | undefined, field: FieldName): string | null {
+export function encryptField(value: string | null | undefined): string | null {
   if (value == null) return null;
   if (value === "" || isEncrypted(value)) return value;
 
   const { currentKeyId, fieldKeys } = keyring();
   const iv = crypto.randomBytes(IV_BYTES);
   const cipher = crypto.createCipheriv("aes-256-gcm", fieldKeys.get(currentKeyId)!, iv);
-  cipher.setAAD(aad(field));
+  cipher.setAAD(AAD);
   const ciphertext = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   return `enc:v1:${currentKeyId}:${iv.toString("base64")}:${tag.toString("base64")}:${ciphertext.toString("base64")}`;
@@ -128,34 +125,34 @@ export function encryptField(value: string | null | undefined, field: FieldName)
 
 /**
  * Decrypts a value written by encryptField. Plain text (not yet migrated) is
- * returned unchanged. Throws if the value was tampered with, belongs to
- * another column, or needs a key that is not loaded.
+ * returned unchanged. Throws if the value was tampered with or needs a key
+ * that is not loaded.
  */
-export function decryptField(value: string | null | undefined, field: FieldName): string | null {
+export function decryptField(value: string | null | undefined): string | null {
   if (value == null) return null;
   const match = typeof value === "string" ? CIPHERTEXT_PATTERN.exec(value) : null;
   if (!match) return value;
 
   const [, keyId, ivB64, tagB64, ctB64] = match;
   const key = keyring().fieldKeys.get(keyId);
-  if (!key) throw new Error(`A value in ${field} needs key "${keyId}", which is not loaded.`);
+  if (!key) throw new Error(`An encrypted value needs key "${keyId}", which is not loaded.`);
 
   try {
     const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(ivB64, "base64"));
-    decipher.setAAD(aad(field));
+    decipher.setAAD(AAD);
     decipher.setAuthTag(Buffer.from(tagB64, "base64"));
     return Buffer.concat([decipher.update(Buffer.from(ctB64, "base64")), decipher.final()]).toString("utf8");
   } catch {
-    throw new Error(`A value in ${field} could not be decrypted (wrong key, wrong column or damaged).`);
+    throw new Error("An encrypted value could not be decrypted (wrong key or damaged).");
   }
 }
 
 // ------------------------------------------------------------ JSON encryption
 
 /** Encrypts any JSON value (arrays, objects) as text. null/undefined -> null. */
-export function encryptJson(value: unknown, field: FieldName): string | null {
+export function encryptJson(value: unknown): string | null {
   if (value == null) return null;
-  return encryptField(JSON.stringify(value), field);
+  return encryptField(JSON.stringify(value));
 }
 
 /**
@@ -163,14 +160,14 @@ export function encryptJson(value: unknown, field: FieldName): string | null {
  * passed through: objects/arrays as the database returned them (jsonb, text[]),
  * strings parsed as JSON when possible.
  */
-export function decryptJson<T = unknown>(value: unknown, field: FieldName): T | null {
+export function decryptJson<T = unknown>(value: unknown): T | null {
   if (value == null) return null;
   if (typeof value !== "string") return value as T;
-  const text = isEncrypted(value) ? decryptField(value, field)! : value;
+  const text = isEncrypted(value) ? decryptField(value)! : value;
   try {
     return JSON.parse(text) as T;
   } catch {
-    if (isEncrypted(value)) throw new Error(`A value in ${field} decrypted to invalid JSON.`);
+    if (isEncrypted(value)) throw new Error("An encrypted value decrypted to invalid JSON.");
     return value as unknown as T;
   }
 }
@@ -190,20 +187,4 @@ export function blindIndex(kind: "phone" | "email", normalized: string | null | 
 export function normalizeEmail(email: string | null | undefined): string | null {
   const trimmed = email?.trim().toLowerCase();
   return trimmed ? trimmed : null;
-}
-
-// ---------------------------------------------------------------- row helpers
-
-/** Returns a copy of `row` with the listed text columns decrypted. */
-export function decryptRow<T extends Record<string, unknown>>(row: T, table: string, columns: readonly (keyof T & string)[]): T {
-  const copy: Record<string, unknown> = { ...row };
-  for (const column of columns) {
-    const value = copy[column];
-    if (typeof value === "string") copy[column] = decryptField(value, `${table}.${column}`);
-  }
-  return copy as T;
-}
-
-export function decryptRows<T extends Record<string, unknown>>(rows: readonly T[], table: string, columns: readonly (keyof T & string)[]): T[] {
-  return rows.map((row) => decryptRow(row, table, columns));
 }

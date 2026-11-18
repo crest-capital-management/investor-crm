@@ -18,7 +18,8 @@ export async function buildCrmBackup(): Promise<CrmBackup> {
   for (const { table, orderBy, optional } of CRM_TABLES) {
     try {
       // Table and column names come from the fixed list in lib/crm-tables.ts, never from user input.
-      data[table] = await db.query(`select * from public.${table} order by ${orderBy.join(", ")}`);
+      // rawQuery: encrypted columns stay encrypted in the backup file.
+      data[table] = await db.rawQuery(`select * from public.${table} order by ${orderBy.join(", ")}`);
     } catch (err) {
       if (!optional) throw err;
     }

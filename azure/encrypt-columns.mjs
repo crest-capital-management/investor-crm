@@ -154,9 +154,9 @@ async function processColumn(client, spec, { hashOnly, dryRun, batchSize }) {
       }
 
       for (const row of rows) {
-        const plain = decryptField(row.value, fieldOf(spec));
-        const encrypted = hashOnly || isEncrypted(row.value) ? row.value : encryptField(row.value, fieldOf(spec));
-        if (decryptField(encrypted, fieldOf(spec)) !== plain) {
+        const plain = decryptField(row.value);
+        const encrypted = hashOnly || isEncrypted(row.value) ? row.value : encryptField(row.value);
+        if (decryptField(encrypted) !== plain) {
           throw new Error(`Round-trip check failed in ${fieldOf(spec)} (row ${row.id}); nothing in this batch was saved.`);
         }
         const hash = hashColumn ? (row.hash ?? hashOf(spec, plain)) : null;
@@ -202,7 +202,7 @@ async function verifyColumn(client, spec, { hashOnly }) {
   for (const row of rows) {
     if (isEncrypted(row.value)) encrypted += 1;
     else plain += 1;
-    const value = decryptField(row.value, fieldOf(spec)); // throws on a damaged value
+    const value = decryptField(row.value); // throws on a damaged value
     if (spec.hash && row.hash !== hashOf(spec, value)) badHash += 1;
   }
   const problems = [];
