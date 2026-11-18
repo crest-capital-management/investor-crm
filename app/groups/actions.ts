@@ -9,6 +9,7 @@ import {
   type GroupContactRelation,
 } from "@/lib/group-members";
 import { escapeLike, ilikeAny } from "@/lib/sql";
+import { hasInvalidId, INVALID_ID_ERROR } from "@/lib/validate";
 
 function validateName(value: string) {
   const name = value.trim();
@@ -56,6 +57,7 @@ async function groupExists(groupId: string) {
 export async function addGroup(name: string, contactIds: string[]) {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(contactIds)) return { error: INVALID_ID_ERROR };
 
   const trimmedName = String(name ?? "").trim();
   const validationError = validateName(trimmedName);
@@ -111,6 +113,7 @@ export async function addGroup(name: string, contactIds: string[]) {
 export async function updateGroup(id: string, formData: FormData) {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(id)) return { error: INVALID_ID_ERROR };
 
   const name = String(formData.get("name") ?? "").trim();
   const validationError = validateName(name);
@@ -134,6 +137,7 @@ export async function updateGroup(id: string, formData: FormData) {
 export async function deleteGroup(id: string) {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(id)) return { error: INVALID_ID_ERROR };
 
   try {
     await db.tx(async (tx) => {
@@ -152,6 +156,7 @@ export async function deleteGroup(id: string) {
 export async function removeContactFromGroup(groupId: string, contactId: string) {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(groupId, contactId)) return { error: INVALID_ID_ERROR };
 
   if (!groupId.trim() || !contactId.trim()) {
     return { error: "The group membership could not be found." };
@@ -202,6 +207,7 @@ export async function removeContactFromGroup(groupId: string, contactId: string)
 export async function removeContactsFromGroup(groupId: string, contactIds: string[]) {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(groupId, contactIds)) return { error: INVALID_ID_ERROR };
 
   const normalizedContactIds = [
     ...new Set(contactIds.filter((id) => typeof id === "string" && id.trim())),
@@ -266,6 +272,7 @@ export async function removeContactsFromGroup(groupId: string, contactIds: strin
 export async function deleteGroups(ids: string[]) {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(ids)) return { error: INVALID_ID_ERROR };
 
   const groupIds = [
     ...new Set(ids.filter((id) => typeof id === "string" && id.trim())),
@@ -310,6 +317,7 @@ export type GroupContactOption = {
 export async function getGroupContactOptions(groupId: string, search = "") {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(groupId)) return { error: INVALID_ID_ERROR };
 
   if (!groupId.trim()) return { error: "The group could not be found." };
 
@@ -391,6 +399,7 @@ export async function searchContactsForNewGroup(search = "") {
 export async function addContactsToGroup(groupId: string, contactIds: string[]) {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(groupId, contactIds)) return { error: INVALID_ID_ERROR };
 
   const normalizedContactIds = [
     ...new Set(contactIds.filter((id) => typeof id === "string" && id.trim())),

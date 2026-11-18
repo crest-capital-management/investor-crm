@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { requireAuthFast } from "@/lib/auth";
+import { isUuid } from "@/lib/validate";
 import { db } from "@/lib/db";
 import { loadBroadcastContactChoices } from "@/lib/sections";
 import { BroadcastEditor } from "@/components/broadcast-editor";
@@ -30,6 +31,7 @@ interface PageProps {
 export default async function BroadcastDetailPage({ params }: PageProps) {
   const { id } = await params;
   await requireAuthFast();
+  if (!isUuid(id)) notFound();
 
   // A failed lookup leaves that picker empty, as before; a failed broadcast lookup is "not found".
   const [broadcastRow, groups, contactChoices, templates] = await Promise.all([

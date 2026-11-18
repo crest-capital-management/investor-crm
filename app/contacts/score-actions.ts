@@ -12,6 +12,7 @@ import {
   PROSPECT_SCORE_COLUMNS,
   type ProspectScore,
 } from "@/lib/prospect-score-types";
+import { hasInvalidId, INVALID_ID_ERROR } from "@/lib/validate";
 
 function revalidateContact(contactId: string) {
   revalidatePath("/contacts");
@@ -26,6 +27,7 @@ export async function suggestProspectScore(
 ): Promise<{ score: ProspectScore } | { error: string }> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(contactId)) return { error: INVALID_ID_ERROR };
 
   const id = contactId.trim();
   let contact: ScoringInput["contact"] | null;
@@ -92,6 +94,7 @@ export async function setManualScore(
 ): Promise<{ score: ProspectScore } | { error: string }> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(contactId)) return { error: INVALID_ID_ERROR };
 
   if (!Number.isInteger(score) || score < 1 || score > 5) return { error: "Choose a score from 1 to 5." };
   const cleanReason = reason.trim();
@@ -123,6 +126,7 @@ export async function clearManualScore(
 ): Promise<{ score: ProspectScore } | { error: string }> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(contactId)) return { error: INVALID_ID_ERROR };
 
   const id = contactId.trim();
   let saved: ProspectScore;

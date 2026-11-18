@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { requireAuthFast } from "@/lib/auth";
+import { isUuid } from "@/lib/validate";
 import { loadContactDetail } from "@/lib/contact-queries";
 import { ContactDetail } from "@/components/contact-detail";
 
@@ -15,6 +16,7 @@ export default async function ContactDetailPage({
 }) {
   const { id } = await params;
   await requireAuthFast();
+  if (!isUuid(id)) notFound();
 
   const data = await loadContactDetail(id);
   if (!data) notFound();

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { requireAuthFast } from "@/lib/auth";
+import { isUuid } from "@/lib/validate";
 import { db } from "@/lib/db";
 import { TemplateEditor } from "@/components/template-editor";
 import type { TemplateData } from "@/app/templates/actions";
@@ -18,6 +19,7 @@ interface PageProps {
 export default async function TemplateDetailPage({ params }: PageProps) {
   const { id } = await params;
   await requireAuthFast();
+  if (!isUuid(id)) notFound();
 
   let typedTemplate: TemplateData | null;
   try {

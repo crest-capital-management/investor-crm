@@ -27,7 +27,7 @@ import { linkUnmatchedMessages } from "@/lib/link-messages";
 import { insertOutboundMessage, type SavedMessage } from "@/lib/message-status";
 import { assignNewContactsToSection, sectionNameForPhone } from "@/lib/sections";
 import { extractPlaceholders, fillPlaceholders } from "@/lib/template-placeholders";
-import { isValidDate, isValidEmail } from "@/lib/validate";
+import { isValidDate, isValidEmail, hasInvalidId, INVALID_ID_ERROR } from "@/lib/validate";
 
 // Excel files are read into memory on the server, so keep uploads small (the request size cap is serverActions.bodySizeLimit in next.config.ts).
 const MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024;
@@ -126,6 +126,7 @@ export async function addContact(formData: FormData) {
 export async function updateContact(id: string, formData: FormData) {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(id)) return { error: INVALID_ID_ERROR };
 
   const name = String(formData.get("name") ?? "").trim();
   const phone = normalizePhone(String(formData.get("phone") ?? ""));
@@ -234,6 +235,7 @@ async function contactExists(id: string): Promise<boolean> {
 export async function addTagToContact(id: string, tag: string) {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(id)) return { error: INVALID_ID_ERROR };
 
   const normalizedTag = tag.trim();
   if (!id.trim()) return { error: "The contact could not be found." };
@@ -262,6 +264,7 @@ export async function addTagToContact(id: string, tag: string) {
 export async function removeTagFromContact(id: string, tag: string) {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(id)) return { error: INVALID_ID_ERROR };
 
   const normalizedTag = tag.trim();
   if (!id.trim() || !normalizedTag) return { error: "The contact could not be found." };
@@ -289,6 +292,7 @@ export async function removeTagFromContact(id: string, tag: string) {
 export async function addMeetingNote(contactId: string, note: string) {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(contactId)) return { error: INVALID_ID_ERROR };
 
   const normalizedContactId = contactId.trim();
   const normalizedNote = note.trim();
@@ -330,6 +334,7 @@ export async function transcribeVoiceNote(
 ): Promise<TranscribeVoiceNoteResult> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(contactId)) return { error: INVALID_ID_ERROR };
 
   const normalizedContactId = contactId.trim();
   if (!normalizedContactId) return { error: "The contact could not be found." };
@@ -370,6 +375,7 @@ export type MeetingNote = {
 export async function getMeetingNotes(contactId: string) {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(contactId)) return { error: INVALID_ID_ERROR };
 
   const normalizedContactId = contactId.trim();
   if (!normalizedContactId) return { error: "The contact could not be found." };
@@ -406,6 +412,7 @@ export async function sendWhatsAppReply(
 ): Promise<SendWhatsAppReplyResult> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(contactId)) return { error: INVALID_ID_ERROR };
 
   const normalizedContactId = contactId.trim();
   const normalizedMessage = message.trim();
@@ -464,6 +471,7 @@ export async function sendWhatsAppTemplateToContact(
 ): Promise<SendWhatsAppReplyResult> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(contactId, templateId)) return { error: INVALID_ID_ERROR };
 
   const contact = await attempt(() =>
     db.maybeOne<{ id: string; phone: string }>(
@@ -550,6 +558,7 @@ const MIME_BY_EXTENSION: Record<string, string> = {
 export async function resendFailedWhatsAppMessage(messageId: string): Promise<SendWhatsAppReplyResult> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(messageId)) return { error: INVALID_ID_ERROR };
 
   type OriginalRow = {
     id: string;
@@ -646,6 +655,7 @@ export async function prepareWhatsAppMediaUpload(
 ): Promise<{ path: string; uploadUrl: string } | { error: string }> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(contactId)) return { error: INVALID_ID_ERROR };
 
   const normalizedContactId = contactId.trim();
   if (!normalizedContactId) return { error: "The contact could not be found." };
@@ -683,6 +693,7 @@ export async function sendWhatsAppMediaFromStorage(
 ): Promise<SendWhatsAppMediaReplyResult> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(contactId)) return { error: INVALID_ID_ERROR };
 
   const normalizedContactId = contactId.trim();
   if (!normalizedContactId) return { error: "The contact could not be found." };
@@ -751,6 +762,7 @@ export async function updateMeetingNote(
 ) {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(noteId, contactId)) return { error: INVALID_ID_ERROR };
 
   const normalizedNoteId = noteId.trim();
   const normalizedContactId = contactId.trim();
@@ -796,6 +808,7 @@ export async function updateMeetingNote(
 export async function deleteMeetingNote(noteId: string, contactId: string) {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(noteId, contactId)) return { error: INVALID_ID_ERROR };
 
   const normalizedNoteId = noteId.trim();
   const normalizedContactId = contactId.trim();
@@ -842,6 +855,7 @@ export type ContactGroupOption = { id: string; name: string };
 export async function getContactGroupOptions(contactId: string) {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(contactId)) return { error: INVALID_ID_ERROR };
 
   if (!contactId.trim()) return { error: "The contact could not be found." };
 
@@ -863,6 +877,7 @@ export async function getContactGroupOptions(contactId: string) {
 export async function addContactToGroups(contactId: string, groupIds: string[]) {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(contactId, groupIds)) return { error: INVALID_ID_ERROR };
 
   const normalizedGroupIds = [...new Set(groupIds.filter((id) => typeof id === "string" && id.trim()))];
   if (!contactId.trim()) return { error: "The contact could not be found." };
@@ -922,6 +937,7 @@ export async function addContactToGroups(contactId: string, groupIds: string[]) 
 export async function deleteContact(id: string) {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(id)) return { error: INVALID_ID_ERROR };
 
   try {
     await db.execute("update public.contacts set deleted_at = $2 where id = $1", [id, new Date().toISOString()]);
@@ -936,6 +952,7 @@ export async function deleteContact(id: string) {
 export async function deleteContacts(ids: string[]) {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(ids)) return { error: INVALID_ID_ERROR };
 
   const contactIds = [...new Set(ids.filter(Boolean))];
 
@@ -1199,6 +1216,7 @@ export async function generateWhatsAppSummary(
 ): Promise<GenerateWhatsAppSummaryResult> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(contactId)) return { error: INVALID_ID_ERROR };
 
   const normalizedContactId = contactId.trim();
   if (!normalizedContactId) return { error: "The contact could not be found." };

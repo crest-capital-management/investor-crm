@@ -34,7 +34,7 @@ export async function GET(
   try {
     message = isUuid(id)
       ? await db.maybeOne<{ id: string; media_url: string | null }>(
-          "select id, media_url from whatsapp_messages where id = $1::uuid",
+          "select id, media_url from whatsapp_messages where id = $1::uuid and deleted_at is null",
           [id],
         )
       : null;
