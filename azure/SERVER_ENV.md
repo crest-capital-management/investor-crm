@@ -38,6 +38,14 @@ Not needed on the server: `DATABASE_SSL_NO_VERIFY` (the database is on the same 
 | `NEXTAUTH_URL` | `https://investor-crm.crest-capital.com` |
 | `AZURE_STORAGE_CONNECTION_STRING` | The storage account connection string with its access key (account `crestfinancialreports`) |
 
+## C. Encryption keys
+
+| Name | Value |
+|---|---|
+| `KEY_VAULT_URL` | `https://<vault-name>.vault.azure.net/`. The VM's managed identity needs *Key Vault Secrets User* on that vault. Setup, rotation and key safety: `azure/ENCRYPTION_KEYS.md`. Optional until the first data is encrypted; after that the app cannot read that data without it. |
+
+Never set `CRM_FIELD_KEYS` / `CRM_INDEX_KEY` on the server (development only; refused in production).
+
 ## Also needed on the server
 
 - **nginx** must pass `X-Forwarded-For` (`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`); the login lockout uses it.
