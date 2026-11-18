@@ -2,6 +2,8 @@
 
 import { requireActionAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { encryptJson } from "@/lib/encryption";
+import { withDecryptedAnalysis } from "@/lib/pii";
 import { analyzePortfolioUpdate, portfolioFileKind } from "@/lib/portfolio-analysis";
 import {
   MAX_PORTFOLIO_FILE_BYTES,
@@ -148,14 +150,16 @@ export async function analyzePortfolioUpdateById(
 
   let previousRow: { analysis: PortfolioAnalysis | null; title: string | null; file_name: string; created_at: string } | null;
   try {
-    previousRow = await db.maybeOne(
-      `select analysis, title, file_name, created_at
-         from public.portfolio_updates
-        where contact_id = $1 and analysis_status = 'done' and deleted_at is null and created_at < $2
-        order by created_at desc
-        limit 1`,
-      [row.contact_id, row.created_at],
-    );
+    previousRow = await db
+      .maybeOne<{ analysis: PortfolioAnalysis | null; title: string | null; file_name: string; created_at: string }>(
+        `select analysis, title, file_name, created_at
+           from public.portfolio_updates
+          where contact_id = $1 and analysis_status = 'done' and deleted_at is null and created_at < $2
+          order by created_at desc
+          limit 1`,
+        [row.contact_id, row.created_at],
+      )
+      .then((found) => found && withDecryptedAnalysis(found));
   } catch {
     previousRow = null;
   }
@@ -177,13 +181,14 @@ export async function analyzePortfolioUpdateById(
 
   let saved: PortfolioUpdate;
   try {
+    // Stored encrypted, as a JSON string inside the jsonb column.
     saved = analysis
       ? await db.one<PortfolioUpdate>(
           `update public.portfolio_updates
-              set analysis = $2::jsonb, analysis_status = 'done', analysis_error = null, as_of_date = $3
+              set analysis = to_jsonb($2::text), analysis_status = 'done', analysis_error = null, as_of_date = $3
             where id = $1
             returning ${PORTFOLIO_UPDATE_COLUMNS}`,
-          [row.id, JSON.stringify(analysis), asOfDate(analysis.aum.as_of)],
+          [row.id, encryptJson(analysis), asOfDate(analysis.aum.as_of)],
         )
       : await db.one<PortfolioUpdate>(
           `update public.portfolio_updates
@@ -196,7 +201,7 @@ export async function analyzePortfolioUpdateById(
     return { error: "The analysis could not be saved." };
   }
   if (failure) return { error: failure };
-  return { update: saved };
+  return { update: withDecryptedAnalysis(saved) };
 }
 
 function asOfDate(value: string | null): string | null {
@@ -232,7 +237,7 @@ export async function listPortfolioUpdates(
         order by created_at desc`,
       [contactId.trim()],
     );
-    return { updates };
+    return { updates: updates.map(withDecryptedAnalysis) };
   } catch {
     return { error: "Portfolio updates could not be loaded." };
   }

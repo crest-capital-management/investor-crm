@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { sendButtonAutoReply } from "@/lib/auto-reply";
 import crypto from "crypto";
 import { db, isUniqueViolation } from "@/lib/db";
+import { encryptField } from "@/lib/encryption";
+import { phoneHash, phoneMatch } from "@/lib/pii";
 import { safeEqual } from "@/lib/secure-compare";
 import { storeInboundWhatsAppMedia } from "@/lib/inbound-media";
 import { applyDeliveryStatus, describeDeliveryError } from "@/lib/message-status";
@@ -460,29 +462,22 @@ async function processSingleMessage({
   // Match contact by phone
   let contactId: string | null = null;
 
-  if (phone) {
-    const localPhone = normalizeToLocalPhone(String(phone));
-    const rawDigits = String(phone).replace(/\D/g, "");
-
-    const candidates = Array.from(
-      new Set([localPhone, rawDigits].filter(Boolean) as string[]),
-    );
-
-    if (candidates.length > 0) {
-      try {
-        const contact = await db.maybeOne<{ id: string }>(
-          "select id from contacts where deleted_at is null and phone = any($1::text[]) limit 1",
-          [candidates],
-        );
-        if (contact) contactId = contact.id;
-      } catch {
-        // A failed lookup leaves the message unlinked, as before.
-      }
+  if (phone && String(phone).replace(/\D/g, "")) {
+    try {
+      const params: unknown[] = [];
+      const contact = await db.maybeOne<{ id: string }>(
+        `select id from contacts where deleted_at is null and ${phoneMatch("", params, String(phone))} limit 1`,
+        params,
+      );
+      if (contact) contactId = contact.id;
+    } catch {
+      // A failed lookup leaves the message unlinked, as before.
     }
   }
 
   // Database-level deduplication. WhatsApp gives every message a unique ID, so
-  // that is the check. Only a message without an ID falls back to comparing content.
+  // that is the check. Only a message without an ID falls back to comparing
+  // content; the text is encrypted, so it is compared here after reading.
   try {
     if (messageId) {
       const sameId = await db.maybeOne<{ id: string }>(
@@ -491,16 +486,15 @@ async function processSingleMessage({
       );
       if (sameId) return; // already saved
     } else {
-      const existing = await db.maybeOne<{ id: string }>(
-        `select id from whatsapp_messages
+      const sameMoment = await db.query<{ message_text: string | null }>(
+        `select message_text from whatsapp_messages
           where direction = $1 and sent_at = $2::timestamptz and deleted_at is null
             and contact_id is not distinct from $3::uuid
-            and message_text is not distinct from $4::text
-            and media_url is not distinct from $5::text
-          limit 1`,
-        [direction, sentAt, contactId, messageText, mediaUrl],
+            and media_url is not distinct from $4::text
+          limit 20`,
+        [direction, sentAt, contactId, mediaUrl],
       );
-      if (existing) return; // already saved
+      if (sameMoment.some((saved) => (saved.message_text ?? null) === (messageText ?? null))) return; // already saved
     }
   } catch {
     // A failed duplicate check falls through to the insert, as before.
@@ -511,11 +505,12 @@ async function processSingleMessage({
   const row = {
     contact_id: contactId,
     direction,
-    message_text: messageText,
+    message_text: encryptField(messageText),
     media_url: mediaUrl,
     sent_at: sentAt,
     deleted_at: null,
-    phone: phone ? normalizeToLocalPhone(String(phone)) : null,
+    phone: phone ? encryptField(normalizeToLocalPhone(String(phone))) : null,
+    phone_hash: phone ? phoneHash(String(phone)) : null,
     profile_name: profileName?.trim() || null,
     wamid: messageId ?? null,
   };

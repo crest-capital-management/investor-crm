@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireActionAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { decryptJson } from "@/lib/encryption";
 import type { PortfolioAnalysis } from "@/lib/portfolio-types";
 import { scoreProspect, type ScoringInput } from "@/lib/prospect-scoring";
 import { loadContactHistory, type ContactHistory } from "@/lib/ai-context";
@@ -57,7 +58,7 @@ export async function suggestProspectScore(
         order by created_at desc limit 1`,
       [id],
     );
-    portfolio = row?.analysis ?? null;
+    portfolio = decryptJson<PortfolioAnalysis>(row?.analysis ?? null);
   } catch {
     portfolio = null;
   }

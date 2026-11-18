@@ -9,7 +9,9 @@ import { db } from "@/lib/db";
 import { PAGE_SIZE, getTotalPages, parsePage } from "@/lib/pagination";
 import { getUnreadCountsByContact } from "@/lib/unread";
 import { CONTACT_GROUPS_COLUMN } from "@/lib/contact-queries";
-import { ilikeAny, pageClause, param } from "@/lib/sql";
+import { pageClause, param } from "@/lib/sql";
+import { contactsMatching } from "@/lib/contact-filter";
+import { messagePreview } from "@/lib/pii";
 import { INVESTOR_TAGS } from "@/lib/tags";
 import { loadSectionsInfo } from "@/lib/sections";
 import { ALL_SECTIONS, parseSectionParam, sectionCondition, type SectionsInfo } from "@/lib/section-filter";
@@ -54,8 +56,12 @@ export default async function ContactsPage({
     const conditions = ["c.deleted_at is null"];
     const inSectionSql = sectionCondition(section, filterParams);
     if (inSectionSql) conditions.push(inSectionSql);
-    if (search) conditions.push(ilikeAny(["c.name", "c.phone", "c.email", "c.company"], search, filterParams));
     if (selectedTags.length > 0) conditions.push(`c.tags && ${param(filterParams, selectedTags)}::text[]`);
+    if (search) {
+      // Name and phone are encrypted: the search runs on the decrypted values, then filters by id.
+      const matches = await contactsMatching(conditions.join(" and "), filterParams, search);
+      conditions.push(`c.id = any(${param(filterParams, matches.map((row) => row.id))}::uuid[])`);
+    }
     const where = conditions.join(" and ");
 
     // The overview cards count the chosen section only.
@@ -99,7 +105,7 @@ export default async function ContactsPage({
         order by c.last_message_at desc nulls last, c.date_saved desc, c.id asc
         ${paging}`,
       pageParams,
-    );
+    ).then((rows) => rows.map((row) => ({ ...row, last_message_text: messagePreview(row.last_message_text) })));
   } catch (err) {
     loadError = err instanceof Error ? err.message : "Contacts could not be loaded.";
   }

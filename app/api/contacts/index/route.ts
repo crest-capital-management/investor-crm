@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
+import { messagePreview } from "@/lib/pii";
 import { getOwnerSessionId } from "@/lib/auth";
 import { CONTACT_GROUPS_COLUMN } from "@/lib/contact-queries";
 
@@ -25,7 +26,8 @@ export async function GET() {
     const contacts = await db.query<Record<string, unknown>>(
       `select ${COLUMNS}, ${CONTACT_GROUPS_COLUMN} from contacts c where c.deleted_at is null order by c.id asc`,
     );
-    return NextResponse.json({ contacts }, { headers: { "Cache-Control": "private, no-store" } });
+    const rows = contacts.map((contact) => ({ ...contact, last_message_text: messagePreview(contact.last_message_text) }));
+    return NextResponse.json({ contacts: rows }, { headers: { "Cache-Control": "private, no-store" } });
   } catch {
     return NextResponse.json({ error: "Contacts could not be loaded." }, { status: 500 });
   }

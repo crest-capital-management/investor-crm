@@ -1,6 +1,7 @@
 import type { QueryResultRow } from "pg";
 
 import { db } from "@/lib/db";
+import { withDecryptedAnalysis } from "@/lib/pii";
 import { PORTFOLIO_UPDATE_COLUMNS, type PortfolioUpdate } from "@/lib/portfolio-types";
 import { PROSPECT_SCORE_COLUMNS, type ProspectScore } from "@/lib/prospect-score-types";
 import { loadContactSection, type ContactSectionInfo } from "@/lib/sections";
@@ -115,7 +116,7 @@ export async function loadContactDetail(id: string): Promise<ContactDetailData |
     whatsAppMessagesError: messages.error ? "WhatsApp messages could not be loaded." : null,
     initialWhatsAppSummary: contact.whatsapp_summary ?? null,
     initialWhatsAppSummaryGeneratedAt: contact.whatsapp_summary_generated_at ?? null,
-    initialPortfolioUpdates: portfolioUpdates.error ? [] : portfolioUpdates.data,
+    initialPortfolioUpdates: portfolioUpdates.error ? [] : portfolioUpdates.data.map(withDecryptedAnalysis),
     portfolioUpdatesError: portfolioUpdates.error ? "Portfolio updates could not be loaded." : null,
     initialProspectScore: prospectScore.error || !score ? undefined : score,
     prospectScoreError: prospectScore.error ? "The prospect score could not be loaded." : null,

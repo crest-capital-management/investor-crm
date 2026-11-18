@@ -2,6 +2,8 @@
 
 import { requireActionAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { encryptField } from "@/lib/encryption";
+import { phoneHash, phoneMatch } from "@/lib/pii";
 import { isReplyWindowOpen } from "@/lib/reply-window";
 import { revalidatePath } from "next/cache";
 import { generateChatSummary } from "@/lib/contact-ai";
@@ -43,11 +45,12 @@ function normalizePhone(value: string) {
 }
 
 // Every path that writes contacts.phone (add, update, import) stores normalizePhone()
-// output, so duplicate checks can compare directly and use contacts_phone_idx.
+// output (encrypted) and its phone_hash, so duplicate checks compare hashes.
 async function isPhoneTaken(phone: string): Promise<boolean> {
+  const params: unknown[] = [];
   const row = await db.maybeOne<{ id: string }>(
-    "select id from public.contacts where phone = $1 and deleted_at is null limit 1",
-    [phone],
+    `select id from public.contacts where ${phoneMatch("", params, phone)} and deleted_at is null limit 1`,
+    params,
   );
   return row !== null;
 }
@@ -104,10 +107,10 @@ export async function addContact(formData: FormData) {
   let inserted: { id: string; phone: string };
   try {
     inserted = await db.one<{ id: string; phone: string }>(
-      `insert into public.contacts (name, phone, email, company, tags, date_saved, notes)
-       values ($1, $2, $3, $4, $5::text[], $6, $7)
+      `insert into public.contacts (name, phone, phone_hash, email, company, tags, date_saved, notes)
+       values ($1, $2, $8, $3, $4, $5::text[], $6, $7)
        returning id, phone`,
-      [name, phone, normalizedEmail, company || null, tags, dateSaved || null, notes || null],
+      [encryptField(name), encryptField(phone), normalizedEmail, company || null, tags, dateSaved || null, notes || null, phoneHash(phone)],
     );
   } catch (error) {
     console.error("[addContact] insert failed:", error instanceof Error ? error.message : error);
@@ -166,9 +169,10 @@ export async function updateContact(id: string, formData: FormData) {
 
   let duplicate: { id: string } | null;
   try {
+    const params: unknown[] = [id];
     duplicate = await db.maybeOne<{ id: string }>(
-      "select id from public.contacts where phone = $1 and id <> $2 and deleted_at is null limit 1",
-      [phone, id],
+      `select id from public.contacts where ${phoneMatch("", params, phone)} and id <> $1 and deleted_at is null limit 1`,
+      params,
     );
   } catch {
     return { error: "The contact could not be checked for duplicates." };
@@ -181,9 +185,9 @@ export async function updateContact(id: string, formData: FormData) {
   try {
     await db.execute(
       `update public.contacts
-          set name = $2, phone = $3, email = $4, company = $5, tags = $6::text[], date_saved = $7, notes = $8
+          set name = $2, phone = $3, phone_hash = $9, email = $4, company = $5, tags = $6::text[], date_saved = $7, notes = $8
         where id = $1`,
-      [id, name, phone, normalizedEmail, company || null, tags, dateSaved || null, notes || null],
+      [id, encryptField(name), encryptField(phone), normalizedEmail, company || null, tags, dateSaved || null, notes || null, phoneHash(phone)],
     );
   } catch {
     return { error: "The contact could not be updated." };
@@ -1078,8 +1082,9 @@ export async function importContacts(rowsRaw: string, sectionId?: string | null)
     // soft-deleted contacts both count as "already taken" phone numbers.
     const filePhones = [...new Set(validRows.map((row) => normalizePhone(row.phone)))];
     const taken = await db.query<{ phone: string }>(
-      "select phone from public.contacts where phone = any($1::text[])",
-      [filePhones],
+      `select phone from public.contacts
+        where phone_hash = any($1::text[]) or (phone_hash is null and phone = any($2::text[]))`,
+      [filePhones.map((phone) => phoneHash(phone)), filePhones],
     );
     existingPhones = new Set(taken.map((row) => String(row.phone)));
   } catch {
@@ -1128,8 +1133,9 @@ export async function importContacts(rowsRaw: string, sectionId?: string | null)
 
   for (let i = 0; i < rowsToInsert.length; i += IMPORT_INSERT_BATCH_SIZE) {
     const batch = rowsToInsert.slice(i, i + IMPORT_INSERT_BATCH_SIZE).map((row) => ({
-      name: row.name,
-      phone: normalizePhone(row.phone),
+      name: encryptField(row.name),
+      phone: encryptField(normalizePhone(row.phone)),
+      phone_hash: phoneHash(normalizePhone(row.phone)),
       email: row.email ? row.email.toLowerCase() : null,
       company: row.company || null,
       tags: row.tags,
@@ -1141,10 +1147,10 @@ export async function importContacts(rowsRaw: string, sectionId?: string | null)
     let insertedRows: Array<{ id: string; phone: string }> | null = null;
     try {
       insertedRows = await db.query<{ id: string; phone: string }>(
-        `insert into public.contacts (name, phone, email, company, tags, date_saved, notes)
-         select x.name, x.phone, x.email, x.company, x.tags, x.date_saved, x.notes
+        `insert into public.contacts (name, phone, phone_hash, email, company, tags, date_saved, notes)
+         select x.name, x.phone, x.phone_hash, x.email, x.company, x.tags, x.date_saved, x.notes
            from jsonb_to_recordset($1::jsonb) as x(
-             name text, phone text, email text, company text, tags text[], date_saved date, notes text
+             name text, phone text, phone_hash text, email text, company text, tags text[], date_saved date, notes text
            )
          returning id, phone`,
         [JSON.stringify(batch)],

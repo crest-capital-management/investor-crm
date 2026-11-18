@@ -311,10 +311,15 @@ begin
   if new.contact_id is not null and new.deleted_at is null then
     update public.contacts
     set last_message_at = new.sent_at,
-        last_message_text = left(
-          coalesce(nullif(btrim(new.message_text), ''),
-                   case when new.media_url is not null then 'Attachment' else '' end),
-          120),
+        -- Encrypted text is copied whole (cutting it would break it); the app
+        -- shortens the preview after decrypting (migrations/002).
+        last_message_text = case
+          when new.message_text like 'enc:v1:%' then new.message_text
+          else left(
+            coalesce(nullif(btrim(new.message_text), ''),
+                     case when new.media_url is not null then 'Attachment' else '' end),
+            120)
+        end,
         last_message_direction = new.direction
     where id = new.contact_id
       and (last_message_at is null or last_message_at <= new.sent_at);

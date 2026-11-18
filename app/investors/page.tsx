@@ -6,7 +6,8 @@ import type { InvestorTrackingRow } from "@/components/investor-tracking-table";
 import { INVESTOR_TAGS } from "@/lib/tags";
 import { PAGE_SIZE, getTotalPages, parsePage } from "@/lib/pagination";
 import { db } from "@/lib/db";
-import { ilikeAny, pageClause } from "@/lib/sql";
+import { param } from "@/lib/sql";
+import { contactsMatching, sortByRecentChatThenName } from "@/lib/contact-filter";
 import { getUnreadCountsByContact } from "@/lib/unread";
 import { CONTACT_GROUPS_COLUMN } from "@/lib/contact-queries";
 import { loadSectionsInfo } from "@/lib/sections";
@@ -55,35 +56,26 @@ export default async function InvestorsPage({
     let filter = "c.tags && $1::text[] and c.deleted_at is null";
     const inSectionSql = sectionCondition(section, filterParams);
     if (inSectionSql) filter += ` and ${inSectionSql}`;
-    if (search) {
-      filter += ` and ${ilikeAny(["c.name", "c.phone", "c.email", "c.company"], search, filterParams)}`;
-    }
+    // Name, phone (and later email, company) are encrypted, so searching and the
+    // A-Z part of the order happen here on the decrypted values, then one page is loaded by id.
+    const matching = sortByRecentChatThenName(await contactsMatching(filter, filterParams, search));
 
-    const { count } = await db.one<{ count: number }>(
-      `select count(*)::int as count from public.contacts c where ${filter}`,
-      filterParams,
-    );
-
-    totalCount = count;
+    totalCount = matching.length;
     // Clamp so a stale or hand-typed ?page=999 shows the last page instead of erroring.
     page = Math.min(requestedPage, getTotalPages(totalCount));
 
-    const loadContacts = (orderBy: string) => {
-      const params = [...filterParams];
-      return db.query<ContactRow>(
-        `select c.id, c.name, c.phone, c.email, c.company, c.tags, c.date_saved, c.notes,${sectionsInfo ? " c.section_id," : ""}
-           ${CONTACT_GROUPS_COLUMN}
-         from public.contacts c
-         where ${filter}
-         order by ${orderBy}
-         ${pageClause(params, page, PAGE_SIZE)}`,
-        params,
-      );
-    };
-
-    // Most recent chat first, like WhatsApp; then A to Z. "id" is a tie-breaker so
-    // rows don't shuffle between pages.
-    contacts = await loadContacts("c.last_message_at desc nulls last, c.name asc, c.id asc");
+    // Most recent chat first, like WhatsApp; then A to Z; "id" breaks ties so rows don't shuffle between pages.
+    const pageIds = matching.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((row) => row.id);
+    const params: unknown[] = [];
+    const ids = param(params, pageIds);
+    contacts = await db.query<ContactRow>(
+      `select c.id, c.name, c.phone, c.email, c.company, c.tags, c.date_saved, c.notes,${sectionsInfo ? " c.section_id," : ""}
+         ${CONTACT_GROUPS_COLUMN}
+       from public.contacts c
+       where c.id = any(${ids}::uuid[])
+       order by array_position(${ids}::uuid[], c.id)`,
+      params,
+    );
 
     const contactIds = contacts.map((contact) => contact.id);
 
