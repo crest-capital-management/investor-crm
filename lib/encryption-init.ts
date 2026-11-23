@@ -5,15 +5,16 @@ import { loadKeyring, verifyKeyFingerprints } from "@/lib/keys";
 /**
  * Loads the encryption keys once at server start (from instrumentation.ts)
  * and checks them against the database before any request is handled.
- * Wrong or unregistered keys stop the server; no keys configured only warns
- * for now (nothing is encrypted yet) and becomes required once data is.
+ * Missing, wrong or unregistered keys stop the server: personal data is
+ * written encrypted, so the app can't work without them.
  */
 export async function initEncryption(): Promise<void> {
   const keyring = await loadKeyring();
   if (!keyring) {
     setKeyring(null);
-    console.warn("[encryption] No encryption key configured (PII_ENCRYPTION_SECRET_KEY). Encrypted fields cannot be read or written.");
-    return;
+    throw new Error(
+      "No encryption key configured. Set PII_ENCRYPTION_SECRET_KEY (see azure/ENCRYPTION_KEYS.md).",
+    );
   }
 
   try {

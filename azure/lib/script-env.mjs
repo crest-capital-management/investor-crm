@@ -9,14 +9,41 @@ import pg from "pg";
 
 export const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
+export const LOCAL_HOSTS = ["localhost", "127.0.0.1", "::1"];
+
+/**
+ * Reads .env.local. With --local on the command line, the script works on the
+ * local test copy instead: LOCAL_DATABASE_URL (must be on this PC) replaces
+ * AZURE_CONNECTION_STRING. See azure/copy-to-local.mjs.
+ */
 export function loadEnv() {
   const file = path.join(root, ".env.local");
-  if (!fs.existsSync(file)) return;
-  for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
-    const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)$/);
-    if (!match || process.env[match[1]] !== undefined) continue;
-    process.env[match[1]] = match[2].trim().replace(/^['"]|['"]$/g, "");
+  if (fs.existsSync(file)) {
+    for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
+      const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)$/);
+      if (!match || process.env[match[1]] !== undefined) continue;
+      process.env[match[1]] = match[2].trim().replace(/^['"]|['"]$/g, "");
+    }
   }
+  if (isLocalRun()) {
+    process.env.AZURE_CONNECTION_STRING = localDatabaseUrl().toString();
+    delete process.env.DATABASE_URL;
+  }
+}
+
+export function isLocalRun() {
+  return process.argv.includes("--local");
+}
+
+/** LOCAL_DATABASE_URL from .env.local, refused unless it points at this PC. */
+export function localDatabaseUrl() {
+  const raw = process.env.LOCAL_DATABASE_URL;
+  if (!raw) {
+    throw new Error("LOCAL_DATABASE_URL is not set in .env.local (postgresql://postgres:<password>@localhost:5432/crest_crm_local).");
+  }
+  const url = new URL(raw);
+  if (!LOCAL_HOSTS.includes(url.hostname)) throw new Error("LOCAL_DATABASE_URL must point at this PC (localhost).");
+  return url;
 }
 
 export async function connect() {

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
+import { messagePreview } from "@/lib/pii";
 import { getOwnerSessionId } from "@/lib/auth";
 import { INVESTOR_TAGS } from "@/lib/tags";
 
@@ -52,6 +53,7 @@ export async function GET() {
 
     const rows = investors.map((investor) => ({
       ...investor,
+      last_message_text: messagePreview(investor.last_message_text),
       contact_groups: null,
       lastInteraction: lastInteraction.get(String(investor.id)) ?? null,
       nextFollowUp: nextFollowUp.get(String(investor.id)) ?? null,

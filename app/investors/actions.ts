@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireActionAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { encryptField } from "@/lib/encryption";
 import { generateFollowUpSuggestion } from "@/lib/contact-ai";
 import { todayAsISODate } from "@/lib/format";
 import { isValidDate, hasInvalidId, INVALID_ID_ERROR } from "@/lib/validate";
@@ -170,7 +171,7 @@ export async function addFollowUp(
   try {
     await db.execute(
       `insert into public.follow_ups (contact_id, due_date, message, is_done) values ($1, $2, $3, false)`,
-      [normalizedContactId, normalizedDueDate, normalizedMessage],
+      [normalizedContactId, normalizedDueDate, encryptField(normalizedMessage)],
     );
   } catch {
     return { error: "The follow-up could not be saved." };
@@ -271,7 +272,7 @@ export async function editFollowUp(
   try {
     await db.execute(
       `update public.follow_ups set due_date = $1, message = $2 where id = $3 and is_done = false`,
-      [normalizedDueDate, normalizedMessage, normalizedFollowUpId],
+      [normalizedDueDate, encryptField(normalizedMessage), normalizedFollowUpId],
     );
   } catch {
     return { error: "The follow-up could not be updated." };

@@ -1,4 +1,5 @@
 import { db, isUniqueViolation } from "@/lib/db";
+import { encryptField } from "@/lib/encryption";
 
 /** Delivery states in order; a message never moves backwards. */
 const STATUS_RANK: Record<string, number> = { sent: 1, delivered: 2, read: 3, failed: 4 };
@@ -73,7 +74,7 @@ export async function insertOutboundMessage(
   const base = {
     contact_id: row.contact_id,
     direction: "out",
-    message_text: row.message_text,
+    message_text: encryptField(row.message_text),
     media_url: row.media_url ?? null,
     sent_at: row.sent_at ?? new Date().toISOString(),
   };

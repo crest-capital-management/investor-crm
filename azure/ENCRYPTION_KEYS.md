@@ -78,6 +78,23 @@ match, the key is too short, a column has an unexpected type, a trigger fires
 on those columns, or there is no backup from the last 6 hours
 (Settings → Back up now).
 
+### Phase 1 rollout (package 2), in this order
+
+1. Proper key set up and registered (above), and the server log shows it verified.
+2. `node azure/run-sql.mjs azure/migrations/002_encrypted_last_message.sql`
+   (the "last message" trigger must handle encrypted text before any is written).
+3. Deploy the package 2 code. From now on new names, phones, messages,
+   broadcast texts, follow-up messages and portfolio analyses are written
+   encrypted; old rows still read as before. The app **will not start without
+   `PII_ENCRYPTION_SECRET_KEY`** (also on a development PC).
+4. `node azure/encrypt-columns.mjs 1 --hash-only` (phone lookups by hash for old rows).
+5. Settings → Back up now, then `node azure/encrypt-columns.mjs 1 --dry-run`
+   and `node azure/encrypt-columns.mjs 1`. It ends with a full check
+   (`--verify-only` repeats it any time).
+6. Click through: contacts/investors list and search, a contact's chat, a
+   received WhatsApp message (new and known number), sending a reply, a
+   broadcast, unread list, groups, a portfolio analysis, follow-ups, export.
+
 ## Rotating the key
 
 1. Generate a new secret and put the new key **first**, keeping the old one:

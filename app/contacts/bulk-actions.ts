@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { requireActionAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { encryptField } from "@/lib/encryption";
 import { PROTECTED_TAGS, TAG_OPTIONS } from "@/lib/tags";
 import { parseTagCell } from "@/lib/tag-match";
 import { normalizeToLocalPhone } from "@/lib/whatsapp";
@@ -289,8 +290,12 @@ export async function applyContactUpdate(
   let updated = 0;
   for (let i = 0; i < plan.items.length; i += CHUNK) {
     try {
+      // Matching happened on the decrypted phones above; names are written encrypted.
+      const chunk = plan.items
+        .slice(i, i + CHUNK)
+        .map((item) => (item.name === undefined ? item : { ...item, name: encryptField(item.name) ?? undefined }));
       const row = await db.one<{ n: number | null }>("select public.bulk_update_contacts($1::jsonb) as n", [
-        JSON.stringify(plan.items.slice(i, i + CHUNK)),
+        JSON.stringify(chunk),
       ]);
       updated += Number(row.n ?? 0);
     } catch (error) {

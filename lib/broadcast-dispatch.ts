@@ -1,5 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
+import { encryptField } from "@/lib/encryption";
+import { phoneHash, sortByName } from "@/lib/pii";
 import {
   normalizePhoneForWhatsApp,
   sendWhatsAppMessage,
@@ -415,16 +417,17 @@ export async function startBroadcast(
       for (let i = 0; i < contacts.length; i += 500) {
         const rows = contacts.slice(i, i + 500).map((c) => ({
           contact_id: c.id,
-          name: c.name,
-          phone: c.phone,
+          name: encryptField(c.name),
+          phone: encryptField(c.phone),
+          phone_hash: phoneHash(c.phone),
           email: c.email ?? null,
         }));
         try {
           await tx.execute(
-            `insert into broadcast_recipients (broadcast_id, contact_id, name, phone, email)
-             select $1::uuid, x.contact_id, x.name, x.phone, x.email
+            `insert into broadcast_recipients (broadcast_id, contact_id, name, phone, phone_hash, email)
+             select $1::uuid, x.contact_id, x.name, x.phone, x.phone_hash, x.email
                from jsonb_to_recordset($2::jsonb)
-                    as x(contact_id uuid, name text, phone text, email text)
+                    as x(contact_id uuid, name text, phone text, phone_hash text, email text)
              on conflict (broadcast_id, contact_id) do nothing`,
             [broadcastId, JSON.stringify(rows)],
           );
@@ -564,21 +567,20 @@ async function finalizeIfDone(broadcastId: string): Promise<BroadcastProgress> {
   };
   if (!progress.done) return progress;
 
+  // Names are encrypted, so the A-Z order (and the first 100) are taken here.
   const [skippedRows, failedRows] = await Promise.all([
-    db.query<{ name: string | null }>(
-      `select name from broadcast_recipients
-        where broadcast_id = $1 and status = 'skipped'
-        order by name
-        limit 100`,
-      [broadcastId],
-    ),
-    db.query<{ name: string | null; error: string | null }>(
-      `select name, error from broadcast_recipients
-        where broadcast_id = $1 and status = 'failed'
-        order by name
-        limit 100`,
-      [broadcastId],
-    ),
+    db
+      .query<{ name: string | null }>(
+        `select name from broadcast_recipients where broadcast_id = $1 and status = 'skipped'`,
+        [broadcastId],
+      )
+      .then((rows) => sortByName(rows).slice(0, 100)),
+    db
+      .query<{ name: string | null; error: string | null }>(
+        `select name, error from broadcast_recipients where broadcast_id = $1 and status = 'failed'`,
+        [broadcastId],
+      )
+      .then((rows) => sortByName(rows).slice(0, 100)),
   ]);
 
   const summary: BroadcastSendSummary = {

@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { phoneHash } from "@/lib/pii";
 import { normalizeToLocalPhone } from "@/lib/whatsapp";
 
 /**
@@ -17,15 +18,17 @@ export async function linkUnmatchedMessages(
     }
     const entries = [...idByPhone.entries()];
 
-    // One statement per batch: each unmatched message gets the id of the contact with its phone.
+    // One statement per batch: each unmatched message gets the id of the contact with its phone
+    // (by hash; messages saved before their hash was filled in, by the plain number).
     for (let i = 0; i < entries.length; i += 200) {
       const batch = entries.slice(i, i + 200);
       await db.execute(
         `update whatsapp_messages m
             set contact_id = x.id
-           from unnest($1::text[], $2::uuid[]) as x(phone, id)
-          where m.contact_id is null and m.phone = x.phone`,
-        [batch.map(([phone]) => phone), batch.map(([, id]) => id)],
+           from unnest($1::text[], $2::text[], $3::uuid[]) as x(phone, phone_hash, id)
+          where m.contact_id is null
+            and (m.phone_hash = x.phone_hash or (m.phone_hash is null and m.phone = x.phone))`,
+        [batch.map(([phone]) => phone), batch.map(([phone]) => phoneHash(phone)), batch.map(([, id]) => id)],
       );
     }
   } catch (err) {

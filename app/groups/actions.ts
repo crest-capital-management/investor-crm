@@ -8,7 +8,8 @@ import {
   normalizeGroupMembers,
   type GroupContactRelation,
 } from "@/lib/group-members";
-import { escapeLike, ilikeAny } from "@/lib/sql";
+import { decryptJsonContact, matchesSearch, sortByName } from "@/lib/pii";
+import { escapeLike } from "@/lib/sql";
 import { hasInvalidId, INVALID_ID_ERROR } from "@/lib/validate";
 
 function validateName(value: string) {
@@ -339,16 +340,13 @@ export async function getGroupContactOptions(groupId: string, search = "") {
 
   const trimmedSearch = search.trim();
 
+  // Names and phones are encrypted, so the search and A-Z order happen here.
   let contacts: GroupContactOption[];
   try {
-    const params: unknown[] = [];
-    const where = ["deleted_at is null"];
-    if (trimmedSearch) where.push(ilikeAny(["name", "phone"], trimmedSearch, params));
-    contacts = await db.query<GroupContactOption>(
-      `select id, name, phone from public.contacts
-       where ${where.join(" and ")}
-       order by name asc, id asc`,
-      params,
+    contacts = sortByName(
+      (await db.query<GroupContactOption>("select id, name, phone from public.contacts where deleted_at is null")).filter(
+        (contact) => matchesSearch([contact.name, contact.phone], trimmedSearch),
+      ),
     );
   } catch {
     return { error: "Contacts could not be loaded." };
@@ -373,19 +371,14 @@ export async function searchContactsForNewGroup(search = "") {
 
   const trimmedSearch = search.trim();
 
+  // Names and phones are encrypted, so the search, A-Z order and cap happen here.
   let rows: GroupContactOption[];
   try {
-    const params: unknown[] = [];
-    const where = ["deleted_at is null"];
-    if (trimmedSearch) where.push(ilikeAny(["name", "phone"], trimmedSearch, params));
-    params.push(NEW_GROUP_CONTACT_LIMIT + 1);
-    rows = await db.query<GroupContactOption>(
-      `select id, name, phone from public.contacts
-       where ${where.join(" and ")}
-       order by name asc, id asc
-       limit $${params.length}`,
-      params,
-    );
+    rows = sortByName(
+      (await db.query<GroupContactOption>("select id, name, phone from public.contacts where deleted_at is null")).filter(
+        (contact) => matchesSearch([contact.name, contact.phone], trimmedSearch),
+      ),
+    ).slice(0, NEW_GROUP_CONTACT_LIMIT + 1);
   } catch {
     return { error: "Contacts could not be loaded." };
   }
@@ -471,7 +464,10 @@ export async function addContactsToGroup(groupId: string, contactIds: string[]) 
       [groupId],
     );
     if (!updatedGroup) return { error: "The group members could not be refreshed." };
-    relations = updatedGroup.contact_groups;
+    relations = updatedGroup.contact_groups.map((relation) => ({
+      ...relation,
+      contacts: Array.isArray(relation.contacts) ? relation.contacts.map(decryptJsonContact) : decryptJsonContact(relation.contacts),
+    }));
   } catch {
     return { error: "The group members could not be refreshed." };
   }

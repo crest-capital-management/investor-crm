@@ -7,6 +7,7 @@ import { PaginationControls } from "@/components/pagination-controls";
 import { normalizeGroupMembers, type GroupContactRelation } from "@/lib/group-members";
 import { requireAuthFast } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { decryptJsonContact } from "@/lib/pii";
 import { PAGE_SIZE, getTotalPages, parsePage } from "@/lib/pagination";
 import { ilikeAny, pageClause } from "@/lib/sql";
 
@@ -73,7 +74,10 @@ export default async function GroupsPage({ searchParams }: { searchParams: Promi
 
   const groups = data.map((group) => ({
     ...group,
-    contact_groups: normalizeGroupMembers(group.contact_groups),
+    contact_groups: normalizeGroupMembers(group.contact_groups.map((relation) => ({
+      ...relation,
+      contacts: Array.isArray(relation.contacts) ? relation.contacts.map(decryptJsonContact) : decryptJsonContact(relation.contacts),
+    }))),
   })) as GroupRow[];
   return (
     <div className="flex min-h-0 flex-col p-4 sm:p-6 lg:p-8">

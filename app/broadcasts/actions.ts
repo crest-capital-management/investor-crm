@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireActionAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { encryptField } from "@/lib/encryption";
 import {
   retryFailedBroadcastRecipients,
   sendBroadcastBatch,
@@ -162,7 +163,7 @@ export async function createBroadcastDraft(data: CreateBroadcastDraftInput) {
     await db.execute(
       `insert into broadcasts (message_text, target_type, target_ids, status, template_id, variable_mappings)
        values ($1, $2, $3::text[], 'draft', $4, $5::jsonb)`,
-      [messageText, data.target_type, normalizedTargetIds, templateId, JSON.stringify(variableMappings)],
+      [encryptField(messageText), data.target_type, normalizedTargetIds, templateId, JSON.stringify(variableMappings)],
     );
   } catch (error) {
     console.error("Failed to create broadcast draft.", error instanceof Error ? error.message : error);
@@ -227,7 +228,7 @@ export async function createScheduledBroadcast(
       `insert into broadcasts (message_text, target_type, target_ids, status, scheduled_for, template_id, variable_mappings)
        values ($1, $2, $3::text[], 'scheduled', $4, $5, $6::jsonb)`,
       [
-        messageText,
+        encryptField(messageText),
         data.target_type,
         normalizedTargetIds,
         scheduledDate.toISOString(),
@@ -308,7 +309,7 @@ export async function updateBroadcast(id: string, data: UpdateBroadcastInput) {
     template_id?: string | null;
     variable_mappings?: Record<string, unknown>;
   } = {
-    message_text: messageText,
+    message_text: encryptField(messageText) ?? "",
     target_type: data.target_type,
     target_ids: normalizedTargetIds,
   };

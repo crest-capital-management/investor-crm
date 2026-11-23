@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { phoneMatch, sortByName } from "@/lib/pii";
 import type { ContactSection, SectionsInfo } from "@/lib/section-filter";
 import { isUuid } from "@/lib/validate";
 
@@ -41,17 +42,20 @@ export async function loadBroadcastContactChoices(): Promise<{
 }> {
   try {
     const [contacts, sections] = await Promise.all([
-      db.query<{ id: string; name: string; phone: string; section_id: string | null }>(
-        "select id, name, phone, section_id from contacts where deleted_at is null order by name asc, id asc",
-      ),
+      db
+        .query<{ id: string; name: string; phone: string; section_id: string | null }>(
+          "select id, name, phone, section_id from contacts where deleted_at is null",
+        )
+        .then(sortByName),
       db.query<ContactSection>("select id, name from public.contact_sections order by sort_order, lower(name)"),
     ]);
     return { contacts, sections };
   } catch {
     const contacts = await db
       .query<{ id: string; name: string; phone: string }>(
-        "select id, name, phone from contacts where deleted_at is null order by name asc, id asc",
+        "select id, name, phone from contacts where deleted_at is null",
       )
+      .then(sortByName)
       .catch(() => []);
     return { contacts: contacts.map((contact) => ({ ...contact, section_id: null })), sections: [] };
   }
@@ -80,12 +84,13 @@ export async function assignNewContactsToSection(contactIds: string[], sectionId
 /** The section name of the active contact with this phone, if any (for duplicate messages). */
 export async function sectionNameForPhone(phone: string): Promise<string | null> {
   try {
+    const params: unknown[] = [];
     const row = await db.maybeOne<{ name: string | null }>(
       `select s.name from public.contacts c
          left join public.contact_sections s on s.id = c.section_id
-        where c.phone = $1 and c.deleted_at is null
+        where ${phoneMatch("c.", params, phone)} and c.deleted_at is null
         limit 1`,
-      [phone],
+      params,
     );
     return row?.name ?? null;
   } catch {

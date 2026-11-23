@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 
 import { db } from "@/lib/db";
+import { sortByName } from "@/lib/pii";
 import { getOwnerSessionId } from "@/lib/auth";
 import { csvCell } from "@/lib/csv";
 import { CONTACT_GROUPS_COLUMN } from "@/lib/contact-queries";
@@ -55,9 +56,10 @@ async function loadContacts(ids: string[] | null): Promise<ContactExportRow[]> {
           `select ${columns} from contacts c where c.id = any($1::uuid[]) and c.deleted_at is null`,
           [ids],
         )
-      : db.query<ContactExportRow>(
-          `select ${columns} from contacts c where c.deleted_at is null order by c.name asc, c.id asc`,
-        );
+      : db
+          .query<ContactExportRow>(`select ${columns} from contacts c where c.deleted_at is null`)
+          // Names are encrypted, so A to Z is sorted here.
+          .then(sortByName);
 
   const rows = await query(`${COLUMNS}, ${SECTION_COLUMN}`);
   if (!ids) return rows;
