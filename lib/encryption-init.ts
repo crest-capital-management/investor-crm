@@ -12,7 +12,7 @@ export async function initEncryption(): Promise<void> {
   const keyring = await loadKeyring();
   if (!keyring) {
     setKeyring(null);
-    console.warn("[encryption] No encryption keys configured (KEY_VAULT_URL). Encrypted fields cannot be read or written.");
+    console.warn("[encryption] No encryption key configured (PII_ENCRYPTION_SECRET_KEY). Encrypted fields cannot be read or written.");
     return;
   }
 

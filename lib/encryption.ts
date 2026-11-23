@@ -26,6 +26,8 @@ export interface Keyring {
   fieldKeys: Map<string, Buffer>;
   /** Key for blind-index hashes. Changing it means re-hashing every row. */
   indexKey: Buffer;
+  /** Keys made from secrets shorter than MIN_SECRET_LENGTH (refused in production). */
+  weakKeyIds: string[];
 }
 
 const KEY_BYTES = 32;
@@ -56,43 +58,51 @@ function keyring(): Keyring {
 
 // ---------------------------------------------------------------- key parsing
 
-function decodeKey(base64: string, what: string): Buffer {
-  const key = Buffer.from(base64.trim(), "base64");
-  if (key.length !== KEY_BYTES) throw new Error(`${what} must be ${KEY_BYTES} bytes, base64-encoded.`);
-  return key;
+/** Secrets shorter than this are accepted only outside production (lib/keys.ts). */
+export const MIN_SECRET_LENGTH = 32;
+
+/** Turns a secret into a 256-bit key for one purpose (HKDF-SHA256), so one secret can serve several. */
+function deriveKey(secret: string, purpose: string): Buffer {
+  return Buffer.from(crypto.hkdfSync("sha256", Buffer.from(secret, "utf8"), Buffer.alloc(0), `crest-crm ${purpose}`, KEY_BYTES));
 }
 
 /**
- * Builds a keyring from the two stored secrets:
- *   field keys: {"current":"k1","keys":{"k1":"<base64 32 bytes>", ...}}
- *   index key:  "<base64 32 bytes>"
+ * Builds the keyring from the PII_ENCRYPTION_SECRET_KEY setting:
+ *   "v1:<secret>"                 one key
+ *   "v2:<new secret>,v1:<old>"    after a rotation: the FIRST key encrypts new
+ *                                 values, every listed key can still read
+ * The LAST (oldest) key also makes the lookup-hash key, so it must stay in the
+ * list for as long as phone_hash/email_hash values made with it exist.
  */
-export function parseKeyring(fieldKeysJson: string, indexKeyBase64: string): Keyring {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(fieldKeysJson);
-  } catch {
-    throw new Error("The field keys secret is not valid JSON.");
-  }
-  const { current, keys } = (parsed ?? {}) as { current?: unknown; keys?: unknown };
-  if (typeof current !== "string" || !keys || typeof keys !== "object") {
-    throw new Error('The field keys secret must look like {"current":"k1","keys":{"k1":"..."}}.');
-  }
+export function parseKeySetting(setting: string): Keyring {
+  const entries = setting
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (!entries.length) throw new Error("The encryption key setting is empty.");
 
   const fieldKeys = new Map<string, Buffer>();
-  for (const [id, value] of Object.entries(keys as Record<string, unknown>)) {
-    if (!KEY_ID_PATTERN.test(id)) throw new Error(`Key id "${id}" may only use letters, digits, _ and -.`);
-    if (typeof value !== "string") throw new Error(`Field key ${id} must be a base64 string.`);
-    fieldKeys.set(id, decodeKey(value, `Field key ${id}`));
+  const weakKeyIds: string[] = [];
+  const secrets: string[] = [];
+  for (const entry of entries) {
+    const colon = entry.indexOf(":");
+    const id = colon > 0 ? entry.slice(0, colon) : "";
+    const secret = colon > 0 ? entry.slice(colon + 1).trim() : "";
+    if (!KEY_ID_PATTERN.test(id) || !secret) {
+      throw new Error('Each encryption key must look like "v1:<secret>" (several separated by commas, newest first).');
+    }
+    if (fieldKeys.has(id)) throw new Error(`Encryption key "${id}" is listed twice.`);
+    fieldKeys.set(id, deriveKey(secret, "field key"));
+    if (secret.length < MIN_SECRET_LENGTH) weakKeyIds.push(id);
+    secrets.push(secret);
   }
-  if (!fieldKeys.has(current)) throw new Error(`The current field key "${current}" is not in the keys list.`);
 
-  const indexKey = decodeKey(indexKeyBase64, "The index key");
-  for (const [id, key] of fieldKeys) {
-    if (key.equals(indexKey)) throw new Error(`The index key must differ from field key ${id}.`);
-  }
-
-  return { currentKeyId: current, fieldKeys, indexKey };
+  return {
+    currentKeyId: [...fieldKeys.keys()][0],
+    fieldKeys,
+    indexKey: deriveKey(secrets[secrets.length - 1], "index key"),
+    weakKeyIds,
+  };
 }
 
 /** Short value that identifies a key without revealing it (stored in encryption_keys). */
