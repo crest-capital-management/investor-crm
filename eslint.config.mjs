@@ -14,6 +14,7 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // One-off Node scripts for the Azure database migration (not part of the app).
     "azure/*.js",
+    "azure/**/*.mjs",
   ]),
 ]);
 

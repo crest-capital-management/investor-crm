@@ -397,4 +397,25 @@ create index contacts_section_id_idx on public.contacts (section_id);
 -- Starting sections; rename them in the app (Contacts -> Manage sections).
 insert into public.contact_sections (name, sort_order) values ('Tab 1', 1), ('Tab 2', 2);
 
+-- Field encryption groundwork (formerly azure/migrations/001_encryption.sql).
+-- Fingerprints (never the keys) of the encryption keys the data uses; written
+-- only by azure/register-keys.mjs; not part of backups.
+create table public.encryption_keys (
+  key_id      text primary key,
+  fingerprint text not null,
+  created_at  timestamp with time zone not null default now()
+);
+
+-- Blind-index hashes (HMAC-SHA256 hex) for exact lookups on encrypted phone/email.
+alter table public.contacts             add column phone_hash text;
+alter table public.contacts             add column email_hash text;
+alter table public.whatsapp_messages    add column phone_hash text;
+alter table public.broadcast_recipients add column phone_hash text;
+
+create index contacts_phone_hash_idx on public.contacts (phone_hash);
+create index contacts_email_hash_idx on public.contacts (email_hash);
+create index whatsapp_messages_unmatched_phone_hash_idx
+  on public.whatsapp_messages (phone_hash) where (contact_id is null);
+create index broadcast_recipients_phone_hash_idx on public.broadcast_recipients (phone_hash);
+
 commit;

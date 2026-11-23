@@ -7,7 +7,7 @@ import { db } from "@/lib/db";
 import { PROTECTED_TAGS, TAG_OPTIONS } from "@/lib/tags";
 import { parseTagCell } from "@/lib/tag-match";
 import { normalizeToLocalPhone } from "@/lib/whatsapp";
-import { isValidDate, isValidEmail } from "@/lib/validate";
+import { isValidDate, isValidEmail, hasInvalidId, INVALID_ID_ERROR } from "@/lib/validate";
 
 const CHUNK = 500;
 const MAX_CONTACTS = 5000;
@@ -26,6 +26,7 @@ export async function bulkChangeTags(
 ): Promise<{ success: true; updated: number } | { error: string }> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(ids)) return { error: INVALID_ID_ERROR };
 
   const normalizedTag = TAG_OPTIONS.find((option) => option === tag.trim());
   if (!normalizedTag) return { error: "That tag is not available." };

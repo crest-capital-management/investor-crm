@@ -5,7 +5,7 @@ import { requireActionAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { generateFollowUpSuggestion } from "@/lib/contact-ai";
 import { todayAsISODate } from "@/lib/format";
-import { isValidDate } from "@/lib/validate";
+import { isValidDate, hasInvalidId, INVALID_ID_ERROR } from "@/lib/validate";
 
 export type FollowUp = {
   id: string;
@@ -50,6 +50,7 @@ async function findFollowUp(followUpId: string) {
 export async function getFollowUps(contactId: string) {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(contactId)) return { error: INVALID_ID_ERROR };
 
   const normalizedContactId = contactId.trim();
   if (!normalizedContactId) return { error: "The contact could not be found." };
@@ -87,6 +88,7 @@ export async function suggestFollowUp(
 ): Promise<SuggestFollowUpResult> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(contactId)) return { error: INVALID_ID_ERROR };
 
   const normalizedContactId = contactId.trim();
   if (!normalizedContactId) return { error: "The contact could not be found." };
@@ -149,6 +151,7 @@ export async function addFollowUp(
 ) {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(contactId)) return { error: INVALID_ID_ERROR };
 
   const normalizedContactId = contactId.trim();
   const normalizedDueDate = dueDate.trim();
@@ -180,6 +183,7 @@ export async function addFollowUp(
 export async function markFollowUpAsDone(followUpId: string, contactId: string) {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(followUpId, contactId)) return { error: INVALID_ID_ERROR };
 
   const normalizedFollowUpId = followUpId.trim();
   const normalizedContactId = contactId.trim();
@@ -236,6 +240,7 @@ export async function editFollowUp(
 ) {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(followUpId, contactId)) return { error: INVALID_ID_ERROR };
 
   const normalizedFollowUpId = followUpId.trim();
   const normalizedContactId = contactId.trim();
@@ -279,6 +284,7 @@ export async function editFollowUp(
 export async function deleteFollowUp(followUpId: string, contactId: string) {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(followUpId, contactId)) return { error: INVALID_ID_ERROR };
 
   const normalizedFollowUpId = followUpId.trim();
   const normalizedContactId = contactId.trim();
@@ -315,6 +321,7 @@ export async function deleteFollowUp(followUpId: string, contactId: string) {
 export async function deleteCompletedFollowUp(followUpId: string, contactId: string) {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(followUpId, contactId)) return { error: INVALID_ID_ERROR };
 
   const normalizedFollowUpId = followUpId.trim();
   const normalizedContactId = contactId.trim();

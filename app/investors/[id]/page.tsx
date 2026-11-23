@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { requireAuthFast } from "@/lib/auth";
+import { isUuid } from "@/lib/validate";
 import { loadContactDetail } from "@/lib/contact-queries";
 import { isInvestorTag } from "@/lib/tags";
 import { InvestorDetail } from "@/components/investor-detail";
@@ -16,6 +17,7 @@ export default async function InvestorDetailPage({
 }) {
   const { id } = await params;
   await requireAuthFast();
+  if (!isUuid(id)) notFound();
 
   const data = await loadContactDetail(id);
   // Only investor-tagged contacts open here; others use /contacts/[id].

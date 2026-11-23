@@ -9,7 +9,7 @@ import {
   type BroadcastSendSummary,
   type SendBroadcastResult,
 } from "@/lib/broadcast-dispatch";
-import { isUuid } from "@/lib/validate";
+import { isUuid, hasInvalidId, INVALID_ID_ERROR } from "@/lib/validate";
 
 export type TargetType = "group" | "tag" | "manual";
 
@@ -249,6 +249,7 @@ export async function updateBroadcast(id: string, data: UpdateBroadcastInput) {
   if (authError) {
     return { error: "Unauthorized" };
   }
+  if (hasInvalidId(id)) return { error: INVALID_ID_ERROR };
 
   if (!id) {
     return { error: "Broadcast ID is required." };
@@ -386,6 +387,7 @@ export async function deleteBroadcast(id: string) {
   if (authError) {
     return { error: "Unauthorized" };
   }
+  if (hasInvalidId(id)) return { error: INVALID_ID_ERROR };
 
   if (!id) {
     return { error: "Broadcast ID is required." };
@@ -417,6 +419,7 @@ export async function deleteBroadcasts(ids: string[]) {
   if (authError) {
     return { error: "Unauthorized" };
   }
+  if (hasInvalidId(ids)) return { error: INVALID_ID_ERROR };
 
   const broadcastIds = [...new Set(ids.filter(Boolean))];
   if (!broadcastIds.length) {
@@ -451,6 +454,7 @@ export async function retryFailedBroadcast(broadcastId: string): Promise<SendBro
   if (authError) {
     return { error: "Unauthorized" };
   }
+  if (hasInvalidId(broadcastId)) return { error: INVALID_ID_ERROR };
 
   const result = await retryFailedBroadcastRecipients(broadcastId);
   revalidatePath("/broadcasts");
@@ -470,6 +474,7 @@ export async function sendBroadcastNow(
   if (authError) {
     return { error: "Unauthorized" };
   }
+  if (hasInvalidId(broadcastId)) return { error: INVALID_ID_ERROR };
 
   return sendBroadcastBatch(broadcastId);
 }

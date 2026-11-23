@@ -7,6 +7,7 @@ import {
   fetchWhatsAppMessageTemplates,
   type MetaMessageTemplate,
 } from "@/lib/whatsapp";
+import { hasInvalidId, INVALID_ID_ERROR } from "@/lib/validate";
 
 export type TemplateCategory = "MARKETING" | "UTILITY" | "AUTHENTICATION";
 
@@ -110,6 +111,7 @@ export async function updateTemplate(id: string, data: UpdateTemplateInput) {
   if (authError) {
     return { error: "Unauthorized" };
   }
+  if (hasInvalidId(id)) return { error: INVALID_ID_ERROR };
 
   if (!id) {
     return { error: "Template ID is required." };
@@ -169,6 +171,7 @@ export async function deleteTemplate(id: string) {
   if (authError) {
     return { error: "Unauthorized" };
   }
+  if (hasInvalidId(id)) return { error: INVALID_ID_ERROR };
 
   if (!id) {
     return { error: "Template ID is required." };

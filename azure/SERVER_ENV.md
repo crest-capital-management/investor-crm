@@ -38,6 +38,15 @@ Not needed on the server: `DATABASE_SSL_NO_VERIFY` (the database is on the same 
 | `NEXTAUTH_URL` | `https://investor-crm.crest-capital.com` |
 | `AZURE_STORAGE_CONNECTION_STRING` | The storage account connection string with its access key (account `crestfinancialreports`) |
 
+## C. Encryption keys
+
+| Name | Value |
+|---|---|
+| `PII_ENCRYPTION_SECRET_KEY` | `v1:<secret>`, at least 32 random characters (`echo "v1:$(openssl rand -base64 32)"`). Encrypts personal data; the same value must be in `.env.local` on PCs that use the live database. Setup, rotation and key safety: `azure/ENCRYPTION_KEYS.md`. Once data is encrypted the app cannot read it without this key. |
+| `BACKUP_ENCRYPTION_SECRET_KEY` | `v1:<secret>`, same format. Encrypts backup files (package 5). |
+
+Keep an offline copy of both values: if they are lost, the encrypted data is lost.
+
 ## Also needed on the server
 
 - **nginx** must pass `X-Forwarded-For` (`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`); the login lockout uses it.

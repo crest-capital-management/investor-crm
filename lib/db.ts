@@ -1,4 +1,5 @@
-import { Pool, types, type PoolClient, type QueryResultRow } from "pg";
+import { Pool, types, type CustomTypesConfig, type PoolClient, type QueryResultRow } from "pg";
+import { decryptField, isEncrypted } from "@/lib/encryption";
 
 /**
  * Direct PostgreSQL access (Azure Database for PostgreSQL). Replaces the
@@ -7,6 +8,13 @@ import { Pool, types, type PoolClient, type QueryResultRow } from "pg";
  * Results keep the shapes the app got from Supabase's REST layer, so the rest
  * of the code doesn't change: dates and timestamps come back as strings, and
  * bigint / numeric come back as numbers. jsonb and text[] are parsed by pg.
+ *
+ * Encrypted columns (lib/encryption.ts) are decrypted here, on read: every
+ * text/varchar value in the "enc:v1:..." format is decrypted before the app
+ * sees it, so queries, joins and SQL functions read them unchanged. Writes
+ * must still call encryptField. Values inside json/jsonb results (json_agg,
+ * row_to_json) are NOT decrypted; decrypt those where they are built.
+ * Backups use rawQuery so they keep the ciphertext.
  */
 
 // date -> "YYYY-MM-DD" (pg would otherwise build a Date at local midnight and shift the day).
@@ -17,6 +25,23 @@ types.setTypeParser(types.builtins.TIMESTAMP, (value) => new Date(`${value}Z`).t
 // bigint (count(*), size_bytes, unread_count) and numeric -> number.
 types.setTypeParser(types.builtins.INT8, (value) => Number(value));
 types.setTypeParser(types.builtins.NUMERIC, (value) => Number(value));
+
+/** text / varchar values: decrypted when they are in the encrypted format. */
+function readText(value: string): string {
+  return isEncrypted(value) ? decryptField(value)! : value;
+}
+
+const decryptingTypes: CustomTypesConfig = {
+  getTypeParser: ((oid: number, format?: "text" | "binary") => {
+    if (oid === types.builtins.TEXT || oid === types.builtins.VARCHAR || oid === types.builtins.BPCHAR) {
+      return readText;
+    }
+    return types.getTypeParser(oid, format);
+  }) as CustomTypesConfig["getTypeParser"],
+};
+
+/** The same parsers without decryption, for backups. */
+const rawTypes: CustomTypesConfig = { getTypeParser: types.getTypeParser as CustomTypesConfig["getTypeParser"] };
 
 function createPool(): Pool {
   const raw = process.env.AZURE_CONNECTION_STRING ?? process.env.DATABASE_URL;
@@ -40,6 +65,7 @@ function createPool(): Pool {
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 10_000,
     statement_timeout: 60_000,
+    types: decryptingTypes,
   });
   // An idle client dropping (e.g. a database restart) must not crash the server.
   pool.on("error", (error) => console.error("[db] idle client error:", error.message));
@@ -91,6 +117,8 @@ function queryable(run: (text: string, params?: Params) => Promise<{ rows: Query
 export interface Db extends Queryable {
   /** Runs `fn` in one transaction: all of its statements are saved together, or none are. */
   tx<T>(fn: (tx: Queryable) => Promise<T>): Promise<T>;
+  /** All rows, with encrypted values left encrypted (backups only). */
+  rawQuery<T extends QueryResultRow = QueryResultRow>(text: string, params?: Params): Promise<T[]>;
 }
 
 export const db: Db = {
@@ -108,6 +136,9 @@ export const db: Db = {
     } finally {
       client.release();
     }
+  },
+  async rawQuery<T extends QueryResultRow>(text: string, params?: Params) {
+    return (await getPool().query<T>({ text, values: params as unknown[], types: rawTypes })).rows;
   },
 };
 

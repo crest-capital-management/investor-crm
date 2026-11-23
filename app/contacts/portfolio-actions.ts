@@ -15,6 +15,7 @@ import {
   removePortfolioFile,
   uploadPortfolioFile,
 } from "@/lib/storage";
+import { hasInvalidId, INVALID_ID_ERROR } from "@/lib/validate";
 
 const MAX_PASTED_CHARS = 100_000;
 async function findContact(id: string): Promise<{ id: string } | null> {
@@ -33,6 +34,7 @@ export async function preparePortfolioUpload(
 ): Promise<{ path: string; uploadUrl: string } | { error: string }> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(contactId)) return { error: INVALID_ID_ERROR };
 
   if (!size) return { error: "No file selected." };
   if (size > MAX_PORTFOLIO_FILE_BYTES) return { error: "File is too large. Please choose a file under 15MB." };
@@ -59,6 +61,7 @@ export async function createPortfolioUpdate(
 ): Promise<{ id: string } | { error: string }> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(contactId)) return { error: INVALID_ID_ERROR };
 
   const id = contactId.trim();
   if (!path.startsWith(`${id}/`) || path.includes("..")) return { error: "That file isn't available for this contact." };
@@ -84,6 +87,7 @@ export async function createPortfolioUpdateFromText(
 ): Promise<{ id: string } | { error: string }> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(contactId)) return { error: INVALID_ID_ERROR };
 
   const id = contactId.trim();
   const body = text.trim();
@@ -126,6 +130,7 @@ export async function analyzePortfolioUpdateById(
 ): Promise<{ update: PortfolioUpdate } | { error: string }> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(updateId)) return { error: INVALID_ID_ERROR };
 
   type UpdateRow = { id: string; contact_id: string; file_path: string; file_name: string; mime_type: string | null; created_at: string };
   let row: UpdateRow | null;
@@ -201,6 +206,7 @@ function asOfDate(value: string | null): string | null {
 export async function deletePortfolioUpdate(updateId: string): Promise<{ success: true } | { error: string }> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(updateId)) return { error: INVALID_ID_ERROR };
 
   try {
     await db.execute("update public.portfolio_updates set deleted_at = $2 where id = $1", [updateId, new Date().toISOString()]);
@@ -216,6 +222,7 @@ export async function listPortfolioUpdates(
 ): Promise<{ updates: PortfolioUpdate[] } | { error: string }> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(contactId)) return { error: INVALID_ID_ERROR };
 
   try {
     const updates = await db.query<PortfolioUpdate>(

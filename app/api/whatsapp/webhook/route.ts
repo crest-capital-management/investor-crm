@@ -156,7 +156,7 @@ export async function GET(request: Request) {
 
   const verifyToken = process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN;
 
-  if (mode === "subscribe" && token && verifyToken && token === verifyToken) {
+  if (mode === "subscribe" && token && verifyToken && safeEqual(token, verifyToken)) {
     return new Response(challenge ?? "", {
       status: 200,
       headers: { "Content-Type": "text/plain" },

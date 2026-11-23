@@ -1,6 +1,28 @@
 /** Input checks shared by forms (browser) and server actions. Pure functions. */
 
-export { isUuid } from "@/lib/sql";
+import { isUuid } from "@/lib/sql";
+
+export { isUuid };
+
+/** Message server actions return when an id is not a well-formed UUID. */
+export const INVALID_ID_ERROR = "Invalid request.";
+
+/**
+ * True when any given id is not a well-formed UUID. Arrays are checked item by
+ * item; null and undefined are skipped (optional ids). Server actions call this
+ * right after the auth check so malformed ids never reach SQL.
+ */
+export function hasInvalidId(...values: (string | readonly string[] | null | undefined)[]): boolean {
+  for (const value of values) {
+    if (value == null) continue;
+    const items = typeof value === "string" ? [value] : value;
+    if (!Array.isArray(items)) return true;
+    for (const item of items) {
+      if (typeof item !== "string" || !isUuid(item.trim())) return true;
+    }
+  }
+  return false;
+}
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 

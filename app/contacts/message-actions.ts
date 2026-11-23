@@ -6,6 +6,7 @@ import { draftMessage, type DraftInput } from "@/lib/message-drafting";
 import { isReplyWindowOpen } from "@/lib/reply-window";
 import { loadContactHistory, type ContactHistory } from "@/lib/ai-context";
 import { todayAsISODate } from "@/lib/format";
+import { hasInvalidId, INVALID_ID_ERROR } from "@/lib/validate";
 
 /**
  * Drafts a personalised message for a contact. Nothing is saved or sent: the
@@ -17,6 +18,7 @@ export async function generatePersonalisedMessage(
 ): Promise<{ message: string; windowOpen: boolean } | { error: string }> {
   const { error: authError } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(contactId)) return { error: INVALID_ID_ERROR };
 
   const id = contactId.trim();
   let contact: DraftInput["contact"] | null;
