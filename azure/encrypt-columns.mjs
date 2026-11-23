@@ -4,7 +4,8 @@
 //   node azure/encrypt-columns.mjs <phase> --hash-only           only fill phone_hash/email_hash
 //   node azure/encrypt-columns.mjs <phase>                       encrypt (and fill hashes)
 //   node azure/encrypt-columns.mjs <phase> --verify-only         check every encrypted value decrypts
-// Options: --batch=500, --max-backup-age-hours=6, --skip-backup-check (test copies only).
+// Options: --batch=500, --max-backup-age-hours=6, --skip-backup-check (test copies only),
+// --local (work on the local copy from azure/copy-to-local.mjs).
 //
 // Only run a phase after the app code that reads it has been deployed (the
 // app reads plain text and encrypted values alike, so code goes first, data second).
@@ -20,7 +21,7 @@ import { BlobServiceClient } from "@azure/storage-blob";
 import { blindIndex, decryptField, encryptField, isEncrypted, normalizeEmail, setKeyring } from "../lib/encryption.ts";
 import { loadKeyring, verifyKeyFingerprints } from "../lib/keys.ts";
 import { normalizeToLocalPhone } from "../lib/whatsapp.ts";
-import { connect, confirmDatabase, flag, loadEnv, option, run } from "./lib/script-env.mjs";
+import { connect, confirmDatabase, flag, isLocalRun, loadEnv, option, run } from "./lib/script-env.mjs";
 
 const phoneHash = { column: "phone_hash", kind: "phone" };
 const emailHash = { column: "email_hash", kind: "email" };
@@ -281,7 +282,8 @@ run(async () => {
 
     if (!verifyOnly) {
       if (!dryRun) {
-        if (flag("--skip-backup-check")) console.log("Backup check skipped (--skip-backup-check).");
+        if (isLocalRun()) console.log("Local test copy: backup check skipped.");
+        else if (flag("--skip-backup-check")) console.log("Backup check skipped (--skip-backup-check).");
         else await checkRecentBackup(Number(option("--max-backup-age-hours", "6")));
         const mode = hashOnly ? "fill the lookup hashes of" : "ENCRYPT";
         await confirmDatabase(database, `\nAbout to ${mode} phase ${phase} (${active.map(fieldOf).join(", ")}) in ${label}.`);
