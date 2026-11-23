@@ -96,7 +96,8 @@ run(async () => {
     const liveSsl = ["localhost", "127.0.0.1", "::1"].includes(live.hostname) ? "disable" : "require";
     runTool(bin, "pg_dump", ["--format=custom", "--no-owner", "--no-privileges", `--file=${dumpFile}`], pgEnv(live, { ssl: liveSsl }));
     console.log("Restoring into the local database...");
-    runTool(bin, "pg_restore", ["--no-owner", "--no-privileges", `--dbname=${localName}`], pgEnv(local, { ssl: "disable" }));
+    if (!fs.existsSync(dumpFile) || fs.statSync(dumpFile).size === 0) throw new Error("pg_dump produced an empty file.");
+    runTool(bin, "pg_restore", ["--no-owner", "--no-privileges", `--dbname=${localName}`, dumpFile], pgEnv(local, { ssl: "disable" }));
   } finally {
     fs.rmSync(dumpFile, { force: true });
   }
