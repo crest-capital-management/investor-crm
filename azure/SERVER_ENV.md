@@ -42,9 +42,10 @@ Not needed on the server: `DATABASE_SSL_NO_VERIFY` (the database is on the same 
 
 | Name | Value |
 |---|---|
-| `KEY_VAULT_URL` | `https://<vault-name>.vault.azure.net/`. The VM's managed identity needs *Key Vault Secrets User* on that vault. Setup, rotation and key safety: `azure/ENCRYPTION_KEYS.md`. Optional until the first data is encrypted; after that the app cannot read that data without it. |
+| `PII_ENCRYPTION_SECRET_KEY` | `v1:<secret>`, at least 32 random characters (`echo "v1:$(openssl rand -base64 32)"`). Encrypts personal data; the same value must be in `.env.local` on PCs that use the live database. Setup, rotation and key safety: `azure/ENCRYPTION_KEYS.md`. Once data is encrypted the app cannot read it without this key. |
+| `BACKUP_ENCRYPTION_SECRET_KEY` | `v1:<secret>`, same format. Encrypts backup files (package 5). |
 
-Never set `CRM_FIELD_KEYS` / `CRM_INDEX_KEY` on the server (development only; refused in production).
+Keep an offline copy of both values: if they are lost, the encrypted data is lost.
 
 ## Also needed on the server
 

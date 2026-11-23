@@ -13,8 +13,7 @@ export async function initEncryption(): Promise<void> {
   if (!keyring) {
     setKeyring(null);
     throw new Error(
-      "No encryption keys configured. Set KEY_VAULT_URL (see azure/ENCRYPTION_KEYS.md); " +
-        "on a PC also run `az login`.",
+      "No encryption key configured. Set PII_ENCRYPTION_SECRET_KEY (see azure/ENCRYPTION_KEYS.md).",
     );
   }
 

@@ -1,5 +1,5 @@
 // Self-test of lib/encryption.ts and lib/keys.ts with throwaway random keys.
-// Touches no database and no Key Vault.   node azure/verify-encryption.mjs
+// Touches no database.   node azure/verify-encryption.mjs
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import {
@@ -11,7 +11,7 @@ import {
   isEncrypted,
   keyFingerprint,
   normalizeEmail,
-  parseKeyring,
+  parseKeySetting,
   setKeyring,
 } from "../lib/encryption.ts";
 import { loadKeyring, registerKeyFingerprints, verifyKeyFingerprints } from "../lib/keys.ts";
@@ -19,9 +19,8 @@ import { loadKeyring, registerKeyFingerprints, verifyKeyFingerprints } from "../
 const newKey = () => crypto.randomBytes(32).toString("base64");
 const k1 = newKey();
 const k2 = newKey();
-const indexKey = newKey();
-const ring1 = parseKeyring(JSON.stringify({ current: "k1", keys: { k1 } }), indexKey);
-const ring2 = parseKeyring(JSON.stringify({ current: "k2", keys: { k1, k2 } }), indexKey);
+const ring1 = parseKeySetting(`k1:${k1}`);
+const ring2 = parseKeySetting(`k2:${k2}, k1:${k1}`);
 
 let passed = 0;
 function test(name, fn) {
@@ -124,24 +123,38 @@ await test("blind index: deterministic, keyed, kinds kept apart", () => {
   assert.notEqual(blindIndex("phone", "9876543211"), a);
   assert.equal(blindIndex("phone", ""), null);
   assert.equal(blindIndex("email", normalizeEmail("  A@B.com ")), blindIndex("email", "a@b.com"));
-  const otherRing = parseKeyring(JSON.stringify({ current: "k1", keys: { k1 } }), newKey());
+  const otherRing = parseKeySetting(`k1:${newKey()}`);
   setKeyring(otherRing);
   assert.notEqual(blindIndex("phone", "9876543210"), a);
   setKeyring(ring1);
 });
 
-await test("key parsing rejects bad input", () => {
-  assert.throws(() => parseKeyring("not json", indexKey), /not valid JSON/);
-  assert.throws(() => parseKeyring(JSON.stringify({ current: "k1", keys: { k1: "c2hvcnQ=" } }), indexKey), /32 bytes/);
-  assert.throws(() => parseKeyring(JSON.stringify({ current: "k2", keys: { k1 } }), indexKey), /not in the keys list/);
-  assert.throws(() => parseKeyring(JSON.stringify({ current: "a:b", keys: { "a:b": k1 } }), indexKey), /letters, digits/);
-  assert.throws(() => parseKeyring(JSON.stringify({ current: "k1", keys: { k1 } }), k1), /must differ/);
+await test("key setting: format, rotation order, derived keys", () => {
+  assert.throws(() => parseKeySetting(""), /empty/);
+  assert.throws(() => parseKeySetting("no-colon-here"), /v1:<secret>/);
+  assert.throws(() => parseKeySetting("v1:"), /v1:<secret>/);
+  assert.throws(() => parseKeySetting(`v1:${k1},v1:${k2}`), /listed twice/);
+  assert.equal(ring2.currentKeyId, "k2", "first listed key encrypts");
+  assert.ok(ring1.indexKey.equals(ring2.indexKey), "rotation keeps the lookup-hash key (made from the oldest key)");
+  assert.ok(!ring1.fieldKeys.get("k1").equals(ring1.indexKey), "field and index keys differ");
+  assert.equal(ring1.fieldKeys.get("k1").length, 32);
+  assert.deepEqual(parseKeySetting("v1:short-placeholder").weakKeyIds, ["v1"]);
+  assert.deepEqual(ring1.weakKeyIds, []);
+  assert.ok(parseKeySetting("v1:same-secret-for-both-calls-123456").fieldKeys.get("v1")
+    .equals(parseKeySetting("v1:same-secret-for-both-calls-123456").fieldKeys.get("v1")), "same secret, same key");
 });
 
-await test("development keys are refused in production", async () => {
-  const env = { CRM_FIELD_KEYS: JSON.stringify({ current: "k1", keys: { k1 } }), CRM_INDEX_KEY: indexKey };
-  assert.ok(await loadKeyring({ ...env, NODE_ENV: "development" }));
-  await assert.rejects(loadKeyring({ ...env, NODE_ENV: "production" }), /development only/);
+await test("short keys: warned in development, refused in production", async () => {
+  const weak = { PII_ENCRYPTION_SECRET_KEY: "v1:short-placeholder" };
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    assert.ok(await loadKeyring({ ...weak, NODE_ENV: "development" }));
+  } finally {
+    console.warn = warn;
+  }
+  await assert.rejects(loadKeyring({ ...weak, NODE_ENV: "production" }), /shorter than 32/);
+  assert.ok(await loadKeyring({ PII_ENCRYPTION_SECRET_KEY: `v1:${k1}`, NODE_ENV: "production" }));
   assert.equal(await loadKeyring({}), null);
 });
 
@@ -164,13 +177,13 @@ await test("fingerprints: unregistered keys refused, registered keys accepted", 
   await assert.rejects(verifyKeyFingerprints(ring1, table.query), /not registered/);
   assert.deepEqual((await registerKeyFingerprints(ring1, table.query)).sort(), ["index", "k1"]);
   await verifyKeyFingerprints(ring1, table.query);
-  assert.equal(table.rows.get("k1"), keyFingerprint(Buffer.from(k1, "base64")));
+  assert.equal(table.rows.get("k1"), keyFingerprint(ring1.fieldKeys.get("k1")));
 });
 
 await test("fingerprints: a different key under the same id is refused", async () => {
   const table = fakeTable();
   await registerKeyFingerprints(ring1, table.query);
-  const impostor = parseKeyring(JSON.stringify({ current: "k1", keys: { k1: newKey() } }), indexKey);
+  const impostor = parseKeySetting(`k1:${newKey()}`);
   await assert.rejects(verifyKeyFingerprints(impostor, table.query), /not the key this database uses/);
   await assert.rejects(registerKeyFingerprints(impostor, table.query), /different key/);
 });
@@ -179,8 +192,8 @@ await test("fingerprints: rotation registers k2; dropping k1 is refused", async 
   const table = fakeTable();
   await registerKeyFingerprints(ring1, table.query);
   assert.deepEqual(await registerKeyFingerprints(ring2, table.query), ["k2"]);
-  const onlyK2 = parseKeyring(JSON.stringify({ current: "k2", keys: { k2 } }), indexKey);
-  await assert.rejects(verifyKeyFingerprints(onlyK2, table.query), /uses encryption key "k1", which is not loaded/);
+  const onlyK2 = parseKeySetting(`k2:${k2}`);
+  await assert.rejects(verifyKeyFingerprints(onlyK2, table.query), /not the key this database uses|which is not loaded/);
 });
 
 console.log(process.exitCode ? "\nSome checks FAILED." : `\nAll ${passed} checks passed.`);

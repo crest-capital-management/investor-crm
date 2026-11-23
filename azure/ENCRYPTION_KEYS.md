@@ -5,66 +5,61 @@ encrypted column by column with AES-256-GCM (`lib/encryption.ts`). This page
 covers the keys: where they live, how to set them up, rotate them and not lose
 them.
 
-**If the keys are lost, the encrypted data cannot be recovered. Not by us, not
-by Microsoft.** Read "Do not lose the keys" before encrypting anything.
+**If the key is lost, the encrypted data cannot be recovered.** Read "Do not
+lose the key" before encrypting anything.
 
-## The two secrets
+## The settings
 
-Both live in **Azure Key Vault**. The app reads them once at start-up.
+Both are ordinary settings in the server's `.env` (and in `.env.local` on a PC
+that works against the same database).
 
-| Secret name | Value | Used for |
+| Setting | Value | Used for |
 |---|---|---|
-| `crm-field-keys` | JSON: `{"current":"k1","keys":{"k1":"<base64 of 32 random bytes>"}}` | Encrypting/decrypting columns. `current` is used for new values; every key listed can still be read. |
-| `crm-index-key` | `<base64 of 32 random bytes>` | Lookup hashes (`phone_hash`, `email_hash`) so phone/email can still be searched exactly. Must differ from every field key. |
+| `PII_ENCRYPTION_SECRET_KEY` | `v1:<secret>` | Encrypting/decrypting personal-data columns, and (derived from it) the lookup hashes `phone_hash` / `email_hash`. |
+| `BACKUP_ENCRYPTION_SECRET_KEY` | `v1:<secret>` | Encrypting backup files (package 5). |
+
+- `v1` is the key's version. It is stored with every encrypted value, so a
+  newer key (`v2`) can be added later while old data stays readable.
+- The secret must be **at least 32 characters** of real randomness. A shorter
+  secret is only accepted for testing: the app warns about it in development
+  and **refuses to start with it in production**, and the scripts refuse to
+  encrypt data or register it.
+- The app turns the secret into separate 256-bit keys (HKDF-SHA256): one for
+  encrypting, one for the lookup hashes.
+
+Generate a proper secret (prints a new random one; run it on the server or
+any PC with OpenSSL, e.g. Git Bash):
+
+```bash
+echo "v1:$(openssl rand -base64 32)"
+```
+
+Never send a real key by email or chat. Put it straight into the `.env` files.
+
+## Same key everywhere
+
+The server and every PC whose `.env.local` points at the live database must
+have **exactly the same** `PII_ENCRYPTION_SECRET_KEY`. Data written with one
+key can't be read with another.
 
 The database stores only a **fingerprint** of each key (`encryption_keys`
-table, never the key). The app and the scripts refuse to start if their keys
-don't match those fingerprints, so a wrong key can never write data nobody can
-read.
+table, never the key itself). The app and the scripts refuse to start if their
+key doesn't match, so a wrong key can never write data nobody can read.
 
-## One-time setup (someone with Azure access)
+## One-time setup
 
-1. **Create the vault** (or use an existing one) in the same subscription, with
-   *Azure role-based access control* permissions. Turn on **soft delete** and
-   **purge protection** (both protect against accidental deletion of the keys).
-2. **Give the server an identity**: on the VM (98.70.30.45) turn on the
-   *system-assigned managed identity*.
-3. **Grant access**: on the vault, *Access control (IAM)* → add role
-   **Key Vault Secrets User** to the VM's identity. For whoever runs the
-   scripts in `azure/` from a PC (`az login`), add the same role to their account.
-   Whoever creates the secrets needs **Key Vault Secrets Officer**.
-4. **Create the secrets** (Azure Cloud Shell or a PC with the Azure CLI; the keys
-   are generated and stored in one step and never printed):
-   ```bash
-   VAULT=<vault-name>
-   az keyvault secret set --vault-name "$VAULT" --name crm-field-keys \
-     --value "{\"current\":\"k1\",\"keys\":{\"k1\":\"$(openssl rand -base64 32)\"}}" --output none
-   az keyvault secret set --vault-name "$VAULT" --name crm-index-key \
-     --value "$(openssl rand -base64 32)" --output none
-   ```
-5. **Server setting**: add `KEY_VAULT_URL=https://<vault-name>.vault.azure.net/`
-   to the app's `.env` on the server.
-6. **Database**: apply the table and columns, then register the key fingerprints
-   (from a PC with `az login` and `KEY_VAULT_URL` in `.env.local`):
+1. Put the proper key in the server `.env` and in `.env.local`.
+2. Apply the table and columns, then register the key fingerprints (from the PC):
    ```bash
    node azure/run-sql.mjs azure/migrations/001_encryption.sql
    node azure/register-keys.mjs
    ```
-7. Restart the app. Its log should say
-   `[encryption] Keys loaded and verified (current key "k1").`
-
-## Development PCs
-
-`.env.local` on a development PC points at the **live** database. So a PC must
-use the **same** keys as the server: put `KEY_VAULT_URL` in `.env.local` and run
-`az login` (account needs *Key Vault Secrets User*). Never put real keys into
-`.env.local`.
-
-`CRM_FIELD_KEYS` / `CRM_INDEX_KEY` (same formats as the secrets) are only for a
-**separate test database**. They are refused when `NODE_ENV=production`, and
-`register-keys.mjs` only registers them with `--dev-keys`. If they ever reach
-the live database by mistake, the fingerprint check stops the app before it
-writes anything.
+   Registering ties the key id (`v1`) to that key in this database **for
+   good**. Never register a placeholder key on the live database
+   (`register-keys.mjs` refuses short keys unless `--allow-weak-key`, which is
+   for test databases only).
+3. Restart the app. Its log should say
+   `[encryption] Keys loaded and verified (current key "v1").`
 
 ## Encrypting a phase of columns
 
@@ -78,19 +73,20 @@ node azure/encrypt-columns.mjs 1               # encrypt (needs a backup < 6 h o
 node azure/encrypt-columns.mjs 1 --verify-only # decrypt every value once to check
 ```
 
-Run it on a copy of the database first. The script refuses if the keys don't
-match, a column is not `text`, the table still has triggers, or there is no
-backup from the last 6 hours (Settings → Back up now).
+Run it on a copy of the database first. The script refuses if the key doesn't
+match, the key is too short, a column has an unexpected type, a trigger fires
+on those columns, or there is no backup from the last 6 hours
+(Settings → Back up now).
 
 ### Phase 1 rollout (package 2), in this order
 
-1. Keys set up and registered (above), and the server log shows them verified.
+1. Proper key set up and registered (above), and the server log shows it verified.
 2. `node azure/run-sql.mjs azure/migrations/002_encrypted_last_message.sql`
    (the "last message" trigger must handle encrypted text before any is written).
 3. Deploy the package 2 code. From now on new names, phones, messages,
    broadcast texts, follow-up messages and portfolio analyses are written
    encrypted; old rows still read as before. The app **will not start without
-   the keys** (also on a development PC: `KEY_VAULT_URL` + `az login`).
+   `PII_ENCRYPTION_SECRET_KEY`** (also on a development PC).
 4. `node azure/encrypt-columns.mjs 1 --hash-only` (phone lookups by hash for old rows).
 5. Settings → Back up now, then `node azure/encrypt-columns.mjs 1 --dry-run`
    and `node azure/encrypt-columns.mjs 1`. It ends with a full check
@@ -99,24 +95,22 @@ backup from the last 6 hours (Settings → Back up now).
    received WhatsApp message (new and known number), sending a reply, a
    broadcast, unread list, groups, a portfolio analysis, follow-ups, export.
 
-## Rotating the field key
+## Rotating the key
 
-1. Add a new key and make it current, keeping the old one:
-   `{"current":"k2","keys":{"k1":"<old>","k2":"<new>"}}` (new secret version).
-2. `node azure/register-keys.mjs` (registers `k2`).
-3. Restart the app. New values use `k2`; old `k1` values still read.
-4. Optional, later: re-encrypt old values with `k2`, then remove `k1` from the
-   secret **and** its row in `encryption_keys`. Until then keep `k1`.
+1. Generate a new secret and put the new key **first**, keeping the old one:
+   `PII_ENCRYPTION_SECRET_KEY=v2:<new secret>,v1:<old secret>`
+   (same value on the server and in `.env.local`).
+2. `node azure/register-keys.mjs` (registers `v2`).
+3. Restart the app. New values use `v2`; old `v1` values still read.
+4. Keep `v1` in the list. It is also the source of the lookup-hash key (the
+   **last** key in the list always is), so removing it would break phone and
+   email lookups and is refused at start-up.
 
-The index key cannot simply be rotated: every `phone_hash`/`email_hash` would
-have to be recomputed. Only change it with a planned re-hash.
+## Do not lose the key
 
-## Do not lose the keys
-
-- Purge protection on the vault (setup step 1) stops the secrets being deleted
-  for good by mistake.
-- Keep an **offline copy** of both secret values somewhere separate from Azure
+- Keep an **offline copy** of both settings somewhere separate from the server
   (e.g. printed and stored in the office safe, or a company password manager
   with restricted access). Update it after every rotation.
-- Backups of the database are only useful together with the keys from the
-  same time. A backup made before a key was removed needs that old key.
+- The server `.env` is the only other copy. Include it in whatever protects the
+  server (VM backups/snapshots), with restricted access.
+- Database backups are only useful together with the keys from the same time.

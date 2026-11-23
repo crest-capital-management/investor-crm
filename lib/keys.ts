@@ -1,53 +1,37 @@
 /**
  * Loads the encryption keys and checks they are the ones this database uses.
  *
- * Where the keys come from:
- *   KEY_VAULT_URL set          -> Azure Key Vault, secrets "crm-field-keys" and
- *                                 "crm-index-key", signed in with
- *                                 DefaultAzureCredential (managed identity on the
- *                                 server, `az login` on a PC).
- *   CRM_FIELD_KEYS + CRM_INDEX_KEY -> taken from the environment. Development only:
- *                                 refused when NODE_ENV=production.
- *   neither                    -> no keys (null).
+ * The keys come from the PII_ENCRYPTION_SECRET_KEY setting (server .env, and
+ * .env.local on a PC that works against the same database): "v1:<secret>", or
+ * several "v2:<new>,v1:<old>" after a rotation (lib/encryption.ts
+ * parseKeySetting). Not set -> no keys (null).
+ *
+ * Secrets shorter than MIN_SECRET_LENGTH are refused when NODE_ENV=production
+ * and only warned about otherwise.
  *
  * Relative imports only, so the scripts in azure/ can import this file too.
  */
-import { keyFingerprint, parseKeyring, type Keyring } from "./encryption.ts";
+import { keyFingerprint, MIN_SECRET_LENGTH, parseKeySetting, type Keyring } from "./encryption.ts";
 
-export const FIELD_KEYS_SECRET = "crm-field-keys";
-export const INDEX_KEY_SECRET = "crm-index-key";
+export const KEY_SETTING = "PII_ENCRYPTION_SECRET_KEY";
 /** encryption_keys.key_id used for the blind-index key. */
 export const INDEX_KEY_ID = "index";
 
 type Env = Record<string, string | undefined>;
 
 export async function loadKeyring(env: Env = process.env): Promise<Keyring | null> {
-  const vaultUrl = env.KEY_VAULT_URL?.trim();
-  if (vaultUrl) {
-    const [{ DefaultAzureCredential }, { SecretClient }] = await Promise.all([
-      import("@azure/identity"),
-      import("@azure/keyvault-secrets"),
-    ]);
-    const client = new SecretClient(vaultUrl, new DefaultAzureCredential());
-    const [fieldKeys, indexKey] = await Promise.all([
-      client.getSecret(FIELD_KEYS_SECRET),
-      client.getSecret(INDEX_KEY_SECRET),
-    ]);
-    if (!fieldKeys.value || !indexKey.value) throw new Error("A Key Vault encryption secret is empty.");
-    return parseKeyring(fieldKeys.value, indexKey.value);
-  }
+  const setting = env[KEY_SETTING]?.trim();
+  if (!setting) return null;
 
-  const fieldKeys = env.CRM_FIELD_KEYS?.trim();
-  const indexKey = env.CRM_INDEX_KEY?.trim();
-  if (fieldKeys || indexKey) {
-    if (env.NODE_ENV === "production") {
-      throw new Error("CRM_FIELD_KEYS / CRM_INDEX_KEY are for development only. Use KEY_VAULT_URL in production.");
-    }
-    if (!fieldKeys || !indexKey) throw new Error("Set both CRM_FIELD_KEYS and CRM_INDEX_KEY, or neither.");
-    return parseKeyring(fieldKeys, indexKey);
+  const keyring = parseKeySetting(setting);
+  if (keyring.weakKeyIds.length) {
+    const message =
+      `Encryption key ${keyring.weakKeyIds.join(", ")} is shorter than ${MIN_SECRET_LENGTH} characters. ` +
+      'Generate a proper one: echo "v1:$(openssl rand -base64 32)"';
+    if (env.NODE_ENV === "production") throw new Error(message);
+    console.warn(`[encryption] WARNING: ${message}`);
   }
-
-  return null;
+  return keyring;
 }
 
 type Query = (sql: string, params?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }>;
@@ -84,7 +68,7 @@ export async function verifyKeyFingerprints(keyring: Keyring, query: Query): Pro
       throw new Error(`Encryption key "${id}" is not registered in this database. Run: node azure/register-keys.mjs`);
     }
     if (known !== fingerprint) {
-      throw new Error(`Encryption key "${id}" is not the key this database uses. Check KEY_VAULT_URL and the key secrets.`);
+      throw new Error(`Encryption key "${id}" is not the key this database uses. Check PII_ENCRYPTION_SECRET_KEY.`);
     }
   }
   for (const id of recorded.keys()) {

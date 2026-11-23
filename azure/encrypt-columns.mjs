@@ -254,12 +254,15 @@ run(async () => {
 
   loadEnv();
   const keyring = await loadKeyring(process.env);
-  if (!keyring) throw new Error("No encryption keys configured (KEY_VAULT_URL).");
+  if (!keyring) throw new Error("No encryption key configured (PII_ENCRYPTION_SECRET_KEY).");
 
   const { client, database, label } = await connect();
   try {
     console.log(`Database: ${label}`);
-    console.log(`Keys:     ${process.env.KEY_VAULT_URL?.trim() || "environment (development keys)"}, current key "${keyring.currentKeyId}"`);
+    console.log(`Keys:     ${[...keyring.fieldKeys.keys()].join(", ")} (current "${keyring.currentKeyId}")`);
+    if (keyring.weakKeyIds.length && !flag("--dry-run") && !flag("--verify-only")) {
+      throw new Error(`Key ${keyring.weakKeyIds.join(", ")} is too short to encrypt real data. Use a proper key first.`);
+    }
     await verifyKeyFingerprints(keyring, (sql, params) => client.query(sql, params));
     setKeyring(keyring);
 
