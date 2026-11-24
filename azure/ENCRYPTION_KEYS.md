@@ -95,6 +95,17 @@ on those columns, or there is no backup from the last 6 hours
    received WhatsApp message (new and known number), sending a reply, a
    broadcast, unread list, groups, a portfolio analysis, follow-ups, export.
 
+### Phase 2 rollout (package 3), after phase 1 is live
+
+No migration (`email_hash` came with 001). Steps in
+`azure/GO_LIVE_ENCRYPTION_PHASE2.md`: back up, deploy the package 3 code,
+`node azure/encrypt-columns.mjs 2 --hash-only`, `--dry-run`, then
+`node azure/encrypt-columns.mjs 2`. Columns: contact email (+ `email_hash`),
+notes and WhatsApp summary, meeting notes, WhatsApp profile names, broadcast
+recipient emails, login names (`crm_users.name`), the reminder email address.
+Logins are created with `node azure/set-password.mjs`, which needs the key
+(it stores the name encrypted).
+
 ## Rotating the key
 
 1. Generate a new secret and put the new key **first**, keeping the old one:

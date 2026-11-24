@@ -511,7 +511,7 @@ async function processSingleMessage({
     deleted_at: null,
     phone: phone ? encryptField(normalizeToLocalPhone(String(phone))) : null,
     phone_hash: phone ? phoneHash(String(phone)) : null,
-    profile_name: profileName?.trim() || null,
+    profile_name: encryptField(profileName?.trim() || null),
     wamid: messageId ?? null,
   };
   let insertError: unknown = null;

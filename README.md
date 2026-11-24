@@ -29,7 +29,7 @@ Live at https://investor-crm.crest-capital.com (Azure server, behind nginx, app 
 
 ## Database
 
-The whole schema is `azure/schema.sql` (one transaction, for an empty database). After applying it, register the encryption key with `node azure/register-keys.mjs` and create a login with `node azure/set-password.js`. The old Supabase migrations are in git history only.
+The whole schema is `azure/schema.sql` (one transaction, for an empty database). After applying it, register the encryption key with `node azure/register-keys.mjs` and create a login with `node azure/set-password.mjs`. The old Supabase migrations are in git history only.
 
 Changes to an existing database are numbered files in `azure/migrations/`, applied with `node azure/run-sql.mjs azure/migrations/<file>.sql` (it asks you to type the database name). They are also folded into `schema.sql`.
 
@@ -65,7 +65,7 @@ Copy `.env.example` to `.env.local` and fill in the values, including the encryp
 npm run dev
 ```
 
-Open http://localhost:3000. To set or change the login password, use `azure/set-password.js`.
+Open http://localhost:3000. To set or change the login password, use `azure/set-password.mjs`.
 
 Before committing:
 

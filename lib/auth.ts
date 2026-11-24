@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 /**
  * Anyone who signed in with an account in public.crm_users is a CRM user, with
  * full access for now (roles per user are planned). Logins are only created by
- * someone with database access (azure/set-password.js) and the session is a
+ * someone with database access (azure/set-password.mjs) and the session is a
  * signed cookie, so a valid session is enough: every guard below checks it.
  * (The CRM used to accept only the account whose id was CRM_OWNER_ID.)
  */

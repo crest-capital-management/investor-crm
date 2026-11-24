@@ -214,7 +214,7 @@ export async function markFollowUpAsDone(followUpId: string, contactId: string) 
     recorded = await db.tx(async (tx) => {
       await tx.execute(
         `insert into public.interactions (contact_id, type, note) values ($1, 'follow_up', $2)`,
-        [normalizedContactId, followUp.message],
+        [normalizedContactId, encryptField(followUp.message)],
       );
       // Conditional on is_done = false to avoid a race with another completion.
       const updated = await tx.execute(

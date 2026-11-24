@@ -1,4 +1,4 @@
-import { blindIndex, decryptField, decryptJson } from "@/lib/encryption";
+import { blindIndex, decryptField, decryptJson, normalizeEmail } from "@/lib/encryption";
 import { param } from "@/lib/sql";
 import { normalizeToLocalPhone } from "@/lib/whatsapp";
 
@@ -9,6 +9,11 @@ import { normalizeToLocalPhone } from "@/lib/whatsapp";
  */
 export function phoneHash(phone: string | null | undefined): string | null {
   return blindIndex("phone", phone ? normalizeToLocalPhone(phone) : null);
+}
+
+/** Lookup hash for an email (contacts.email_hash), compared trimmed and lower-cased. */
+export function emailHash(email: string | null | undefined): string | null {
+  return blindIndex("email", normalizeEmail(email));
 }
 
 /**
