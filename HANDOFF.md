@@ -41,7 +41,7 @@ IMPORTANT:
 - `register-keys.mjs`: record key fingerprints (once, and after adding a key).
 - `encrypt-columns.mjs <1|2|3> [--dry-run | --hash-only | --verify-only | --decrypt]`: per-phase migration; refuses without matching key, recent backup (< 6 h), right column types, no triggers on those columns.
 - `verify-encryption.mjs`: offline self-test (16 checks).
-- `copy-to-local.mjs`: copies live into a local PostgreSQL 16 (`LOCAL_DATABASE_URL` in `.env.local`, database `crest_crm_local`) and writes `.env.development.local` so `npm run dev` uses the copy with WhatsApp sending, storage and email off. Add `--local` to the other scripts to work on the copy. The local copy was deleted on 24 Nov after testing; recreate it with this script when needed, and delete it (and `.env.development.local`) afterwards, since it holds all CRM data.
+- `copy-to-local.mjs`: copies live into a local PostgreSQL 16 (`LOCAL_DATABASE_URL` in `.env.local`, database `crest_crm_local`) and writes `.env.development.local` so `npm run dev` uses the copy with WhatsApp sending, storage and email off. Add `--local` to the other scripts to work on the copy. A fresh copy (`crest_crm_local`, not encrypted, made 24 Nov) is kept on Aditya's PC for future tests, and `.env.development.local` is in place, so **`npm run dev` on his PC uses the local copy, not live**; delete that file to work on live again. Re-run the script for a fresh copy before each test. The copy holds all CRM data, so drop it when it is no longer needed.
 - PostgreSQL 16 is installed on Aditya's PC (local `postgres` password = the one in `LOCAL_DATABASE_URL`). DBeaver can view the copy.
 
 ## Next
