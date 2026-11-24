@@ -1,9 +1,11 @@
 # CREST CRM — HANDOFF / CONTEXT
-## Updated: 5 November 2026 (Azure migration DONE: the CRM runs on the company server, see section 0)
+## Updated: 24 November 2026 (TSK-38 security work: encryption phase 1 tested, ready to go live, see section 00; Azure migration done 5 Nov, section 0)
 
 You are continuing development of an internal single-user Investor CRM for CREST Capital Management. This document is the source of truth for context — read it fully before suggesting any changes.
 
 **CURRENT STATE (5 Nov 2026): the switch-over to Azure is done.** The live CRM is **https://investor-crm.crest-capital.com** (company Azure server 98.70.30.45, nginx → app on port 3002), database **`crest_crm`**, logins in **`crm_users`** (NextAuth + bcrypt), files in Azure Blob (account `crestfinancialreports`), WhatsApp webhook pointing at the company address. **Netlify (investor-crm.netlify.app) is frozen** (scheduled jobs off, builds stopped) and **Supabase is no longer used by the app**; both are kept as a way back for about 2 weeks. Phases 1-3 are merged into `master` (PRs #2, #3, #4). Open items: see "After the switch-over" in section 0. Older notes below describe the Supabase/Netlify setup and are history.
+
+**24 Nov 2026: VAPT security fixes (TSK-38), encryption phase 1 ready to go live.** Full plan: 13 VAPT items in 12 packages (0 foundations, 1 encryption core, 2-4 encryption phases 1-3, 5 encrypted backups, 6 CSP, 7 MFA/API auth/re-auth, 8 audit log, 9 rate limits + pagination, 10 PII masking for AI, 11 retention/erasure). Packages 0-2 are done; see section 00 below. Next on the day: follow `azure/GO_LIVE_ENCRYPTION_PHASE1.md`.
 
 **9 Nov 2026: code cleanup.** Six local branches, each built on the previous: `cleanup/dead-and-stale`, `perf/polling-and-queries`, `refactor/shared-helpers`, `refactor/split-contact-detail`, `refactor/split-broadcast-editor`, `cleanup/retire-netlify-supabase`. The last one removes `netlify.toml`, `netlify/`, `supabase/migrations/` and the one-off `azure/` copy scripts (all still in git history). `azure/schema.sql` is now the whole schema in one file (002 and 003 folded in; checked against the live catalog). The "run the migration" fallback code is gone, after a read-only check that every table, column and function it guarded exists in `crest_crm`. Still to do in dashboards (not code): move Meta's privacy-policy URL off `investor-crm.netlify.app` **before** deleting the Netlify site; then delete the site; pause Supabase after its 30 days. Notes below that mention those files are history.
 
@@ -14,10 +16,38 @@ IMPORTANT:
 - **Commit/push policy:** only when Aditya asks. "Commit and push" means **both remotes** (§1). Confirm before any destructive git operation.
 - **Branch rule (from 3 Nov 2026, instruction from Aditya's senior): every change goes on its own separate git branch (`git switch -c <name>`), never straight onto `master`.** Push a branch only when asked. Work done before 3 Nov was committed to `master` and pushed to both remotes.
 - **Database changes:** migrations are not auto-applied. Write a migration file and ask Aditya to paste it into the Supabase SQL Editor. Make code tolerate the column/table being missing until he has, or tell him to run the SQL **before** deploying.
+- **Encryption keys:** `PII_ENCRYPTION_SECRET_KEY` / `BACKUP_ENCRYPTION_SECRET_KEY` must be identical on the server and in `.env.local`; losing them loses the encrypted data. Never print, paste or commit them (section 00).
 - **Secrets:** never ask Aditya to paste tokens/keys/passwords into chat and never repeat them. He has pasted some anyway (a temporary token, the Meta app secret in a screenshot — since reset — and the CRM login password on 3 Oct, which he should change). Keys go straight into `.env.local` and Netlify environment variables.
 - **Never send real WhatsApp messages or emails to people while testing** unless Aditya asks. Safe tests: contacts with no 24-hour window (plain text is skipped), invalid 8-digit phone numbers, made-up numbers through the signed local webhook. Clean up test rows afterwards.
 - **Read `node_modules/next/dist/docs/`** before writing Next.js code (see `AGENTS.md`) — Next.js 16 with breaking changes.
 - **Privacy:** Aditya does not want his name/email shown to CRM users or the public. Code uses neutral examples ("Rahul Sharma", rahul@example.com). The public privacy page (`app/privacy-policy/page.tsx`) uses the company address **info@crest-group.co** (changed 5 Oct); its Contact us section lists the company name, website and registered office from the company policy document. Do not put a personal name or email in the app.
+
+---
+
+# 00. TSK-38 SECURITY WORK (from 18 Nov 2026)
+
+## Where it stands (24 Nov 2026)
+- **Branches** (each built on the previous, all pushed): `multi-user-login` (any `crm_users` account can sign in) → `sec/foundations` (package 0) → `sec/encryption-core` (package 1) → `sec/enc-phase-1` (package 2, plus the local test tools, the `--decrypt` rollback and the go-live runbook). One PR from `sec/enc-phase-1` into `master` carries all of it.
+- **Package 0:** `instrumentation.ts` + `lib/env.ts` refuse to start in production without the core secrets (`NEXTAUTH_SECRET` >= 32 chars, `SCHEDULER_SECRET` >= 16, `META_APP_SECRET`, `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, database); webhook verify token compared in constant time; `hasInvalidId()` (`lib/validate.ts`) in ~50 server actions and `notFound()` for bad ids on detail pages; media route skips deleted messages; HSTS header in `next.config.ts`.
+- **Package 1 (encryption core):** `lib/encryption.ts` AES-256-GCM per value, format `enc:v1:<keyId>:<iv>:<tag>:<ct>`, plain text passes through unchanged (so code can go live before data is migrated). **`lib/db.ts` decrypts every text value on read automatically**; only writes call `encryptField`. Values inside SQL-built JSON (`json_build_object`) are not decrypted automatically (`decryptJsonContact` in `lib/pii.ts`). Backups read with `db.rawQuery` so they keep the ciphertext. Lookup hashes (`phone_hash`, `email_hash`, HMAC) for exact matches.
+- **Keys:** no Azure Key Vault (not available). `PII_ENCRYPTION_SECRET_KEY` = `v1:<secret>` (rotation: `v2:<new>,v1:<old>`, newest first; the LAST key also makes the lookup-hash key, so keep `v1` listed for good) and `BACKUP_ENCRYPTION_SECRET_KEY` (package 5) in the server `.env` and Aditya's `.env.local`, same values, different from each other; an offline copy exists. Short secrets are refused in production. `encryption_keys` table holds fingerprints only; app and scripts refuse wrong or unregistered keys. Details: `azure/ENCRYPTION_KEYS.md`.
+- **Package 2 (phase 1):** encrypted on write: `contacts.name/phone`, `whatsapp_messages.message_text/phone`, `broadcast_recipients.name/phone`, `broadcasts.message_text`, `portfolio_updates.analysis` (stays jsonb, holds the ciphertext as a JSON string), `follow_ups.message`. Phone lookups use `phoneMatch()` (hash, with a plain-number fallback for rows not hashed yet). Name/phone search and A-Z sorting moved from SQL into the app (`lib/contact-filter.ts`, `sortByName`, `matchesSearch`). The app **refuses to start without the key**.
+- **Live database, already applied:** `azure/migrations/001_encryption.sql` (key table, hash columns + indexes), keys `v1` + `index` registered, `azure/migrations/002_encrypted_last_message.sql` (trigger copies encrypted text whole). The live app still runs the old code; **no live data is encrypted yet.**
+- **Tested on a full local copy** (23-24 Nov): encryption of all phase 1 rows, every page, search, export, webhook (unknown and known number), add/edit/import/update-from-file contacts, duplicate check by hash, follow-ups, groups, broadcast draft, rollback (`--decrypt`) and encrypting again. Not testable locally (do on live, with Aditya's own number): sending a broadcast, a new portfolio analysis, voice notes, auto-reply.
+- **Go-live:** `azure/GO_LIVE_ENCRYPTION_PHASE1.md` (before the day: Sharath checks `.env` lengths, nginx HSTS, notes the current commit; on the day: backup, deploy, `encrypt-columns.mjs 1 --hash-only`, `--dry-run`, real run, click-through; rollback = backup, `--decrypt`, redeploy old commit).
+
+## Scripts (`azure/`, read `.env.local`, print no data or secrets)
+- `run-sql.mjs <file>`: apply a migration (asks for the database name).
+- `register-keys.mjs`: record key fingerprints (once, and after adding a key).
+- `encrypt-columns.mjs <1|2|3> [--dry-run | --hash-only | --verify-only | --decrypt]`: per-phase migration; refuses without matching key, recent backup (< 6 h), right column types, no triggers on those columns.
+- `verify-encryption.mjs`: offline self-test (16 checks).
+- `copy-to-local.mjs`: copies live into a local PostgreSQL 16 (`LOCAL_DATABASE_URL` in `.env.local`, database `crest_crm_local`) and writes `.env.development.local` so `npm run dev` uses the copy with WhatsApp sending, storage and email off. Add `--local` to the other scripts to work on the copy. The local copy was deleted on 24 Nov after testing; recreate it with this script when needed, and delete it (and `.env.development.local`) afterwards, since it holds all CRM data.
+- PostgreSQL 16 is installed on Aditya's PC (local `postgres` password = the one in `LOCAL_DATABASE_URL`). DBeaver can view the copy.
+
+## Next
+- Go live with phase 1 (runbook above), then packages 3-4 (phases 2-3: email + notes etc., then company, tags, file names, media URLs; tags are `text[]` and need their own change), 5 (encrypted backups), 6-11.
+- Open decisions: `crm_users.email` stays plain (login); retention periods (package 11); overlap of package 7 with `admin-hierarchy-plan.md` (roles, per-contact access).
+- **No Claude attribution** in commits, PRs or files (Aditya, 23 Nov). Claude never pushes; Aditya pushes, Sharath deploys.
 
 ---
 

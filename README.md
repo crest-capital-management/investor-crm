@@ -1,6 +1,6 @@
 # CREST Capital Management - Investor CRM
 
-An internal, single-owner CRM for CREST Capital Management. It tracks investors, advisors and prospects across meetings, follow-ups and WhatsApp conversations.
+An internal CRM for CREST Capital Management. It tracks investors, advisors and prospects across meetings, follow-ups and WhatsApp conversations.
 
 Live at https://investor-crm.crest-capital.com (Azure server, behind nginx, app on port 3002).
 
@@ -12,6 +12,7 @@ Live at https://investor-crm.crest-capital.com (Azure server, behind nginx, app 
 - **WhatsApp (Meta Cloud API, direct, Coexistence mode)**: inbound webhook with delivery statuses, broadcasts (group/tag/manual targeting, scheduling, per-recipient results, retry failed), templates synced from Meta, unread inbox and unknown numbers, PDF auto-reply to a template button.
 - **Dashboard**: KPIs, follow-up trend, tag distribution, upcoming follow-ups.
 - **Settings**: daily reminder email, backups (download, stored nightly backups, restore).
+- **Security** (VAPT fixes, TSK-38): personal data encrypted in the database (AES-256-GCM), HSTS, startup checks of required secrets, id validation on every server action.
 
 ## Tech stack
 
@@ -20,14 +21,25 @@ Live at https://investor-crm.crest-capital.com (Azure server, behind nginx, app 
 | Framework | Next.js 16 (App Router), React 19, TypeScript |
 | Styling / UI | Tailwind CSS v4, Base UI (`@base-ui/react`) with shadcn/ui components, Lucide icons, recharts |
 | Database | PostgreSQL on the Azure server (`crest_crm`), accessed with `pg` (`lib/db.ts`) |
-| Login | NextAuth (credentials), single owner account in `crm_users`; route guard in `proxy.ts` |
+| Login | NextAuth (credentials), accounts in `crm_users`; route guard in `proxy.ts` |
+| Encryption | Field encryption in `lib/encryption.ts`, decrypted automatically on read in `lib/db.ts`; key from `PII_ENCRYPTION_SECRET_KEY` (`azure/ENCRYPTION_KEYS.md`) |
 | Files | Azure Blob Storage (`lib/storage.ts`), private containers with short-lived signed links |
 | AI | Claude (`@anthropic-ai/sdk`, `lib/claude.ts`); Gemini only for voice-note transcription (`lib/gemini.ts`) |
 | Email | Brevo, with Resend as fallback (`lib/resend.ts`) |
 
 ## Database
 
-The whole schema is `azure/schema.sql` (one transaction, for an empty database). After applying it, create the owner's login with `node azure/set-password.js`. The old Supabase migrations are in git history only.
+The whole schema is `azure/schema.sql` (one transaction, for an empty database). After applying it, register the encryption key with `node azure/register-keys.mjs` and create a login with `node azure/set-password.js`. The old Supabase migrations are in git history only.
+
+Changes to an existing database are numbered files in `azure/migrations/`, applied with `node azure/run-sql.mjs azure/migrations/<file>.sql` (it asks you to type the database name). They are also folded into `schema.sql`.
+
+### Encrypted data
+
+Personal data (contact names and phones, WhatsApp messages, broadcast texts and recipients, follow-ups, portfolio analyses, and later more columns) is stored encrypted as `enc:v1:...`. The app encrypts on write and decrypts on read, so the CRM shows it normally; in DBeaver or a raw query it is unreadable. Phone and email lookups use keyed hashes (`phone_hash`, `email_hash`).
+
+- **Key:** `PII_ENCRYPTION_SECRET_KEY` (and `BACKUP_ENCRYPTION_SECRET_KEY` for backups) must be the same on the server and in every `.env.local` that uses the live database. **Losing it means losing the encrypted data**: keep the offline copy up to date. The app refuses to start without the right key.
+- **Encrypting existing rows** (per phase): `node azure/encrypt-columns.mjs <phase>` with `--dry-run`, `--hash-only`, `--verify-only`, or `--decrypt` to roll back.
+- Setup, rotation and key safety: `azure/ENCRYPTION_KEYS.md`. Phase 1 go-live steps and rollback: `azure/GO_LIVE_ENCRYPTION_PHASE1.md`.
 
 ## Scheduled jobs
 
@@ -47,7 +59,7 @@ Prerequisites: Node.js 20+ and npm.
 npm install
 ```
 
-Copy `.env.example` to `.env.local` and fill in the values. `azure/SERVER_ENV.md` explains each one. **Note:** a `.env.local` pointing at the server's database works on live data.
+Copy `.env.example` to `.env.local` and fill in the values, including the encryption keys (same values as the server). `azure/SERVER_ENV.md` explains each one. **Note:** a `.env.local` pointing at the server's database works on live data.
 
 ```bash
 npm run dev
@@ -63,3 +75,13 @@ npm run build
 ```
 
 Inbound WhatsApp messages need a public URL, so they only arrive on the live server (or through a tunnel such as ngrok).
+
+### Testing on a local copy of the database
+
+To try a migration or a risky change without touching live data:
+
+1. Install PostgreSQL 16 (the server's version), e.g. `winget install PostgreSQL.PostgreSQL.16`, and give the `postgres` user a password.
+2. Add to `.env.local`: `LOCAL_DATABASE_URL=postgresql://postgres:<that password>@localhost:5432/crest_crm_local`
+3. `node azure/copy-to-local.mjs` copies the live database into `crest_crm_local` (live is only read) and writes `.env.development.local`, so `npm run dev` uses the copy with WhatsApp sending, file storage and email switched off.
+4. Run the `azure/` scripts with `--local` to work on the copy, e.g. `node azure/encrypt-columns.mjs 1 --dry-run --local`.
+5. Afterwards delete `.env.development.local` (so `npm run dev` uses live again) and drop `crest_crm_local` (it holds all CRM data).
