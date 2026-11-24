@@ -420,7 +420,7 @@ export async function startBroadcast(
           name: encryptField(c.name),
           phone: encryptField(c.phone),
           phone_hash: phoneHash(c.phone),
-          email: c.email ?? null,
+          email: encryptField(c.email ?? null),
         }));
         try {
           await tx.execute(

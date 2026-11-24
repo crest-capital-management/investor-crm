@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireActionAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { encryptField } from "@/lib/encryption";
 import type { AppSettings } from "@/lib/settings";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -33,7 +34,7 @@ export async function saveAppSettings(settings: AppSettings) {
          updated_at = excluded.updated_at`,
       [
         Boolean(settings.reminderEmailEnabled),
-        reminderEmailTo,
+        encryptField(reminderEmailTo),
         Boolean(settings.reminderIncludeFollowUps),
         Boolean(settings.reminderIncludeUnread),
         Boolean(settings.notifyMessages),

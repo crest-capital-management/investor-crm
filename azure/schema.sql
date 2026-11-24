@@ -7,7 +7,7 @@
 -- contact_sections were added on Azure (formerly 002_crm_users.sql and
 -- 003_contact_sections.sql) and are at the end of this file.
 --
--- After applying it, create the owner's login with `node azure/set-password.js`.
+-- After applying it, create the owner's login with `node azure/set-password.mjs`.
 --
 -- Left out on purpose (Supabase-only, or replaced by code):
 --   row-level security and its 11 policies, is_crm_owner() (auth.uid()),
@@ -365,7 +365,7 @@ CREATE TRIGGER whatsapp_messages_touch_contact AFTER INSERT OR UPDATE OF contact
 
 -- Logins (formerly azure/002_crm_users.sql). One row per person who can sign
 -- in; the owner's id is CRM_OWNER_ID. Passwords are stored only as bcrypt
--- hashes; set one with `node azure/set-password.js`.
+-- hashes; set one with `node azure/set-password.mjs`.
 create table public.crm_users (
   id uuid not null default gen_random_uuid(),
   email text not null,

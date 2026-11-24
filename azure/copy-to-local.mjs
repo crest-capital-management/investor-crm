@@ -18,7 +18,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import pg from "pg";
-import { confirmDatabase, loadEnv, localDatabaseUrl, run } from "./lib/script-env.mjs";
+import { confirmDatabase, loadEnv, localDatabaseUrl, root, run } from "./lib/script-env.mjs";
 
 function findPgBin() {
   const base = "C:\\Program Files\\PostgreSQL";
@@ -122,7 +122,35 @@ run(async () => {
   } finally {
     await Promise.all([liveClient.end(), localClient.end()]);
   }
+
+  writeDevOverride(local);
 });
+
+/**
+ * .env.development.local: `npm run dev` reads it before .env.local, so the app
+ * runs on the local copy with WhatsApp sending, file storage and email off.
+ * The password is URL-encoded because Next.js would treat a "$" as a variable.
+ */
+function writeDevOverride(local) {
+  const url = new URL(local);
+  const password = decodeURIComponent(url.password);
+  const encoded = encodeURIComponent(password).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  const connection = local.toString().replace(`:${url.password}@`, `:${encoded}@`);
+  const lines = [
+    "# LOCAL TEST ONLY (written by azure/copy-to-local.mjs). `npm run dev` reads this",
+    "# before .env.local: the app uses the local copy, and WhatsApp sending, Azure file",
+    "# storage and email are switched off. Delete this file to work on live again.",
+    `AZURE_CONNECTION_STRING=${connection}`,
+    "DATABASE_SSL_NO_VERIFY=",
+    "WHATSAPP_ACCESS_TOKEN=disabled-for-local-test",
+    "AZURE_STORAGE_CONNECTION_STRING=",
+    "BREVO_API_KEY=",
+    "RESEND_API_KEY=",
+    "",
+  ];
+  fs.writeFileSync(path.join(root, ".env.development.local"), lines.join("\n"));
+  console.log("\nWrote .env.development.local: `npm run dev` now uses the local copy (delete the file to go back to live).");
+}
 
 function liveSslOption(url) {
   return ["localhost", "127.0.0.1", "::1"].includes(url.hostname)

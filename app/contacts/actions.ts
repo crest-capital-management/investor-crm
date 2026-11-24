@@ -3,7 +3,7 @@
 import { requireActionAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { encryptField } from "@/lib/encryption";
-import { phoneHash, phoneMatch } from "@/lib/pii";
+import { emailHash, phoneHash, phoneMatch } from "@/lib/pii";
 import { isReplyWindowOpen } from "@/lib/reply-window";
 import { revalidatePath } from "next/cache";
 import { generateChatSummary } from "@/lib/contact-ai";
@@ -107,10 +107,13 @@ export async function addContact(formData: FormData) {
   let inserted: { id: string; phone: string };
   try {
     inserted = await db.one<{ id: string; phone: string }>(
-      `insert into public.contacts (name, phone, phone_hash, email, company, tags, date_saved, notes)
-       values ($1, $2, $8, $3, $4, $5::text[], $6, $7)
+      `insert into public.contacts (name, phone, phone_hash, email, email_hash, company, tags, date_saved, notes)
+       values ($1, $2, $8, $3, $9, $4, $5::text[], $6, $7)
        returning id, phone`,
-      [encryptField(name), encryptField(phone), normalizedEmail, company || null, tags, dateSaved || null, notes || null, phoneHash(phone)],
+      [
+        encryptField(name), encryptField(phone), encryptField(normalizedEmail), company || null, tags, dateSaved || null,
+        encryptField(notes || null), phoneHash(phone), emailHash(normalizedEmail),
+      ],
     );
   } catch (error) {
     console.error("[addContact] insert failed:", error instanceof Error ? error.message : error);
@@ -185,9 +188,13 @@ export async function updateContact(id: string, formData: FormData) {
   try {
     await db.execute(
       `update public.contacts
-          set name = $2, phone = $3, phone_hash = $9, email = $4, company = $5, tags = $6::text[], date_saved = $7, notes = $8
+          set name = $2, phone = $3, phone_hash = $9, email = $4, email_hash = $10, company = $5, tags = $6::text[],
+              date_saved = $7, notes = $8
         where id = $1`,
-      [id, encryptField(name), encryptField(phone), normalizedEmail, company || null, tags, dateSaved || null, notes || null, phoneHash(phone)],
+      [
+        id, encryptField(name), encryptField(phone), encryptField(normalizedEmail), company || null, tags, dateSaved || null,
+        encryptField(notes || null), phoneHash(phone), emailHash(normalizedEmail),
+      ],
     );
   } catch {
     return { error: "The contact could not be updated." };
@@ -309,7 +316,7 @@ export async function addMeetingNote(contactId: string, note: string) {
   try {
     await db.execute("insert into public.interactions (contact_id, type, note) values ($1, 'meeting', $2)", [
       normalizedContactId,
-      normalizedNote,
+      encryptField(normalizedNote),
     ]);
   } catch {
     return { error: "The meeting note could not be saved." };
@@ -798,7 +805,7 @@ export async function updateMeetingNote(
   try {
     await db.execute(
       "update public.interactions set note = $3 where id = $1 and contact_id = $2 and type = 'meeting'",
-      [normalizedNoteId, normalizedContactId, normalizedNote],
+      [normalizedNoteId, normalizedContactId, encryptField(normalizedNote)],
     );
   } catch {
     return { error: "The meeting note could not be updated." };
@@ -1136,21 +1143,23 @@ export async function importContacts(rowsRaw: string, sectionId?: string | null)
       name: encryptField(row.name),
       phone: encryptField(normalizePhone(row.phone)),
       phone_hash: phoneHash(normalizePhone(row.phone)),
-      email: row.email ? row.email.toLowerCase() : null,
+      email: encryptField(row.email ? row.email.toLowerCase() : null),
+      email_hash: emailHash(row.email),
       company: row.company || null,
       tags: row.tags,
       date_saved: row.dateSaved || null,
-      notes: row.notes || null,
+      notes: encryptField(row.notes || null),
     }));
 
     // One statement per batch, so a batch is saved completely or not at all.
     let insertedRows: Array<{ id: string; phone: string }> | null = null;
     try {
       insertedRows = await db.query<{ id: string; phone: string }>(
-        `insert into public.contacts (name, phone, phone_hash, email, company, tags, date_saved, notes)
-         select x.name, x.phone, x.phone_hash, x.email, x.company, x.tags, x.date_saved, x.notes
+        `insert into public.contacts (name, phone, phone_hash, email, email_hash, company, tags, date_saved, notes)
+         select x.name, x.phone, x.phone_hash, x.email, x.email_hash, x.company, x.tags, x.date_saved, x.notes
            from jsonb_to_recordset($1::jsonb) as x(
-             name text, phone text, phone_hash text, email text, company text, tags text[], date_saved date, notes text
+             name text, phone text, phone_hash text, email text, email_hash text, company text, tags text[],
+             date_saved date, notes text
            )
          returning id, phone`,
         [JSON.stringify(batch)],
@@ -1250,7 +1259,7 @@ export async function generateWhatsAppSummary(
     try {
       await db.execute(
         "update public.contacts set whatsapp_summary = $2, whatsapp_summary_generated_at = $3 where id = $1",
-        [normalizedContactId, summary, nowIso],
+        [normalizedContactId, encryptField(summary), nowIso],
       );
     } catch {
       return { error: "Failed to save the WhatsApp summary." };

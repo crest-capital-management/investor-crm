@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { requireActionAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { encryptField } from "@/lib/encryption";
+import { emailHash } from "@/lib/pii";
 import { PROTECTED_TAGS, TAG_OPTIONS } from "@/lib/tags";
 import { parseTagCell } from "@/lib/tag-match";
 import { normalizeToLocalPhone } from "@/lib/whatsapp";
@@ -290,14 +291,31 @@ export async function applyContactUpdate(
   let updated = 0;
   for (let i = 0; i < plan.items.length; i += CHUNK) {
     try {
-      // Matching happened on the decrypted phones above; names are written encrypted.
-      const chunk = plan.items
-        .slice(i, i + CHUNK)
-        .map((item) => (item.name === undefined ? item : { ...item, name: encryptField(item.name) ?? undefined }));
-      const row = await db.one<{ n: number | null }>("select public.bulk_update_contacts($1::jsonb) as n", [
-        JSON.stringify(chunk),
-      ]);
-      updated += Number(row.n ?? 0);
+      // Matching happened on the decrypted phones above; personal fields are written
+      // encrypted, with the email's lookup hash. (Replaces public.bulk_update_contacts,
+      // which knows nothing about email_hash.) One statement, so a chunk is all or nothing.
+      const chunk = plan.items.slice(i, i + CHUNK).map((item) => ({
+        ...item,
+        name: encryptField(item.name),
+        email: encryptField(item.email),
+        email_hash: item.email === undefined ? null : emailHash(item.email),
+        notes: encryptField(item.notes),
+      }));
+      updated += await db.execute(
+        `update public.contacts c
+            set name = coalesce(r.name, c.name),
+                email = coalesce(r.email, c.email),
+                email_hash = case when r.email is null then c.email_hash else r.email_hash end,
+                company = coalesce(r.company, c.company),
+                notes = coalesce(r.notes, c.notes),
+                date_saved = coalesce(r.date_saved, c.date_saved),
+                tags = coalesce(r.tags, c.tags)
+           from jsonb_to_recordset($1::jsonb) as r(
+             id uuid, name text, email text, email_hash text, company text, notes text, date_saved date, tags text[]
+           )
+          where c.id = r.id and c.deleted_at is null`,
+        [JSON.stringify(chunk)],
+      );
     } catch (error) {
       console.error("[applyContactUpdate] failed:", error instanceof Error ? error.message : error);
       return {
