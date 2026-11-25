@@ -10,7 +10,7 @@ import { decryptField, isEncrypted } from "@/lib/encryption";
  * bigint / numeric come back as numbers. jsonb and text[] are parsed by pg.
  *
  * Encrypted columns (lib/encryption.ts) are decrypted here, on read: every
- * text/varchar value in the "enc:v1:..." format is decrypted before the app
+ * text/varchar value (and each element of a text[]) in the "enc:v1:..." format is decrypted before the app
  * sees it, so queries, joins and SQL functions read them unchanged. Writes
  * must still call encryptField. Values inside json/jsonb results (json_agg,
  * row_to_json) are NOT decrypted; decrypt those where they are built.
@@ -31,11 +31,20 @@ function readText(value: string): string {
   return isEncrypted(value) ? decryptField(value)! : value;
 }
 
+// text[] / varchar[] (contacts.tags): each element is decrypted the same way.
+const TEXT_ARRAY_OIDS = new Set([1009, 1015]);
+
+function readTextArray(oid: number) {
+  const parseArray = types.getTypeParser(oid, "text") as (value: string) => Array<string | null>;
+  return (value: string) => parseArray(value).map((item) => (item == null ? item : readText(item)));
+}
+
 const decryptingTypes: CustomTypesConfig = {
   getTypeParser: ((oid: number, format?: "text" | "binary") => {
     if (oid === types.builtins.TEXT || oid === types.builtins.VARCHAR || oid === types.builtins.BPCHAR) {
       return readText;
     }
+    if (TEXT_ARRAY_OIDS.has(oid) && format !== "binary") return readTextArray(oid);
     return types.getTypeParser(oid, format);
   }) as CustomTypesConfig["getTypeParser"],
 };

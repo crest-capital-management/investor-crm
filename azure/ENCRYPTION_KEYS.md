@@ -106,6 +106,19 @@ recipient emails, login names (`crm_users.name`), the reminder email address.
 Logins are created with `node azure/set-password.mjs`, which needs the key
 (it stores the name encrypted).
 
+### Phase 3 rollout (package 4), after phase 2 is live
+
+Migration first: `node azure/run-sql.mjs azure/migrations/003_encrypted_tags.sql`
+(adds `contacts.tag_hashes`; the "last message" trigger stops writing a plain
+"Attachment"). Then the steps in `azure/GO_LIVE_ENCRYPTION_PHASE3.md`: back up,
+deploy the package 4 code, `node azure/encrypt-columns.mjs 3 --hash-only`,
+`--dry-run`, then `node azure/encrypt-columns.mjs 3`. Columns: contact company,
+last-message preview, AI and manual score reasons, tags (each tag encrypted,
+one `tag_hashes` entry per tag for the tag filters), portfolio update title,
+file path and file name, WhatsApp media addresses. Rolling phase 3 back
+(`3 --decrypt`) also empties `tag_hashes`, and is needed before deploying
+older code (it does not read encrypted tags).
+
 ## Rotating the key
 
 1. Generate a new secret and put the new key **first**, keeping the old one:

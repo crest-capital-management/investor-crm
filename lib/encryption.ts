@@ -186,9 +186,9 @@ export function decryptJson<T = unknown>(value: unknown): T | null {
 
 /**
  * Keyed hash of an already-normalised value, for exact-match lookups on
- * encrypted columns. `kind` keeps phone and email hashes apart. Empty -> null.
+ * encrypted columns. `kind` keeps phone, email and tag hashes apart. Empty -> null.
  */
-export function blindIndex(kind: "phone" | "email", normalized: string | null | undefined): string | null {
+export function blindIndex(kind: "phone" | "email" | "tag", normalized: string | null | undefined): string | null {
   if (!normalized) return null;
   return crypto.createHmac("sha256", keyring().indexKey).update(`${kind}\u0000${normalized}`, "utf8").digest("hex");
 }

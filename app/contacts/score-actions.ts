@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireActionAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { decryptJson } from "@/lib/encryption";
+import { decryptJson, encryptField } from "@/lib/encryption";
 import type { PortfolioAnalysis } from "@/lib/portfolio-types";
 import { scoreProspect, type ScoringInput } from "@/lib/prospect-scoring";
 import { loadContactHistory, type ContactHistory } from "@/lib/ai-context";
@@ -77,7 +77,7 @@ export async function suggestProspectScore(
           set ai_score = $2, ai_score_reason = $3, ai_scored_at = $4
         where id = $1
         returning ${PROSPECT_SCORE_COLUMNS}`,
-      [id, result.score, result.reason, new Date().toISOString()],
+      [id, result.score, encryptField(result.reason), new Date().toISOString()],
     );
   } catch {
     return { error: "The score could not be saved." };
@@ -111,7 +111,7 @@ export async function setManualScore(
           set manual_score = $2, manual_score_reason = $3, manual_scored_at = $4
         where id = $1 and deleted_at is null
         returning ${PROSPECT_SCORE_COLUMNS}`,
-      [id, score, cleanReason || null, new Date().toISOString()],
+      [id, score, encryptField(cleanReason || null), new Date().toISOString()],
     );
   } catch {
     return { error: "The score could not be saved." };

@@ -75,7 +75,7 @@ export async function insertOutboundMessage(
     contact_id: row.contact_id,
     direction: "out",
     message_text: encryptField(row.message_text),
-    media_url: row.media_url ?? null,
+    media_url: encryptField(row.media_url ?? null),
     sent_at: row.sent_at ?? new Date().toISOString(),
   };
 

@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { requireActionAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { encryptField } from "@/lib/encryption";
-import { emailHash } from "@/lib/pii";
+import { emailHash, tagColumns } from "@/lib/pii";
 import { PROTECTED_TAGS, TAG_OPTIONS } from "@/lib/tags";
 import { parseTagCell } from "@/lib/tag-match";
 import { normalizeToLocalPhone } from "@/lib/whatsapp";
@@ -41,11 +41,33 @@ export async function bulkChangeTags(
   let updated = 0;
   for (let i = 0; i < contactIds.length; i += CHUNK) {
     try {
-      const row = await db.one<{ n: number | null }>(
-        "select public.bulk_change_contact_tags($1::uuid[], $2, $3) as n",
-        [contactIds.slice(i, i + CHUNK), mode, normalizedTag],
-      );
-      updated += Number(row.n ?? 0);
+      // Tags are encrypted, so the change is worked out here on the decrypted tags
+      // (replaces public.bulk_change_contact_tags). The rows are locked while they
+      // change, so a chunk is all or nothing.
+      updated += await db.tx(async (tx) => {
+        const rows = await tx.query<{ id: string; tags: string[] | null }>(
+          "select id, tags from public.contacts where id = any($1::uuid[]) and deleted_at is null for update",
+          [contactIds.slice(i, i + CHUNK)],
+        );
+        const changes = rows.flatMap((row) => {
+          const current = row.tags ?? [];
+          const has = current.includes(normalizedTag);
+          let next: string[] | null = null;
+          if (mode === "add" && !has) next = [...current, normalizedTag];
+          else if (mode === "remove" && has) next = current.filter((value) => value !== normalizedTag);
+          else if (mode === "replace" && !(current.length === 1 && has)) next = [normalizedTag];
+          if (!next) return [];
+          const { tags, tagHashes } = tagColumns(next);
+          return [{ id: row.id, tags, tag_hashes: tagHashes }];
+        });
+        if (changes.length === 0) return 0;
+        return tx.execute(
+          `update public.contacts c set tags = r.tags, tag_hashes = r.tag_hashes
+             from jsonb_to_recordset($1::jsonb) as r(id uuid, tags text[], tag_hashes text[])
+            where c.id = r.id`,
+          [JSON.stringify(changes)],
+        );
+      });
     } catch (error) {
       console.error("[bulkChangeTags] failed:", error instanceof Error ? error.message : error);
       return {
@@ -292,15 +314,21 @@ export async function applyContactUpdate(
   for (let i = 0; i < plan.items.length; i += CHUNK) {
     try {
       // Matching happened on the decrypted phones above; personal fields are written
-      // encrypted, with the email's lookup hash. (Replaces public.bulk_update_contacts,
-      // which knows nothing about email_hash.) One statement, so a chunk is all or nothing.
-      const chunk = plan.items.slice(i, i + CHUNK).map((item) => ({
-        ...item,
-        name: encryptField(item.name),
-        email: encryptField(item.email),
-        email_hash: item.email === undefined ? null : emailHash(item.email),
-        notes: encryptField(item.notes),
-      }));
+      // encrypted, with the lookup hashes of the email and tags. (Replaces public.bulk_update_contacts,
+      // which knows nothing about the hashes.) One statement, so a chunk is all or nothing.
+      const chunk = plan.items.slice(i, i + CHUNK).map((item) => {
+        const tags = item.tags === undefined ? null : tagColumns(item.tags);
+        return {
+          ...item,
+          name: encryptField(item.name),
+          email: encryptField(item.email),
+          email_hash: item.email === undefined ? null : emailHash(item.email),
+          company: encryptField(item.company),
+          notes: encryptField(item.notes),
+          tags: tags?.tags ?? null,
+          tag_hashes: tags?.tagHashes ?? null,
+        };
+      });
       updated += await db.execute(
         `update public.contacts c
             set name = coalesce(r.name, c.name),
@@ -309,9 +337,11 @@ export async function applyContactUpdate(
                 company = coalesce(r.company, c.company),
                 notes = coalesce(r.notes, c.notes),
                 date_saved = coalesce(r.date_saved, c.date_saved),
-                tags = coalesce(r.tags, c.tags)
+                tags = coalesce(r.tags, c.tags),
+                tag_hashes = case when r.tags is null then c.tag_hashes else r.tag_hashes end
            from jsonb_to_recordset($1::jsonb) as r(
-             id uuid, name text, email text, email_hash text, company text, notes text, date_saved date, tags text[]
+             id uuid, name text, email text, email_hash text, company text, notes text, date_saved date,
+             tags text[], tag_hashes text[]
            )
           where c.id = r.id and c.deleted_at is null`,
         [JSON.stringify(chunk)],

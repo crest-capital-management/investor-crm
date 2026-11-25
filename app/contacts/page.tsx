@@ -11,7 +11,7 @@ import { getUnreadCountsByContact } from "@/lib/unread";
 import { CONTACT_GROUPS_COLUMN } from "@/lib/contact-queries";
 import { pageClause, param } from "@/lib/sql";
 import { contactsMatching } from "@/lib/contact-filter";
-import { messagePreview } from "@/lib/pii";
+import { messagePreview, tagMatch } from "@/lib/pii";
 import { INVESTOR_TAGS } from "@/lib/tags";
 import { loadSectionsInfo } from "@/lib/sections";
 import { ALL_SECTIONS, parseSectionParam, sectionCondition, type SectionsInfo } from "@/lib/section-filter";
@@ -56,7 +56,7 @@ export default async function ContactsPage({
     const conditions = ["c.deleted_at is null"];
     const inSectionSql = sectionCondition(section, filterParams);
     if (inSectionSql) conditions.push(inSectionSql);
-    if (selectedTags.length > 0) conditions.push(`c.tags && ${param(filterParams, selectedTags)}::text[]`);
+    if (selectedTags.length > 0) conditions.push(tagMatch("c.", filterParams, selectedTags));
     if (search) {
       // Name and phone are encrypted: the search runs on the decrypted values, then filters by id.
       const matches = await contactsMatching(conditions.join(" and "), filterParams, search);
@@ -65,16 +65,17 @@ export default async function ContactsPage({
     const where = conditions.join(" and ");
 
     // The overview cards count the chosen section only.
-    const statsParams: unknown[] = [INVESTOR_TAGS];
+    const statsParams: unknown[] = [];
     const statsSection = sectionCondition(section, statsParams);
     const statsWhere = `c.deleted_at is null${statsSection ? ` and ${statsSection}` : ""}`;
+    const isInvestor = tagMatch("c.", statsParams, INVESTOR_TAGS);
 
     const [filtered, stats, unread] = await Promise.all([
       db.one<{ count: number }>(`select count(*)::int as count from public.contacts c where ${where}`, filterParams),
       db.one<{ total: number; investors: number; tagged: number; groups: number }>(
         `select
            (select count(*)::int from public.contacts c where ${statsWhere}) as total,
-           (select count(*)::int from public.contacts c where ${statsWhere} and c.tags && $1::text[]) as investors,
+           (select count(*)::int from public.contacts c where ${statsWhere} and ${isInvestor}) as investors,
            (select count(*)::int from public.contacts c where ${statsWhere} and c.tags <> '{}') as tagged,
            (select count(*)::int from public.groups) as groups`,
         statsParams,

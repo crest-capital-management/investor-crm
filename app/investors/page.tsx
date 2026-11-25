@@ -7,6 +7,7 @@ import { INVESTOR_TAGS } from "@/lib/tags";
 import { PAGE_SIZE, getTotalPages, parsePage } from "@/lib/pagination";
 import { db } from "@/lib/db";
 import { param } from "@/lib/sql";
+import { tagMatch } from "@/lib/pii";
 import { contactsMatching, sortByRecentChatThenName } from "@/lib/contact-filter";
 import { getUnreadCountsByContact } from "@/lib/unread";
 import { CONTACT_GROUPS_COLUMN } from "@/lib/contact-queries";
@@ -52,8 +53,8 @@ export default async function InvestorsPage({
     sectionsInfo = await loadSectionsInfo({ investorTags: INVESTOR_TAGS });
     section = parseSectionParam(resolvedSearchParams.section, sectionsInfo);
 
-    const filterParams: unknown[] = [INVESTOR_TAGS];
-    let filter = "c.tags && $1::text[] and c.deleted_at is null";
+    const filterParams: unknown[] = [];
+    let filter = `${tagMatch("c.", filterParams, INVESTOR_TAGS)} and c.deleted_at is null`;
     const inSectionSql = sectionCondition(section, filterParams);
     if (inSectionSql) filter += ` and ${inSectionSql}`;
     // Name, phone (and later email, company) are encrypted, so searching and the

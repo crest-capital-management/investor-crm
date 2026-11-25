@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { phoneMatch, sortByName } from "@/lib/pii";
+import { phoneMatch, sortByName, tagMatch } from "@/lib/pii";
 import type { ContactSection, SectionsInfo } from "@/lib/section-filter";
 import { isUuid } from "@/lib/validate";
 
@@ -11,8 +11,7 @@ export async function loadSectionsInfo(options: { investorTags?: string[] } = {}
   const params: unknown[] = [];
   let extra = "";
   if (options.investorTags) {
-    params.push(options.investorTags);
-    extra = " and c.tags && $1::text[]";
+    extra = ` and ${tagMatch("c.", params, options.investorTags)}`;
   }
   const [sections, totals] = await Promise.all([
     db.query<{ id: string; name: string; count: number }>(

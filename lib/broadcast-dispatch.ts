@@ -1,7 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { encryptField } from "@/lib/encryption";
-import { phoneHash, sortByName } from "@/lib/pii";
+import { phoneHash, sortByName, tagMatch } from "@/lib/pii";
 import {
   normalizePhoneForWhatsApp,
   sendWhatsAppMessage,
@@ -362,11 +362,12 @@ async function resolveTargetContacts(prepared: PreparedBroadcast): Promise<Targe
   }
 
   if (prepared.targetType === "tag") {
+    const params: unknown[] = [];
     return db.query<TargetContact>(
       `select id, name, phone, email
          from contacts
-        where tags && $1::text[] and deleted_at is null`,
-      [prepared.targetIds],
+        where ${tagMatch("", params, prepared.targetIds)} and deleted_at is null`,
+      params,
     );
   }
 

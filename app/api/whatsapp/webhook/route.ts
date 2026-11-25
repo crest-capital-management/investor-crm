@@ -477,7 +477,7 @@ async function processSingleMessage({
 
   // Database-level deduplication. WhatsApp gives every message a unique ID, so
   // that is the check. Only a message without an ID falls back to comparing
-  // content; the text is encrypted, so it is compared here after reading.
+  // content; the text and media address are encrypted, so they are compared here after reading.
   try {
     if (messageId) {
       const sameId = await db.maybeOne<{ id: string }>(
@@ -486,15 +486,16 @@ async function processSingleMessage({
       );
       if (sameId) return; // already saved
     } else {
-      const sameMoment = await db.query<{ message_text: string | null }>(
-        `select message_text from whatsapp_messages
+      const sameMoment = await db.query<{ message_text: string | null; media_url: string | null }>(
+        `select message_text, media_url from whatsapp_messages
           where direction = $1 and sent_at = $2::timestamptz and deleted_at is null
             and contact_id is not distinct from $3::uuid
-            and media_url is not distinct from $4::text
           limit 20`,
-        [direction, sentAt, contactId, mediaUrl],
+        [direction, sentAt, contactId],
       );
-      if (sameMoment.some((saved) => (saved.message_text ?? null) === (messageText ?? null))) return; // already saved
+      const isSame = (saved: { message_text: string | null; media_url: string | null }) =>
+        (saved.message_text ?? null) === (messageText ?? null) && (saved.media_url ?? null) === (mediaUrl ?? null);
+      if (sameMoment.some(isSame)) return; // already saved
     }
   } catch {
     // A failed duplicate check falls through to the insert, as before.
@@ -506,7 +507,7 @@ async function processSingleMessage({
     contact_id: contactId,
     direction,
     message_text: encryptField(messageText),
-    media_url: mediaUrl,
+    media_url: encryptField(mediaUrl),
     sent_at: sentAt,
     deleted_at: null,
     phone: phone ? encryptField(normalizeToLocalPhone(String(phone))) : null,

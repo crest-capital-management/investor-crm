@@ -3,7 +3,7 @@
 import { requireActionAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { encryptField } from "@/lib/encryption";
-import { emailHash, phoneHash, phoneMatch } from "@/lib/pii";
+import { emailHash, phoneHash, phoneMatch, tagColumns } from "@/lib/pii";
 import { isReplyWindowOpen } from "@/lib/reply-window";
 import { revalidatePath } from "next/cache";
 import { generateChatSummary } from "@/lib/contact-ai";
@@ -104,15 +104,16 @@ export async function addContact(formData: FormData) {
     return { error: sectionName ? `This phone number is already saved, in the "${sectionName}" section.` : DUPLICATE_PHONE_ERROR };
   }
 
+  const stored = tagColumns(Array.isArray(tags) ? tags.filter((tag): tag is string => typeof tag === "string") : []);
   let inserted: { id: string; phone: string };
   try {
     inserted = await db.one<{ id: string; phone: string }>(
-      `insert into public.contacts (name, phone, phone_hash, email, email_hash, company, tags, date_saved, notes)
-       values ($1, $2, $8, $3, $9, $4, $5::text[], $6, $7)
+      `insert into public.contacts (name, phone, phone_hash, email, email_hash, company, tags, tag_hashes, date_saved, notes)
+       values ($1, $2, $8, $3, $9, $4, $5::text[], $10::text[], $6, $7)
        returning id, phone`,
       [
-        encryptField(name), encryptField(phone), encryptField(normalizedEmail), company || null, tags, dateSaved || null,
-        encryptField(notes || null), phoneHash(phone), emailHash(normalizedEmail),
+        encryptField(name), encryptField(phone), encryptField(normalizedEmail), encryptField(company || null), stored.tags,
+        dateSaved || null, encryptField(notes || null), phoneHash(phone), emailHash(normalizedEmail), stored.tagHashes,
       ],
     );
   } catch (error) {
@@ -185,15 +186,17 @@ export async function updateContact(id: string, formData: FormData) {
     return { error: DUPLICATE_PHONE_ERROR };
   }
 
+  const stored = tagColumns(tags);
   try {
     await db.execute(
       `update public.contacts
           set name = $2, phone = $3, phone_hash = $9, email = $4, email_hash = $10, company = $5, tags = $6::text[],
-              date_saved = $7, notes = $8
+              tag_hashes = $11::text[], date_saved = $7, notes = $8
         where id = $1`,
       [
-        id, encryptField(name), encryptField(phone), encryptField(normalizedEmail), company || null, tags, dateSaved || null,
-        encryptField(notes || null), phoneHash(phone), emailHash(normalizedEmail),
+        id, encryptField(name), encryptField(phone), encryptField(normalizedEmail), encryptField(company || null),
+        stored.tags, dateSaved || null, encryptField(notes || null), phoneHash(phone), emailHash(normalizedEmail),
+        stored.tagHashes,
       ],
     );
   } catch {
@@ -262,7 +265,10 @@ export async function addTagToContact(id: string, tag: string) {
 
   const updatedTags = [...tags, normalizedTag];
   try {
-    await db.execute("update public.contacts set tags = $2::text[] where id = $1", [id, updatedTags]);
+    const stored = tagColumns(updatedTags);
+    await db.execute("update public.contacts set tags = $2::text[], tag_hashes = $3::text[] where id = $1", [
+      id, stored.tags, stored.tagHashes,
+    ]);
   } catch {
     return { error: "The tag could not be added." };
   }
@@ -290,7 +296,10 @@ export async function removeTagFromContact(id: string, tag: string) {
   if (updatedTags.length === tags.length) return { error: "That tag is not on this contact." };
 
   try {
-    await db.execute("update public.contacts set tags = $2::text[] where id = $1", [id, updatedTags]);
+    const stored = tagColumns(updatedTags);
+    await db.execute("update public.contacts set tags = $2::text[], tag_hashes = $3::text[] where id = $1", [
+      id, stored.tags, stored.tagHashes,
+    ]);
   } catch {
     return { error: "The tag could not be removed." };
   }
@@ -1139,27 +1148,31 @@ export async function importContacts(rowsRaw: string, sectionId?: string | null)
   }
 
   for (let i = 0; i < rowsToInsert.length; i += IMPORT_INSERT_BATCH_SIZE) {
-    const batch = rowsToInsert.slice(i, i + IMPORT_INSERT_BATCH_SIZE).map((row) => ({
-      name: encryptField(row.name),
-      phone: encryptField(normalizePhone(row.phone)),
-      phone_hash: phoneHash(normalizePhone(row.phone)),
-      email: encryptField(row.email ? row.email.toLowerCase() : null),
-      email_hash: emailHash(row.email),
-      company: row.company || null,
-      tags: row.tags,
-      date_saved: row.dateSaved || null,
-      notes: encryptField(row.notes || null),
-    }));
+    const batch = rowsToInsert.slice(i, i + IMPORT_INSERT_BATCH_SIZE).map((row) => {
+      const stored = tagColumns(row.tags);
+      return {
+        name: encryptField(row.name),
+        phone: encryptField(normalizePhone(row.phone)),
+        phone_hash: phoneHash(normalizePhone(row.phone)),
+        email: encryptField(row.email ? row.email.toLowerCase() : null),
+        email_hash: emailHash(row.email),
+        company: encryptField(row.company || null),
+        tags: stored.tags,
+        tag_hashes: stored.tagHashes,
+        date_saved: row.dateSaved || null,
+        notes: encryptField(row.notes || null),
+      };
+    });
 
     // One statement per batch, so a batch is saved completely or not at all.
     let insertedRows: Array<{ id: string; phone: string }> | null = null;
     try {
       insertedRows = await db.query<{ id: string; phone: string }>(
-        `insert into public.contacts (name, phone, phone_hash, email, email_hash, company, tags, date_saved, notes)
-         select x.name, x.phone, x.phone_hash, x.email, x.email_hash, x.company, x.tags, x.date_saved, x.notes
+        `insert into public.contacts (name, phone, phone_hash, email, email_hash, company, tags, tag_hashes, date_saved, notes)
+         select x.name, x.phone, x.phone_hash, x.email, x.email_hash, x.company, x.tags, x.tag_hashes, x.date_saved, x.notes
            from jsonb_to_recordset($1::jsonb) as x(
              name text, phone text, phone_hash text, email text, email_hash text, company text, tags text[],
-             date_saved date, notes text
+             tag_hashes text[], date_saved date, notes text
            )
          returning id, phone`,
         [JSON.stringify(batch)],

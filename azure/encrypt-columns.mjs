@@ -27,11 +27,13 @@ import { connect, confirmDatabase, flag, isLocalRun, loadEnv, option, run } from
 
 const phoneHash = { column: "phone_hash", kind: "phone" };
 const emailHash = { column: "email_hash", kind: "email" };
+const tagHashes = { column: "tag_hashes", kind: "tag" };
 
 // The 26 columns from the TSK-38 plan. `jsonb` columns keep their type: the
 // encrypted text is stored as a JSON string (to_jsonb), and lib/pii.ts
-// withDecryptedAnalysis / decryptJson read both forms. contacts.tags (text[])
-// needs its own change in package 4 before phase 3 can run.
+// withDecryptedAnalysis / decryptJson read both forms. `array` columns
+// (contacts.tags, text[]) encrypt each element and keep one lookup hash per
+// element in a text[] hash column (contacts.tag_hashes, migration 003).
 const PHASES = {
   1: [
     { table: "contacts", column: "name" },
@@ -59,7 +61,7 @@ const PHASES = {
     { table: "contacts", column: "last_message_text" },
     { table: "contacts", column: "ai_score_reason" },
     { table: "contacts", column: "manual_score_reason" },
-    { table: "contacts", column: "tags" },
+    { table: "contacts", column: "tags", array: true, hash: tagHashes },
     { table: "portfolio_updates", column: "title" },
     { table: "portfolio_updates", column: "file_path" },
     { table: "portfolio_updates", column: "file_name" },
@@ -88,6 +90,7 @@ function sqlFor(spec) {
 
 function hashOf(spec, plain) {
   if (!spec.hash || plain == null) return null;
+  if (spec.hash.kind === "tag") return blindIndex("tag", plain.trim() || null);
   const normalized = spec.hash.kind === "phone" ? normalizeToLocalPhone(plain) : normalizeEmail(plain);
   return blindIndex(spec.hash.kind, normalized);
 }
@@ -96,8 +99,8 @@ function hashOf(spec, plain) {
 async function columnProblems(client, specs) {
   const problems = new Map();
   for (const spec of specs) {
-    const columns = [[spec.column, spec.jsonb ? ["jsonb"] : ["text", "character varying"]]];
-    if (spec.hash) columns.push([spec.hash.column, ["text"]]);
+    const columns = [[spec.column, spec.jsonb ? ["jsonb"] : spec.array ? ["ARRAY"] : ["text", "character varying"]]];
+    if (spec.hash) columns.push([spec.hash.column, spec.array ? ["ARRAY"] : ["text"]]);
     for (const [column, allowed] of columns) {
       const { rows } = await client.query(
         `select data_type from information_schema.columns where table_schema = 'public' and table_name = $1 and column_name = $2`,
@@ -245,6 +248,157 @@ async function verifyColumn(client, spec, { hashOnly }) {
   return { encrypted, plain, badHash, problems };
 }
 
+// ------------------------------------------------------------ text[] columns
+// contacts.tags: every element is encrypted on its own, and the hash column
+// holds one lookup hash per element, in the same order.
+
+const hasPlainElement = (column) =>
+  `exists (select 1 from unnest(${column}) as e(v) where e.v is not null and e.v <> '' and e.v !~ '^enc:v1:')`;
+const hasEncryptedElement = (column) => `exists (select 1 from unnest(${column}) as e(v) where e.v ~ '^enc:v1:')`;
+
+const sameArray = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => v === b[i]);
+
+/** The lookup hashes of decrypted elements (empty elements get none). */
+const arrayHashes = (spec, plain) => plain.map((v) => hashOf(spec, v)).filter(Boolean);
+
+async function processArrayColumn(client, spec, { hashOnly, dryRun, batchSize }) {
+  const table = ident(spec.table);
+  const column = ident(spec.column);
+  const hashColumn = ident(spec.hash.column);
+  const needsHash = `(${hashColumn} is null and ${column} is not null)`;
+  const needs = hashOnly ? needsHash : `(${hasPlainElement(column)} or ${needsHash})`;
+
+  const stats = { encrypted: 0, hashed: 0, changedMeanwhile: 0, noHash: 0 };
+  let lastId = null;
+  for (;;) {
+    await client.query("begin");
+    try {
+      const { rows } = await client.query(
+        `select id::text as id, ${column} as value, ${hashColumn} as hash
+           from public.${table}
+          where ${needs} and ($1::text is null or id::text > $1::text)
+          order by id::text
+          limit $2
+          for update`,
+        [lastId, batchSize],
+      );
+      if (!rows.length) {
+        await client.query("rollback");
+        break;
+      }
+
+      for (const row of rows) {
+        const plain = row.value.map((v) => decryptField(v));
+        const encrypted = hashOnly
+          ? row.value
+          : row.value.map((v) => (v == null || v === "" || isEncrypted(v) ? v : encryptField(v)));
+        if (!sameArray(encrypted.map((v) => decryptField(v)), plain)) {
+          throw new Error(`Round-trip check failed in ${fieldOf(spec)} (row ${row.id}); nothing in this batch was saved.`);
+        }
+        const hash = row.hash ?? arrayHashes(spec, plain);
+        const encrypting = !sameArray(encrypted, row.value);
+        if (encrypting) stats.encrypted += 1;
+        if (!row.hash) stats.hashed += 1;
+        if (dryRun || (!encrypting && row.hash)) continue;
+
+        // Only if the row still holds what was read (an edit in the app meanwhile wins).
+        const changed = await client.query(
+          `update public.${table} set ${column} = $3::text[], ${hashColumn} = $4::text[]
+            where id::text = $1 and ${column} is not distinct from $2::text[]`,
+          [row.id, row.value, encrypted, hash],
+        );
+        if (changed.rowCount !== 1) stats.changedMeanwhile += 1;
+      }
+
+      await client.query(dryRun ? "rollback" : "commit");
+      lastId = rows[rows.length - 1].id;
+    } catch (error) {
+      await client.query("rollback").catch(() => undefined);
+      throw error;
+    }
+  }
+  return stats;
+}
+
+/** Every element must decrypt, the hashes must match, and (unless hash-only) no plain element may remain. */
+async function verifyArrayColumn(client, spec, { hashOnly }) {
+  const { rows } = await client.query(
+    `select id::text as id, ${ident(spec.column)} as value, ${ident(spec.hash.column)} as hash
+       from public.${ident(spec.table)} where ${ident(spec.column)} is not null`,
+  );
+  let encrypted = 0;
+  let plain = 0;
+  let badHash = 0;
+  for (const row of rows) {
+    const values = row.value.filter((v) => v != null && v !== "");
+    if (values.some((v) => !isEncrypted(v))) plain += 1;
+    else if (values.length) encrypted += 1;
+    const decrypted = row.value.map((v) => decryptField(v)); // throws on a damaged value
+    if (!sameArray(row.hash, arrayHashes(spec, decrypted))) badHash += 1;
+  }
+  const problems = [];
+  if (!hashOnly && plain) problems.push(`${plain} rows still hold plain text`);
+  if (badHash) problems.push(`${badHash} rows with missing/wrong ${spec.hash.column}`);
+  return { encrypted, plain, badHash, problems };
+}
+
+/**
+ * Rollback for a text[] column: plain elements again, and the hash column is
+ * emptied. The older code changes tags without touching the hashes, so kept
+ * hashes would go stale; with none, the app (if redeployed) falls back to the
+ * plain tags until --hash-only runs again.
+ */
+async function decryptArrayColumn(client, spec, { dryRun, batchSize }) {
+  const table = ident(spec.table);
+  const column = ident(spec.column);
+  const stats = { decrypted: 0, changedMeanwhile: 0 };
+  let lastId = null;
+  for (;;) {
+    await client.query("begin");
+    try {
+      const { rows } = await client.query(
+        `select id::text as id, ${column} as value
+           from public.${table}
+          where ${hasEncryptedElement(column)} and ($1::text is null or id::text > $1::text)
+          order by id::text
+          limit $2
+          for update`,
+        [lastId, batchSize],
+      );
+      if (!rows.length) {
+        await client.query("rollback");
+        break;
+      }
+      for (const row of rows) {
+        const plain = row.value.map((v) => decryptField(v));
+        stats.decrypted += 1;
+        if (dryRun) continue;
+        const changed = await client.query(
+          `update public.${table} set ${column} = $3::text[] where id::text = $1 and ${column} is not distinct from $2::text[]`,
+          [row.id, row.value, plain],
+        );
+        if (changed.rowCount !== 1) stats.changedMeanwhile += 1;
+      }
+      await client.query(dryRun ? "rollback" : "commit");
+      lastId = rows[rows.length - 1].id;
+    } catch (error) {
+      await client.query("rollback").catch(() => undefined);
+      throw error;
+    }
+  }
+  if (!dryRun) {
+    await client.query(`update public.${table} set ${ident(spec.hash.column)} = null where ${ident(spec.hash.column)} is not null`);
+  }
+  return stats;
+}
+
+/** SQL counting the rows of this column that still hold encrypted values (rollback check). */
+const stillEncryptedSql = (spec) =>
+  spec.array
+    ? `select count(*)::int as n from public.${ident(spec.table)} where ${hasEncryptedElement(ident(spec.column))}`
+    : `select count(*)::int as n from public.${ident(spec.table)}
+        where ${ident(spec.column)} is not null and ${sqlFor(spec).value} ~ '^enc:v1:'`;
+
 // Columns that only hold encrypted text as a side effect of a phase: in phase 1
 // the "last message" trigger copies encrypted message text into
 // contacts.last_message_text. A rollback must decrypt them too.
@@ -319,7 +473,7 @@ async function runDecrypt(client, { phase, specs, database, label, dryRun, batch
 
   console.log(dryRun ? "\nDry run: nothing will be saved." : "");
   for (const spec of active) {
-    const stats = await decryptColumn(client, spec, { dryRun, batchSize });
+    const stats = await (spec.array ? decryptArrayColumn : decryptColumn)(client, spec, { dryRun, batchSize });
     const extra = stats.changedMeanwhile ? `, ${stats.changedMeanwhile} skipped (changed while running; run again)` : "";
     console.log(`  ${fieldOf(spec).padEnd(40)} ${stats.decrypted} to decrypt${extra}${dryRun ? "" : " - done"}`);
   }
@@ -328,10 +482,7 @@ async function runDecrypt(client, { phase, specs, database, label, dryRun, batch
   console.log("\nChecking nothing encrypted is left:");
   let failed = false;
   for (const spec of active) {
-    const { value } = sqlFor(spec);
-    const { rows } = await client.query(
-      `select count(*)::int as n from public.${ident(spec.table)} where ${ident(spec.column)} is not null and ${value} ~ '^enc:v1:'`,
-    );
+    const { rows } = await client.query(stillEncryptedSql(spec));
     failed ||= rows[0].n > 0;
     console.log(`  ${fieldOf(spec).padEnd(40)} ${rows[0].n === 0 ? "OK" : `PROBLEM: ${rows[0].n} still encrypted`}`);
   }
@@ -392,9 +543,10 @@ run(async () => {
 
       console.log(dryRun ? "\nDry run: nothing will be saved." : "");
       for (const spec of active) {
-        const stats = await processColumn(client, spec, { hashOnly, dryRun, batchSize });
+        const stats = await (spec.array ? processArrayColumn : processColumn)(client, spec, { hashOnly, dryRun, batchSize });
         const parts = [`${stats.encrypted} to encrypt`];
-        if (spec.hash) parts.push(`${stats.hashed} hashes to fill`, `${stats.noHash} without a usable ${spec.hash.kind}`);
+        if (spec.array) parts.push(`${stats.hashed} rows of hashes to fill`);
+        else if (spec.hash) parts.push(`${stats.hashed} hashes to fill`, `${stats.noHash} without a usable ${spec.hash.kind}`);
         if (stats.changedMeanwhile) parts.push(`${stats.changedMeanwhile} skipped (changed while running; run again)`);
         console.log(`  ${fieldOf(spec).padEnd(40)} ${parts.join(", ")}${dryRun ? "" : " - done"}`);
       }
@@ -404,7 +556,7 @@ run(async () => {
     console.log("\nVerifying (every value is decrypted once):");
     let failed = false;
     for (const spec of active) {
-      const result = await verifyColumn(client, spec, { hashOnly });
+      const result = await (spec.array ? verifyArrayColumn : verifyColumn)(client, spec, { hashOnly });
       failed ||= result.problems.length > 0;
       console.log(
         `  ${fieldOf(spec).padEnd(40)} ${result.encrypted} encrypted, ${result.plain} plain` +
