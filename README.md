@@ -35,11 +35,11 @@ Changes to an existing database are numbered files in `azure/migrations/`, appli
 
 ### Encrypted data
 
-Personal data (contact names and phones, WhatsApp messages, broadcast texts and recipients, follow-ups, portfolio analyses, and later more columns) is stored encrypted as `enc:v1:...`. The app encrypts on write and decrypts on read, so the CRM shows it normally; in DBeaver or a raw query it is unreadable. Phone and email lookups use keyed hashes (`phone_hash`, `email_hash`).
+Personal data is stored encrypted as `enc:v1:...`. Live since 25 Nov 2026: phase 1 (contact names and phones, WhatsApp messages and numbers, broadcast texts and recipients, follow-ups, portfolio analyses) and phase 2 (contact emails and notes, WhatsApp summaries and profile names, meeting notes, recipient emails, login names, the reminder email address). Phase 3 (company, tags, last-message text, score reasons, portfolio file details, media links) is still to come. Login emails (`crm_users.email`) stay plain because sign-in looks them up. The app encrypts on write and decrypts on read, so the CRM shows it normally; in DBeaver or a raw query it is unreadable. Phone and email lookups use keyed hashes (`phone_hash`, `email_hash`).
 
 - **Key:** `PII_ENCRYPTION_SECRET_KEY` (and `BACKUP_ENCRYPTION_SECRET_KEY` for backups) must be the same on the server and in every `.env.local` that uses the live database. **Losing it means losing the encrypted data**: keep the offline copy up to date. The app refuses to start without the right key.
 - **Encrypting existing rows** (per phase): `node azure/encrypt-columns.mjs <phase>` with `--dry-run`, `--hash-only`, `--verify-only`, or `--decrypt` to roll back.
-- Setup, rotation and key safety: `azure/ENCRYPTION_KEYS.md`. Phase 1 go-live steps and rollback: `azure/GO_LIVE_ENCRYPTION_PHASE1.md`.
+- Setup, rotation and key safety: `azure/ENCRYPTION_KEYS.md`. Go-live steps and rollback: `azure/GO_LIVE_ENCRYPTION_PHASE1.md`, `azure/GO_LIVE_ENCRYPTION_PHASE2.md`.
 
 ## Scheduled jobs
 
