@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { encryptField } from "@/lib/encryption";
 import { isUuid } from "@/lib/sql";
 import { getOwnerSessionId } from "@/lib/auth";
 import { storeInboundWhatsAppMedia } from "@/lib/inbound-media";
@@ -54,7 +55,7 @@ export async function GET(
 
   try {
     const storedUrl = await storeInboundWhatsAppMedia(mediaId);
-    await db.execute("update whatsapp_messages set media_url = $1 where id = $2::uuid", [storedUrl, id]);
+    await db.execute("update whatsapp_messages set media_url = $1 where id = $2::uuid", [encryptField(storedUrl), id]);
     return openStoredUrl(storedUrl);
   } catch {
     return new NextResponse(

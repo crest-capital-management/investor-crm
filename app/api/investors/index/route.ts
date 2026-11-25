@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
-import { messagePreview } from "@/lib/pii";
+import { messagePreview, tagMatch } from "@/lib/pii";
 import { getOwnerSessionId } from "@/lib/auth";
 import { INVESTOR_TAGS } from "@/lib/tags";
 
@@ -23,9 +23,10 @@ export async function GET() {
   }
 
   try {
+    const params: unknown[] = [];
     const investors = await db.query<Row>(
-      `select ${COLUMNS} from contacts where tags && $1::text[] and deleted_at is null order by id asc`,
-      [INVESTOR_TAGS],
+      `select ${COLUMNS} from contacts where ${tagMatch("", params, INVESTOR_TAGS)} and deleted_at is null order by id asc`,
+      params,
     );
 
     // The latest interaction and the earliest pending follow-up per contact.

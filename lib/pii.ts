@@ -1,4 +1,4 @@
-import { blindIndex, decryptField, decryptJson, normalizeEmail } from "@/lib/encryption";
+import { blindIndex, decryptField, decryptJson, encryptField, normalizeEmail } from "@/lib/encryption";
 import { param } from "@/lib/sql";
 import { normalizeToLocalPhone } from "@/lib/whatsapp";
 
@@ -14,6 +14,35 @@ export function phoneHash(phone: string | null | undefined): string | null {
 /** Lookup hash for an email (contacts.email_hash), compared trimmed and lower-cased. */
 export function emailHash(email: string | null | undefined): string | null {
   return blindIndex("email", normalizeEmail(email));
+}
+
+/** Lookup hash for one tag (contacts.tag_hashes). Tags are compared exactly, trimmed. */
+export function tagHash(tag: string | null | undefined): string | null {
+  return blindIndex("tag", tag?.trim() || null);
+}
+
+/**
+ * The values to store for a contact's tags: contacts.tags (each tag encrypted)
+ * and contacts.tag_hashes (one lookup hash per tag). Empty and repeated tags
+ * are dropped. Bind as `$n::text[]`.
+ */
+export function tagColumns(tags: readonly string[]): { tags: string[]; tagHashes: string[] } {
+  const unique = [...new Set(tags.map((tag) => tag.trim()).filter(Boolean))];
+  return { tags: unique.map((tag) => encryptField(tag)!), tagHashes: unique.map((tag) => tagHash(tag)!) };
+}
+
+/**
+ * SQL condition "this contact has any of `tags`" (replaces `tags && $1::text[]`,
+ * which can't compare encrypted tags). Matches by tag_hashes; rows whose hashes
+ * are not filled in yet (azure/encrypt-columns.mjs 3 --hash-only) still match
+ * by the plain tags, so nothing is missed while the data is being migrated.
+ *
+ * `alias` is the table alias with its dot ("c."), or "" for none.
+ */
+export function tagMatch(alias: string, params: unknown[], tags: readonly string[]): string {
+  const hashes = param(params, tags.map((tag) => tagHash(tag)).filter((hash): hash is string => Boolean(hash)));
+  const plain = param(params, [...tags]);
+  return `(${alias}tag_hashes && ${hashes}::text[] or (${alias}tag_hashes is null and ${alias}tags && ${plain}::text[]))`;
 }
 
 /**

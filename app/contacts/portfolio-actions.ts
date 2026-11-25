@@ -2,7 +2,7 @@
 
 import { requireActionAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { encryptJson } from "@/lib/encryption";
+import { encryptField, encryptJson } from "@/lib/encryption";
 import { withDecryptedAnalysis } from "@/lib/pii";
 import { analyzePortfolioUpdate, portfolioFileKind } from "@/lib/portfolio-analysis";
 import {
@@ -73,7 +73,7 @@ export async function createPortfolioUpdate(
       `insert into public.portfolio_updates (contact_id, file_path, file_name, mime_type, size_bytes, source)
        values ($1, $2, $3, $4, $5, 'file')
        returning id`,
-      [id, path, fileName, mimeType || null, size],
+      [id, encryptField(path), encryptField(fileName), mimeType || null, size],
     );
     return { id: data.id };
   } catch {
@@ -113,7 +113,7 @@ export async function createPortfolioUpdateFromText(
       `insert into public.portfolio_updates (contact_id, title, file_path, file_name, mime_type, size_bytes, source)
        values ($1, $2, $3, $4, 'text/plain', $5, 'paste')
        returning id`,
-      [id, cleanTitle || null, path, fileName, Buffer.byteLength(body, "utf8")],
+      [id, encryptField(cleanTitle || null), encryptField(path), encryptField(fileName), Buffer.byteLength(body, "utf8")],
     );
     return { id: data.id };
   } catch {

@@ -312,13 +312,11 @@ begin
     update public.contacts
     set last_message_at = new.sent_at,
         -- Encrypted text is copied whole (cutting it would break it); the app
-        -- shortens the preview after decrypting (migrations/002).
+        -- shortens the preview after decrypting (migrations/002). No plain
+        -- "Attachment" placeholder: the app shows it for an empty preview (migrations/003).
         last_message_text = case
           when new.message_text like 'enc:v1:%' then new.message_text
-          else left(
-            coalesce(nullif(btrim(new.message_text), ''),
-                     case when new.media_url is not null then 'Attachment' else '' end),
-            120)
+          else left(coalesce(btrim(new.message_text), ''), 120)
         end,
         last_message_direction = new.direction
     where id = new.contact_id
@@ -422,5 +420,10 @@ create index contacts_email_hash_idx on public.contacts (email_hash);
 create index whatsapp_messages_unmatched_phone_hash_idx
   on public.whatsapp_messages (phone_hash) where (contact_id is null);
 create index broadcast_recipients_phone_hash_idx on public.broadcast_recipients (phone_hash);
+
+-- One lookup hash per contact tag, for tag filters on encrypted tags
+-- (formerly azure/migrations/003_encrypted_tags.sql).
+alter table public.contacts add column tag_hashes text[];
+create index contacts_tag_hashes_gin_idx on public.contacts using gin (tag_hashes);
 
 commit;
