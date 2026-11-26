@@ -1,5 +1,6 @@
 import { gzipSync } from "node:zlib";
 import { db } from "@/lib/db";
+import { encryptBackup } from "@/lib/backup-encryption";
 import { listBackupFiles, removeBackupFiles, saveBackupFile } from "@/lib/storage";
 import { CRM_TABLES } from "@/lib/crm-tables";
 
@@ -33,21 +34,29 @@ export async function buildCrmBackup(): Promise<CrmBackup> {
 
 /**
  * Backup file names in the "backups" container:
- *   crest-crm-backup-2026-11-06.json.gz                       nightly / "Back up now"
- *   crest-crm-backup-2026-11-06-before-restore-141502.json.gz safety copy taken just before a restore
- *   upload-1762430000000.json.gz                              a file uploaded for a restore (hidden from the list)
+ *   crest-crm-backup-2026-11-06.json.gz.enc                       nightly / "Back up now"
+ *   crest-crm-backup-2026-11-06-before-restore-141502.json.gz.enc safety copy taken just before a restore
+ *   upload-1762430000000.json.gz.enc                              a file uploaded for a restore (hidden from the list)
+ * ".enc" files are encrypted (lib/backup-encryption.ts). Backups from before
+ * package 5 have no ".enc" and are plain gzip; they can still be restored and
+ * age out with the 30-day cleanup.
  */
-export const STORED_BACKUP_NAME = /^crest-crm-backup-(\d{4}-\d{2}-\d{2})(?:-before-restore-(\d{6}))?\.json\.gz$/;
-export const UPLOADED_BACKUP_NAME = /^upload-\d{13}\.json\.gz$/;
+export const STORED_BACKUP_NAME = /^crest-crm-backup-(\d{4}-\d{2}-\d{2})(?:-before-restore-(\d{6}))?\.json\.gz(?:\.enc)?$/;
+export const UPLOADED_BACKUP_NAME = /^upload-\d{13}\.json\.gz(?:\.enc)?$/;
+
+/** A backup as a file: the JSON, gzipped, then encrypted with the backup key. */
+export function encodeBackupFile(backup: CrmBackup): Buffer {
+  return encryptBackup(gzipSync(Buffer.from(JSON.stringify(backup))));
+}
 
 async function writeBackup(path: string, backup: CrmBackup): Promise<number> {
-  const compressed = gzipSync(Buffer.from(JSON.stringify(backup)));
+  const file = encodeBackupFile(backup);
   try {
-    await saveBackupFile(path, compressed);
+    await saveBackupFile(path, file);
   } catch (err) {
     throw new Error(`Could not save the backup: ${err instanceof Error ? err.message : "unknown error"}`);
   }
-  return compressed.length;
+  return file.length;
 }
 
 /**
@@ -57,7 +66,7 @@ async function writeBackup(path: string, backup: CrmBackup): Promise<number> {
 export async function saveSafetyBackup(): Promise<string> {
   const backup = await buildCrmBackup();
   const time = backup.exportedAt.slice(11, 19).replace(/:/g, "");
-  const path = `crest-crm-backup-${backup.exportedAt.slice(0, 10)}-before-restore-${time}.json.gz`;
+  const path = `crest-crm-backup-${backup.exportedAt.slice(0, 10)}-before-restore-${time}.json.gz.enc`;
   await writeBackup(path, backup);
   return path;
 }
@@ -73,8 +82,10 @@ export async function saveDailyBackup(): Promise<{
   removed: number;
 }> {
   const backup = await buildCrmBackup();
-  const path = `crest-crm-backup-${backup.exportedAt.slice(0, 10)}.json.gz`;
+  const path = `crest-crm-backup-${backup.exportedAt.slice(0, 10)}.json.gz.enc`;
   const bytes = await writeBackup(path, backup);
+  // The day's plain backup from before package 5 (same date, no ".enc") is replaced by this one.
+  await removeBackupFiles([path.slice(0, -".enc".length)]);
 
   // Remove backups past the retention period, and restore uploads older than a day.
   const files = await listBackupFiles();

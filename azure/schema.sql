@@ -409,6 +409,13 @@ create table public.encryption_keys (
   created_at  timestamp with time zone not null default now()
 );
 
+-- Same for the backup file keys (formerly azure/migrations/005_backup_encryption_keys.sql).
+create table public.backup_encryption_keys (
+  key_id      text primary key,
+  fingerprint text not null,
+  created_at  timestamp with time zone not null default now()
+);
+
 -- Blind-index hashes (HMAC-SHA256 hex) for exact lookups on encrypted phone/email.
 alter table public.contacts             add column phone_hash text;
 alter table public.contacts             add column email_hash text;

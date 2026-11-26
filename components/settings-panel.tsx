@@ -231,10 +231,11 @@ export function SettingsPanel({
           </div>
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <p className="text-sm font-medium">Full backup (JSON)</p>
+              <p className="text-sm font-medium">Full backup (encrypted)</p>
               <p className="text-xs text-muted-foreground">
                 Every table: contacts, groups, notes, follow-ups, templates, broadcasts,
-                WhatsApp messages and portfolio updates.
+                WhatsApp messages and portfolio updates. The file is encrypted with the
+                backup key; it can be restored here as it is.
               </p>
             </div>
             <Button

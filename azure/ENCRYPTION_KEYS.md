@@ -1,7 +1,8 @@
 # CREST CRM: encryption keys (TSK-38)
 
-Personal data in the database (names, phones, messages, notes, ...) is being
-encrypted column by column with AES-256-GCM (`lib/encryption.ts`). This page
+Personal data in the database (names, phones, messages, notes, ...) is
+encrypted column by column with AES-256-GCM (`lib/encryption.ts`), and every
+backup file is encrypted as a whole (`lib/backup-encryption.ts`). This page
 covers the keys: where they live, how to set them up, rotate them and not lose
 them.
 
@@ -16,7 +17,7 @@ that works against the same database).
 | Setting | Value | Used for |
 |---|---|---|
 | `PII_ENCRYPTION_SECRET_KEY` | `v1:<secret>` | Encrypting/decrypting personal-data columns, and (derived from it) the lookup hashes `phone_hash` / `email_hash`. |
-| `BACKUP_ENCRYPTION_SECRET_KEY` | `v1:<secret>` | Encrypting backup files (package 5). |
+| `BACKUP_ENCRYPTION_SECRET_KEY` | `v1:<secret>` | Encrypting backup files (package 5): nightly, "Back up now", safety copies before a restore, downloads, and files uploaded for a restore. Must be different from the PII key. |
 
 - `v1` is the key's version. It is stored with every encrypted value, so a
   newer key (`v2`) can be added later while old data stays readable.
@@ -39,11 +40,13 @@ Never send a real key by email or chat. Put it straight into the `.env` files.
 ## Same key everywhere
 
 The server and every PC whose `.env.local` points at the live database must
-have **exactly the same** `PII_ENCRYPTION_SECRET_KEY`. Data written with one
-key can't be read with another.
+have **exactly the same** `PII_ENCRYPTION_SECRET_KEY` and
+`BACKUP_ENCRYPTION_SECRET_KEY`. Data written with one key can't be read with
+another.
 
 The database stores only a **fingerprint** of each key (`encryption_keys`
-table, never the key itself). The app and the scripts refuse to start if their
+table for the personal-data keys, `backup_encryption_keys` for the backup
+keys; never the keys themselves). The app and the scripts refuse to start if their
 key doesn't match, so a wrong key can never write data nobody can read.
 
 ## One-time setup
@@ -119,6 +122,38 @@ file path and file name, WhatsApp media addresses. Rolling phase 3 back
 (`3 --decrypt`) also empties `tag_hashes`, and is needed before deploying
 older code (it does not read encrypted tags).
 
+## Backup files (package 5)
+
+- Every backup the CRM saves is encrypted: nightly and "Back up now"
+  (`crest-crm-backup-YYYY-MM-DD.json.gz.enc`), the safety copy before a restore
+  (`...-before-restore-HHMMSS.json.gz.enc`), the "Full backup" download on My
+  Profile, and a file uploaded for a restore (encrypted before it is stored).
+- File layout: `CRESTBK1`, the key id, a random IV, the GCM tag, then the
+  gzipped JSON encrypted with AES-256-GCM (`lib/backup-encryption.ts`).
+  Changing any byte, or the key id, makes the file unreadable rather than
+  silently wrong.
+- Restore (My Profile) reads encrypted backups and, for backups made before
+  package 5, plain `.json.gz` / `.json`. Old plain backups are marked "(not
+  encrypted)" in the list and age out with the 30-day cleanup.
+- The app **will not start without `BACKUP_ENCRYPTION_SECRET_KEY`**, or with a
+  backup key that does not match its registered fingerprint
+  (`backup_encryption_keys`, migration 005).
+- To read a backup outside the CRM (emergency, or to look inside one):
+  ```bash
+  node azure/decrypt-backup.mjs crest-crm-backup-2026-11-27.json.gz.enc          # -> .json.gz
+  node azure/decrypt-backup.mjs crest-crm-backup-2026-11-27.json.gz.enc --json   # -> .json
+  ```
+  It needs the backup key in `.env.local` and touches no database. The result
+  is readable CRM data (personal-data columns stay encrypted with the PII key):
+  keep it safe and delete it when done.
+- **Rotating the backup key:** `BACKUP_ENCRYPTION_SECRET_KEY=v2:<new>,v1:<old>`
+  (newest first), `node azure/register-keys.mjs` (registers backup key `v2`),
+  restart. New backups use `v2`, old ones still read. After 30 days no kept
+  backup needs `v1`: then remove it from the setting and delete the `v1` row
+  from `backup_encryption_keys` (the app refuses to start while a
+  registered backup key is missing from the setting). Keep the old secret in
+  the offline copy for as long as you keep any downloaded backup made with it.
+
 ## Rotating the key
 
 1. Generate a new secret and put the new key **first**, keeping the old one:
@@ -137,4 +172,5 @@ older code (it does not read encrypted tags).
   with restricted access). Update it after every rotation.
 - The server `.env` is the only other copy. Include it in whatever protects the
   server (VM backups/snapshots), with restricted access.
-- Database backups are only useful together with the keys from the same time.
+- Database backups are only useful together with the keys from the same time:
+  the backup key to open the file, and the PII key for the personal data in it.

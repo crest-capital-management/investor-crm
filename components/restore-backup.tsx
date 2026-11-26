@@ -27,15 +27,23 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 type Source = "stored" | "file";
 
-/** Gzips the chosen file in the browser (unless it already is) and uploads it; returns its stored name. */
+// First bytes of an encrypted backup file (lib/backup-encryption.ts).
+const ENCRYPTED_BACKUP_MAGIC = "CRESTBK1";
+
+/**
+ * Uploads the chosen file and returns its stored name. An encrypted backup or
+ * a gzipped one is sent as it is; an older plain .json is gzipped first.
+ */
 async function uploadBackupFile(file: File): Promise<string> {
-  const header = new Uint8Array(await file.slice(0, 2).arrayBuffer());
+  const header = new Uint8Array(await file.slice(0, ENCRYPTED_BACKUP_MAGIC.length).arrayBuffer());
+  const isEncrypted = new TextDecoder().decode(header) === ENCRYPTED_BACKUP_MAGIC;
   const isGzip = header[0] === 0x1f && header[1] === 0x8b;
-  const body = isGzip ? file : await new Response(file.stream().pipeThrough(new CompressionStream("gzip"))).blob();
+  const body =
+    isEncrypted || isGzip ? file : await new Response(file.stream().pipeThrough(new CompressionStream("gzip"))).blob();
 
   const response = await fetch("/api/backup/upload", {
     method: "PUT",
-    headers: { "Content-Type": "application/gzip" },
+    headers: { "Content-Type": "application/octet-stream" },
     body,
   });
   const result = (await response.json().catch(() => ({}))) as { name?: string; error?: string };
@@ -227,7 +235,7 @@ export function RestoreBackup() {
               <div className="space-y-1">
                 <Input
                   type="file"
-                  accept=".json,.gz,application/json,application/gzip"
+                  accept=".enc,.json,.gz,application/json,application/gzip"
                   disabled={busy}
                   onChange={(event) => {
                     setFile(event.target.files?.[0] ?? null);
@@ -236,7 +244,7 @@ export function RestoreBackup() {
                   }}
                 />
                 <p className="text-xs text-muted-foreground">
-                  A backup downloaded from this page (.json or .json.gz).
+                  A backup downloaded from this page (.json.gz.enc, or an older .json or .json.gz).
                 </p>
               </div>
             )}

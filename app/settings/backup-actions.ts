@@ -13,6 +13,8 @@ export interface StoredBackup {
   /** "HH:MM" (UTC) for a safety copy taken just before a restore; null for a nightly backup. */
   beforeRestoreAt: string | null;
   bytes: number;
+  /** False for a backup from before package 5 (plain gzip, ages out after 30 days). */
+  encrypted: boolean;
 }
 
 // The backups container is private, so it is read with the storage account's
@@ -40,6 +42,7 @@ export async function listStoredBackups(): Promise<{ backups?: StoredBackup[]; e
       date: match[1],
       beforeRestoreAt: match[2] ? `${match[2].slice(0, 2)}:${match[2].slice(2, 4)}` : null,
       bytes: file.bytes,
+      encrypted: file.name.endsWith(".enc"),
     });
   }
   // Newest day first; within a day the latest safety copy first, the nightly backup last.

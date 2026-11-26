@@ -1,4 +1,4 @@
-// Self-test of lib/encryption.ts and lib/keys.ts with throwaway random keys.
+// Self-test of lib/encryption.ts, lib/backup-encryption.ts and lib/keys.ts with throwaway random keys.
 // Touches no database.   node azure/verify-encryption.mjs
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
@@ -14,7 +14,22 @@ import {
   parseKeySetting,
   setKeyring,
 } from "../lib/encryption.ts";
-import { loadKeyring, registerKeyFingerprints, verifyKeyFingerprints } from "../lib/keys.ts";
+import {
+  loadBackupKeyring,
+  loadKeyring,
+  registerBackupKeyFingerprints,
+  registerKeyFingerprints,
+  verifyBackupKeyFingerprints,
+  verifyKeyFingerprints,
+} from "../lib/keys.ts";
+import {
+  backupKeyId,
+  decryptBackup,
+  encryptBackup,
+  isEncryptedBackup,
+  parseBackupKeySetting,
+} from "../lib/backup-encryption.ts";
+import { gzipSync } from "node:zlib";
 
 const newKey = () => crypto.randomBytes(32).toString("base64");
 const k1 = newKey();
@@ -158,18 +173,20 @@ await test("short keys: warned in development, refused in production", async () 
   assert.equal(await loadKeyring({}), null);
 });
 
-/** In-memory stand-in for the encryption_keys table. */
+/** In-memory stand-in for the encryption_keys and backup_encryption_keys tables. */
 function fakeTable() {
   const rows = new Map();
+  const backupRows = new Map();
   const query = async (sql, params = []) => {
-    if (sql.startsWith("select")) return { rows: [...rows].map(([key_id, fingerprint]) => ({ key_id, fingerprint })) };
+    const target = sql.includes("backup_encryption_keys") ? backupRows : rows;
+    if (sql.startsWith("select")) return { rows: [...target].map(([key_id, fingerprint]) => ({ key_id, fingerprint })) };
     if (sql.startsWith("insert")) {
-      if (!rows.has(params[0])) rows.set(params[0], params[1]);
+      if (!target.has(params[0])) target.set(params[0], params[1]);
       return { rows: [] };
     }
     throw new Error(`unexpected SQL: ${sql}`);
   };
-  return { rows, query };
+  return { rows, backupRows, query };
 }
 
 await test("fingerprints: unregistered keys refused, registered keys accepted", async () => {
@@ -194,6 +211,78 @@ await test("fingerprints: rotation registers k2; dropping k1 is refused", async 
   assert.deepEqual(await registerKeyFingerprints(ring2, table.query), ["k2"]);
   const onlyK2 = parseKeySetting(`k2:${k2}`);
   await assert.rejects(verifyKeyFingerprints(onlyK2, table.query), /not the key this database uses|which is not loaded/);
+});
+
+// ------------------------------------------------------- backup files (package 5)
+
+const b1 = newKey();
+const b2 = newKey();
+const backupRing1 = parseBackupKeySetting(`v1:${b1}`);
+const backupRing2 = parseBackupKeySetting(`v2:${b2}, v1:${b1}`);
+const sampleBackup = gzipSync(Buffer.from(JSON.stringify({ exportedAt: "2026-11-27T00:00:00.000Z", data: { contacts: [] } })));
+
+await test("backup files: encrypt then decrypt gives the same bytes; output is not the input", () => {
+  const file = encryptBackup(sampleBackup, backupRing1);
+  assert.ok(isEncryptedBackup(file));
+  assert.ok(!isEncryptedBackup(sampleBackup), "plain gzip is not taken for encrypted");
+  assert.equal(backupKeyId(file), "v1");
+  assert.ok(!file.includes(sampleBackup.subarray(10, 30)), "no plaintext in the file");
+  assert.ok(decryptBackup(file, backupRing1).equals(sampleBackup));
+  assert.ok(!encryptBackup(sampleBackup, backupRing1).equals(file), "random IV per file");
+});
+
+await test("backup files: a changed byte, header or key id is refused", () => {
+  const file = encryptBackup(sampleBackup, backupRing1);
+  for (const at of [file.length - 1, 12, 9]) {
+    const changed = Buffer.from(file);
+    changed[at] ^= 1;
+    assert.throws(() => decryptBackup(changed, backupRing1), /could not be decrypted|not loaded|not an encrypted/);
+  }
+  assert.throws(() => decryptBackup(file.subarray(0, 20), backupRing1), /damaged/);
+});
+
+await test("backup files: wrong key refused; rotation reads old files and writes with the new key", () => {
+  const old = encryptBackup(sampleBackup, backupRing1);
+  assert.throws(() => decryptBackup(old, parseBackupKeySetting(`v1:${newKey()}`)), /key is wrong/);
+  assert.throws(() => decryptBackup(old, parseBackupKeySetting(`v2:${b2}`)), /"v1", which is not loaded/);
+  assert.ok(decryptBackup(old, backupRing2).equals(sampleBackup));
+  assert.equal(backupKeyId(encryptBackup(sampleBackup, backupRing2)), "v2");
+});
+
+await test("backup key: not the same key as the personal-data key made from the same secret", () => {
+  assert.ok(!parseBackupKeySetting(`v1:${k1}`).keys.get("v1").equals(ring1.fieldKeys.get("k1")));
+});
+
+await test("backup key: short keys warned in development, refused in production; unset -> null", async () => {
+  const weak = { BACKUP_ENCRYPTION_SECRET_KEY: "v1:short-placeholder" };
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    assert.ok(await loadBackupKeyring({ ...weak, NODE_ENV: "development" }));
+  } finally {
+    console.warn = warn;
+  }
+  await assert.rejects(loadBackupKeyring({ ...weak, NODE_ENV: "production" }), /shorter than 32/);
+  assert.equal(await loadBackupKeyring({}), null);
+});
+
+await test("backup key fingerprints: kept apart from the personal-data keys", async () => {
+  const table = fakeTable();
+  await registerKeyFingerprints(ring1, table.query);
+  await assert.rejects(verifyBackupKeyFingerprints(backupRing1, table.query), /Backup encryption key "v1" is not registered/);
+  assert.deepEqual(await registerBackupKeyFingerprints(backupRing1, table.query), ["v1"]);
+  // Kept out of encryption_keys, which code from before package 5 checks in full.
+  assert.deepEqual([...table.rows.keys()].sort(), ["index", "k1"]);
+  assert.deepEqual([...table.backupRows.keys()], ["v1"]);
+  // Each check ignores the other kind's rows.
+  await verifyKeyFingerprints(ring1, table.query);
+  await verifyBackupKeyFingerprints(backupRing1, table.query);
+  await assert.rejects(
+    verifyBackupKeyFingerprints(parseBackupKeySetting(`v1:${newKey()}`), table.query),
+    /not the key this database uses/,
+  );
+  assert.deepEqual(await registerBackupKeyFingerprints(backupRing2, table.query), ["v2"]);
+  await assert.rejects(verifyBackupKeyFingerprints(parseBackupKeySetting(`v2:${b2}`), table.query), /which is not loaded/);
 });
 
 console.log(process.exitCode ? "\nSome checks FAILED." : `\nAll ${passed} checks passed.`);
