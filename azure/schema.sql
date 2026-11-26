@@ -67,6 +67,7 @@ create table public.templates (
   deleted_at timestamp with time zone,
   body_text text,
   language text not null default 'en_US'::text,
+  header_format text,
   constraint templates_pkey PRIMARY KEY (id)
 );
 

@@ -5,7 +5,9 @@ import { requireActionAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import {
   fetchWhatsAppMessageTemplates,
+  isTemplateMediaHeaderFormat,
   type MetaMessageTemplate,
+  type TemplateMediaHeaderFormat,
 } from "@/lib/whatsapp";
 import { hasInvalidId, INVALID_ID_ERROR } from "@/lib/validate";
 
@@ -190,11 +192,19 @@ export async function deleteTemplate(id: string) {
 
 const SUPPORTED_META_BUTTONS = new Set(["QUICK_REPLY", "PHONE_NUMBER", "URL"]);
 
+/** The header kind that needs a file with every message (IMAGE, VIDEO, DOCUMENT), or null. */
+function mediaHeaderFormat(template: MetaMessageTemplate): TemplateMediaHeaderFormat | null {
+  const format = template.components?.find((c) => c.type === "HEADER")?.format;
+  return isTemplateMediaHeaderFormat(format) ? format : null;
+}
+
 /**
- * Why the CRM can't send this Meta template, or null if it can. The CRM only
- * fills body variables, so anything needing other parameters is skipped.
+ * Why the CRM can't send this Meta template, or null if it can. The CRM fills
+ * body variables and, for broadcasts, an image/video/document header (the file
+ * is attached to the broadcast); anything needing other parameters is skipped.
+ * Media headers need templates.header_format (migration 004).
  */
-function unsupportedMetaTemplateReason(template: MetaMessageTemplate): string | null {
+function unsupportedMetaTemplateReason(template: MetaMessageTemplate, canStoreMediaHeader: boolean): string | null {
   if (template.name === "hello_world") return "Meta's sample, only sendable from test numbers";
   if (template.category === "AUTHENTICATION") return "authentication template";
   if (template.parameter_format === "NAMED") return "uses named variables";
@@ -204,7 +214,11 @@ function unsupportedMetaTemplateReason(template: MetaMessageTemplate): string | 
 
   for (const component of components) {
     if (component.type === "HEADER") {
-      if (component.format && component.format !== "TEXT") return "has an image/video/document header";
+      if (isTemplateMediaHeaderFormat(component.format)) {
+        if (!canStoreMediaHeader) return "has an image/video/document header; apply database update 004 first";
+      } else if (component.format && component.format !== "TEXT") {
+        return `has a ${component.format.toLowerCase()} header`;
+      }
       if (component.text?.includes("{{")) return "has a variable in the header";
     }
     if (component.type === "BUTTONS") {
@@ -265,6 +279,19 @@ export async function syncMetaTemplates(): Promise<SyncMetaTemplatesResult> {
     return { error: "Could not load CRM templates." };
   }
   const existingRows = allRows.filter((row) => !row.deleted_at);
+  // templates.header_format comes with migration 004; until it is applied,
+  // templates with a media header are skipped as before.
+  let canStoreMediaHeader = false;
+  try {
+    canStoreMediaHeader = Boolean(
+      await db.maybeOne(
+        `select 1 from information_schema.columns
+          where table_schema = 'public' and table_name = 'templates' and column_name = 'header_format'`,
+      ),
+    );
+  } catch {
+    canStoreMediaHeader = false;
+  }
   // Templates deleted in the CRM stay hidden instead of coming back on every sync.
   const deletedMetaIds = new Set(
     allRows.filter((row) => row.deleted_at && row.meta_template_id).map((row) => row.meta_template_id),
@@ -276,7 +303,7 @@ export async function syncMetaTemplates(): Promise<SyncMetaTemplatesResult> {
 
   for (const template of metaTemplates) {
     if (deletedMetaIds.has(template.id)) continue;
-    const reason = unsupportedMetaTemplateReason(template);
+    const reason = unsupportedMetaTemplateReason(template, canStoreMediaHeader);
     if (reason) {
       skipped.push(`${template.name} (${reason})`);
       continue;
@@ -307,22 +334,28 @@ export async function syncMetaTemplates(): Promise<SyncMetaTemplatesResult> {
       variables,
       meta_template_id: template.id,
       approved_at: isApproved ? existing?.approved_at ?? new Date().toISOString() : null,
+      header_format: mediaHeaderFormat(template),
     };
+    // Only written once migration 004 is applied (a media-header template is skipped before that).
+    const headerSet = canStoreMediaHeader ? ", header_format = $9" : "";
+    const headerColumn = canStoreMediaHeader ? ", header_format" : "";
+    const headerValue = canStoreMediaHeader ? ", $8" : "";
+    const headerParams = canStoreMediaHeader ? [row.header_format] : [];
 
     try {
       if (existing) {
         await db.execute(
           `update public.templates
            set name = $1, category = $2, language = $3, body_text = $4, variables = $5::jsonb,
-               meta_template_id = $6, approved_at = $7
+               meta_template_id = $6, approved_at = $7${headerSet}
            where id = $8`,
-          [row.name, row.category, row.language, row.body_text, JSON.stringify(row.variables), row.meta_template_id, row.approved_at, existing.id],
+          [row.name, row.category, row.language, row.body_text, JSON.stringify(row.variables), row.meta_template_id, row.approved_at, existing.id, ...headerParams],
         );
       } else {
         await db.execute(
-          `insert into public.templates (name, category, language, body_text, variables, meta_template_id, approved_at)
-           values ($1, $2, $3, $4, $5::jsonb, $6, $7)`,
-          [row.name, row.category, row.language, row.body_text, JSON.stringify(row.variables), row.meta_template_id, row.approved_at],
+          `insert into public.templates (name, category, language, body_text, variables, meta_template_id, approved_at${headerColumn})
+           values ($1, $2, $3, $4, $5::jsonb, $6, $7${headerValue})`,
+          [row.name, row.category, row.language, row.body_text, JSON.stringify(row.variables), row.meta_template_id, row.approved_at, ...headerParams],
         );
       }
     } catch (error) {
@@ -384,12 +417,14 @@ export async function getChatTemplates(): Promise<ChatTemplate[]> {
     variables: Record<string, string> | null;
     meta_template_id: string | null;
     approved_at: string | null;
+    header_format: string | null;
   };
   let data: ChatTemplateRow[];
   try {
     data = await db.query<ChatTemplateRow>(
-      `select id, name, language, body_text, variables, meta_template_id, approved_at
-       from public.templates
+      `select id, name, language, body_text, variables, meta_template_id, approved_at,
+              to_jsonb(t) ->> 'header_format' as header_format
+       from public.templates t
        where deleted_at is null
        order by name asc`,
     );
@@ -399,7 +434,8 @@ export async function getChatTemplates(): Promise<ChatTemplate[]> {
   }
 
   return data
-    .filter((row) => !row.meta_template_id || row.approved_at)
+    // A template with an image/video/document header can only be sent as a broadcast (the file is attached there).
+    .filter((row) => (!row.meta_template_id || row.approved_at) && !isTemplateMediaHeaderFormat(row.header_format))
     .map((row) => ({
       id: row.id,
       name: row.name,

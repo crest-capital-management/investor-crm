@@ -2,11 +2,12 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Eye, FileText, X } from "lucide-react";
+import { Eye, FileText, Paperclip, X } from "lucide-react";
 
 import {
   createBroadcastDraft,
   createScheduledBroadcast,
+  prepareBroadcastHeaderUpload,
   updateBroadcast,
   type BroadcastData,
   type ContactOption,
@@ -42,6 +43,7 @@ import {
   type VariableMappingType,
 } from "@/lib/template-placeholders";
 import { cn } from "@/lib/utils";
+import { uploadFile } from "@/lib/upload-to-storage";
 import type { ContactSection } from "@/lib/section-filter";
 
 export interface BroadcastEditorProps {
@@ -52,6 +54,20 @@ export interface BroadcastEditorProps {
   sections?: ContactSection[];
   templates?: TemplateOption[];
   existingBroadcast?: BroadcastData | null;
+  /** Storage path of the file already attached for the template's header (edit mode). */
+  existingHeaderMediaPath?: string | null;
+}
+
+/** What a template's image/video/document header accepts, for the file picker. */
+const HEADER_FILE_PICKER: Record<string, { accept: string; label: string }> = {
+  IMAGE: { accept: "image/jpeg,image/png", label: "an image (JPG or PNG, under 5 MB)" },
+  VIDEO: { accept: "video/mp4,video/3gpp", label: "a video (MP4, under 16 MB)" },
+  DOCUMENT: { accept: "application/pdf", label: "a PDF (under 16 MB)" },
+};
+
+/** The file name shown for a stored header file (<folder>/<time>-<name>). */
+function headerFileName(path: string | null): string {
+  return (path?.split("/").pop() ?? "").replace(/^\d+-/, "");
 }
 
 /**
@@ -67,6 +83,7 @@ export function BroadcastEditor({
   sections = [],
   templates = [],
   existingBroadcast,
+  existingHeaderMediaPath = null,
 }: BroadcastEditorProps) {
   const router = useRouter();
   const { toast } = useToast();
@@ -108,6 +125,31 @@ export function BroadcastEditor({
     return templates.find((t) => t.id === selectedTemplateId) ?? null;
   }, [templates, selectedTemplateId]);
   const isMetaTemplate = Boolean(selectedTemplate?.meta_template_id);
+
+  // ---- Header file (templates with an image/video/document header) ----
+  const headerPicker = selectedTemplate?.header_format ? HEADER_FILE_PICKER[selectedTemplate.header_format] ?? null : null;
+  const [headerMediaPath, setHeaderMediaPath] = useState<string | null>(existingHeaderMediaPath);
+  const [headerUploading, setHeaderUploading] = useState(false);
+  const [headerError, setHeaderError] = useState<string | null>(null);
+
+  async function handleHeaderFile(file: File | undefined) {
+    if (!file || !selectedTemplateId) return;
+    setHeaderError(null);
+    setHeaderUploading(true);
+    const prepared = await prepareBroadcastHeaderUpload(selectedTemplateId, file.name, file.type, file.size);
+    if ("error" in prepared) {
+      setHeaderUploading(false);
+      setHeaderError(prepared.error);
+      return;
+    }
+    const ok = await uploadFile(prepared.uploadUrl, file);
+    setHeaderUploading(false);
+    if (!ok) {
+      setHeaderError("The file could not be uploaded. Please try again.");
+      return;
+    }
+    setHeaderMediaPath(prepared.path);
+  }
 
   // Detected placeholders in current template source body
   const detectedPlaceholders = useMemo(() => {
@@ -161,6 +203,10 @@ export function BroadcastEditor({
     if (isReadOnly) return;
     setSelectedTemplateId(templateId);
     if (messageError) setMessageError(null);
+
+    // The attached header file belongs to the template it was chosen for.
+    setHeaderMediaPath(templateId && templateId === existingBroadcast?.template_id ? existingHeaderMediaPath : null);
+    setHeaderError(null);
 
     const tmpl = templates.find((t) => t.id === templateId);
     if (tmpl) {
@@ -222,6 +268,8 @@ export function BroadcastEditor({
 
   function handleClearTemplate() {
     setSelectedTemplateId("");
+    setHeaderMediaPath(null);
+    setHeaderError(null);
     setTemplateSourceBody("");
     setVariableMappings({});
     setTemplateMode("custom");
@@ -263,6 +311,11 @@ export function BroadcastEditor({
           }
         }
       }
+    }
+
+    if (templateMode === "template" && headerPicker && !headerMediaPath) {
+      setHeaderError(`This template needs ${headerPicker.label} in its header. Please attach it.`);
+      return;
     }
 
     let targetIds: string[] = [];
@@ -313,6 +366,7 @@ export function BroadcastEditor({
     const usingTemplate = templateMode === "template" && Boolean(selectedTemplateId);
     const templateIdPayload = usingTemplate ? selectedTemplateId : null;
     const variableMappingsPayload = usingTemplate ? variableMappings : {};
+    const headerMediaPayload = usingTemplate && headerPicker ? headerMediaPath : null;
 
     if (isEditing && existingBroadcast) {
       result = await updateBroadcast(existingBroadcast.id, {
@@ -322,6 +376,7 @@ export function BroadcastEditor({
         ...(isEditingScheduled && scheduledDate ? { scheduled_for: scheduledDate.toISOString() } : {}),
         template_id: templateIdPayload,
         variable_mappings: variableMappingsPayload,
+        header_media_path: headerMediaPayload,
       });
     } else if (scheduleMode === "later") {
       if (!scheduledDate) {
@@ -336,6 +391,7 @@ export function BroadcastEditor({
         scheduled_for: scheduledDate.toISOString(),
         template_id: templateIdPayload,
         variable_mappings: variableMappingsPayload,
+        header_media_path: headerMediaPayload,
       });
     } else {
       result = await createBroadcastDraft({
@@ -344,6 +400,7 @@ export function BroadcastEditor({
         target_ids: targetIds,
         template_id: templateIdPayload,
         variable_mappings: variableMappingsPayload,
+        header_media_path: headerMediaPayload,
       });
     }
 
@@ -467,6 +524,38 @@ export function BroadcastEditor({
                 : "This template isn't approved by Meta yet, so this broadcast can't be sent or scheduled. Choose another template, or wait for approval and click \"Sync from Meta\" on the Templates page."
               : `${selectedTemplate ? "CRM template" : "Custom message"}: sent as plain text, so only contacts who messaged you in the last 24 hours receive it. Everyone else is skipped and listed after sending; use an approved Meta template to reach them.`}
           </p>
+        )}
+
+        {headerPicker && (
+          <div className="mt-4 rounded-md border p-3">
+            <Label htmlFor="broadcast-header-file" className="flex items-center gap-1.5">
+              <Paperclip className="size-3.5" />
+              Header file
+            </Label>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              This template starts with {headerPicker.label}. Every recipient gets this file with the message.
+            </p>
+            {headerMediaPath && (
+              <p className="mt-2 text-sm">
+                Attached: <span className="font-medium">{headerFileName(headerMediaPath)}</span>
+              </p>
+            )}
+            {!isReadOnly && (
+              <input
+                id="broadcast-header-file"
+                type="file"
+                accept={headerPicker.accept}
+                disabled={headerUploading}
+                onChange={(e) => {
+                  void handleHeaderFile(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+                className="mt-2 block w-full text-xs file:mr-3 file:rounded-md file:border file:bg-muted file:px-3 file:py-1.5 file:text-xs file:font-medium"
+              />
+            )}
+            {headerUploading && <p className="mt-2 text-xs text-muted-foreground">Uploading...</p>}
+            {headerError && <p className="mt-2 text-sm text-destructive">{headerError}</p>}
+          </div>
         )}
 
         {selectedTemplate && detectedPlaceholders.length > 0 && (
@@ -633,7 +722,7 @@ export function BroadcastEditor({
           {isReadOnly ? "Back to Broadcasts" : "Cancel"}
         </Button>
         {!isReadOnly && (
-          <Button type="submit" disabled={submitting}>
+          <Button type="submit" disabled={submitting || headerUploading}>
             {submitting
               ? scheduleMode === "later" && !isEditing
                 ? "Scheduling..."

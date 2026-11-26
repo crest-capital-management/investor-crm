@@ -11,6 +11,14 @@ import {
   type SendBroadcastResult,
 } from "@/lib/broadcast-dispatch";
 import { isUuid, hasInvalidId, INVALID_ID_ERROR } from "@/lib/validate";
+import {
+  createBroadcastHeaderUploadTarget,
+  isUploadPath,
+  MAX_UPLOAD_BYTES,
+  mediaUrlForPath,
+  WHATSAPP_MEDIA_BUCKET,
+} from "@/lib/storage";
+import { isTemplateMediaHeaderFormat, type TemplateMediaHeaderFormat } from "@/lib/whatsapp";
 
 export type TargetType = "group" | "tag" | "manual";
 
@@ -36,6 +44,8 @@ export interface TemplateOption {
   approved_at?: string | null;
   /** Set when the template was synced from Meta and is sent as a real WhatsApp template. */
   meta_template_id?: string | null;
+  /** IMAGE, VIDEO or DOCUMENT when the template's header needs a file (attached to the broadcast). */
+  header_format?: string | null;
 }
 
 export interface BroadcastData {
@@ -52,6 +62,8 @@ export interface BroadcastData {
   variable_mappings?: Record<string, unknown> | null;
   /** Who it reached, was skipped or failed; set once sent (see lib/broadcast-dispatch). */
   send_summary?: BroadcastSendSummary | null;
+  /** The stored file sent in the template's header, as a media_url (see lib/storage). */
+  media_url?: string | null;
 }
 
 export interface CreateBroadcastDraftInput {
@@ -60,6 +72,8 @@ export interface CreateBroadcastDraftInput {
   target_ids: string[];
   template_id?: string | null;
   variable_mappings?: Record<string, unknown> | null;
+  /** The uploaded header file (from prepareBroadcastHeaderUpload) for a template with a media header. */
+  header_media_path?: string | null;
 }
 
 export interface UpdateBroadcastInput {
@@ -69,6 +83,8 @@ export interface UpdateBroadcastInput {
   scheduled_for?: string;
   template_id?: string | null;
   variable_mappings?: Record<string, unknown> | null;
+  /** The uploaded header file (from prepareBroadcastHeaderUpload) for a template with a media header. */
+  header_media_path?: string | null;
 }
 
 export interface CreateScheduledBroadcastInput {
@@ -78,6 +94,8 @@ export interface CreateScheduledBroadcastInput {
   scheduled_for: string;
   template_id?: string | null;
   variable_mappings?: Record<string, unknown> | null;
+  /** The uploaded header file (from prepareBroadcastHeaderUpload) for a template with a media header. */
+  header_media_path?: string | null;
 }
 
 function validateTemplatePayload(data?: {
@@ -124,6 +142,71 @@ function validateTemplatePayload(data?: {
   return { error: null, templateId, variableMappings };
 }
 
+/** Files a Meta template header accepts, per header kind. */
+const HEADER_FILE_TYPES: Record<TemplateMediaHeaderFormat, { types: string[]; maxBytes: number; label: string }> = {
+  IMAGE: { types: ["image/jpeg", "image/png"], maxBytes: 5 * 1024 * 1024, label: "a JPG or PNG image under 5 MB" },
+  VIDEO: { types: ["video/mp4", "video/3gpp"], maxBytes: MAX_UPLOAD_BYTES[WHATSAPP_MEDIA_BUCKET], label: "an MP4 video under 16 MB" },
+  DOCUMENT: { types: ["application/pdf"], maxBytes: MAX_UPLOAD_BYTES[WHATSAPP_MEDIA_BUCKET], label: "a PDF under 16 MB" },
+};
+
+async function templateHeaderFormat(templateId: string): Promise<TemplateMediaHeaderFormat | null> {
+  // Read through to_jsonb so this works before migration 004 adds the column.
+  const row = await db
+    .maybeOne<{ header_format: string | null }>(
+      `select to_jsonb(t) ->> 'header_format' as header_format from templates t where id = $1`,
+      [templateId],
+    )
+    .catch(() => null);
+  return isTemplateMediaHeaderFormat(row?.header_format) ? row.header_format : null;
+}
+
+/**
+ * The media_url to save on a broadcast: the uploaded header file when its
+ * template's header needs one (required then), otherwise null.
+ */
+async function resolveHeaderMedia(
+  templateId: string | null,
+  headerMediaPath: string | null | undefined,
+): Promise<{ error?: string; mediaUrl: string | null }> {
+  const format = templateId ? await templateHeaderFormat(templateId) : null;
+  if (!format) return { mediaUrl: null };
+  const path = (headerMediaPath ?? "").trim();
+  if (!path) {
+    return { error: `This template needs ${HEADER_FILE_TYPES[format].label} in its header. Please attach it.`, mediaUrl: null };
+  }
+  if (!isUploadPath(path)) return { error: "The attached file is not valid. Please attach it again.", mediaUrl: null };
+  return { mediaUrl: encryptField(mediaUrlForPath(path)) };
+}
+
+/**
+ * Step 1 of attaching the header file of a broadcast's template: checks the
+ * file and returns where the browser uploads it (the CRM's /api/uploads route).
+ */
+export async function prepareBroadcastHeaderUpload(
+  templateId: string,
+  filename: string,
+  mimeType: string,
+  size: number,
+): Promise<{ path: string; uploadUrl: string } | { error: string }> {
+  const { error: authError } = await requireActionAuth();
+  if (authError) return { error: "Unauthorized" };
+  if (hasInvalidId(templateId)) return { error: INVALID_ID_ERROR };
+
+  const format = await templateHeaderFormat(templateId);
+  if (!format) return { error: "This template doesn't take a file." };
+  const allowed = HEADER_FILE_TYPES[format];
+  if (!size) return { error: "No file selected." };
+  if (!allowed.types.includes(mimeType) || size > allowed.maxBytes) {
+    return { error: `Please choose ${allowed.label}.` };
+  }
+
+  try {
+    return await createBroadcastHeaderUploadTarget(filename);
+  } catch (err: unknown) {
+    return { error: err instanceof Error ? err.message : "Could not prepare the upload." };
+  }
+}
+
 export async function createBroadcastDraft(data: CreateBroadcastDraftInput) {
   const { error: authError } = await requireActionAuth();
   if (authError) {
@@ -159,11 +242,14 @@ export async function createBroadcastDraft(data: CreateBroadcastDraftInput) {
     return { error: templateError };
   }
 
+  const header = await resolveHeaderMedia(templateId, data.header_media_path);
+  if (header.error) return { error: header.error };
+
   try {
     await db.execute(
-      `insert into broadcasts (message_text, target_type, target_ids, status, template_id, variable_mappings)
-       values ($1, $2, $3::text[], 'draft', $4, $5::jsonb)`,
-      [encryptField(messageText), data.target_type, normalizedTargetIds, templateId, JSON.stringify(variableMappings)],
+      `insert into broadcasts (message_text, target_type, target_ids, status, template_id, variable_mappings, media_url)
+       values ($1, $2, $3::text[], 'draft', $4, $5::jsonb, $6)`,
+      [encryptField(messageText), data.target_type, normalizedTargetIds, templateId, JSON.stringify(variableMappings), header.mediaUrl],
     );
   } catch (error) {
     console.error("Failed to create broadcast draft.", error instanceof Error ? error.message : error);
@@ -223,10 +309,13 @@ export async function createScheduledBroadcast(
     return { error: templateError };
   }
 
+  const header = await resolveHeaderMedia(templateId, data.header_media_path);
+  if (header.error) return { error: header.error };
+
   try {
     await db.execute(
-      `insert into broadcasts (message_text, target_type, target_ids, status, scheduled_for, template_id, variable_mappings)
-       values ($1, $2, $3::text[], 'scheduled', $4, $5, $6::jsonb)`,
+      `insert into broadcasts (message_text, target_type, target_ids, status, scheduled_for, template_id, variable_mappings, media_url)
+       values ($1, $2, $3::text[], 'scheduled', $4, $5, $6::jsonb, $7)`,
       [
         encryptField(messageText),
         data.target_type,
@@ -234,6 +323,7 @@ export async function createScheduledBroadcast(
         scheduledDate.toISOString(),
         templateId,
         JSON.stringify(variableMappings),
+        header.mediaUrl,
       ],
     );
   } catch (error) {
@@ -356,6 +446,14 @@ export async function updateBroadcast(id: string, data: UpdateBroadcastInput) {
     updatePayload.scheduled_for = scheduledDate.toISOString();
   }
 
+  // The header file follows the template: required for a media header, cleared otherwise.
+  let headerMediaUrl: string | null | undefined;
+  if (updatePayload.template_id !== undefined) {
+    const header = await resolveHeaderMedia(updatePayload.template_id, data.header_media_path);
+    if (header.error) return { error: header.error };
+    headerMediaUrl = header.mediaUrl;
+  }
+
   // Only the fields present in the payload are changed.
   const params: unknown[] = [id];
   const sets: string[] = [];
@@ -371,6 +469,7 @@ export async function updateBroadcast(id: string, data: UpdateBroadcastInput) {
   if (updatePayload.variable_mappings !== undefined) {
     setField("variable_mappings", JSON.stringify(updatePayload.variable_mappings), "::jsonb");
   }
+  if (headerMediaUrl !== undefined) setField("media_url", headerMediaUrl);
 
   try {
     await db.execute(`update broadcasts set ${sets.join(", ")} where id = $1`, params);

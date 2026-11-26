@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Readable } from "node:stream";
 import {
   BlobSASPermissions,
@@ -111,6 +112,11 @@ export const UPLOAD_WINDOW_MS = 15 * 60 * 1000;
 // <contact uuid>/<13-digit time>-<safe name>, as newUploadPath makes it.
 const UPLOAD_PATH = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(\d{13})-[a-zA-Z0-9._-]{1,200}$/i;
 
+/** True if the path has the form newUploadPath makes (at any time). */
+export function isUploadPath(path: string): boolean {
+  return UPLOAD_PATH.test(path);
+}
+
 /** True if the path is one newUploadPath made in the last UPLOAD_WINDOW_MS. */
 export function isFreshUploadPath(path: string): boolean {
   const match = path.match(UPLOAD_PATH);
@@ -130,6 +136,16 @@ function uploadAddress(bucket: UploadBucket, path: string): string {
  */
 export async function createMediaUploadTarget(contactId: string, filename: string): Promise<UploadTarget> {
   const path = newUploadPath(contactId, filename);
+  return { path, uploadUrl: uploadAddress(WHATSAPP_MEDIA_BUCKET, path) };
+}
+
+/**
+ * Same as createMediaUploadTarget, for the file a broadcast sends in its
+ * template's image/video/document header. It belongs to no contact, so it gets
+ * a folder of its own (a random id, which keeps the usual path form).
+ */
+export async function createBroadcastHeaderUploadTarget(filename: string): Promise<UploadTarget> {
+  const path = newUploadPath(randomUUID(), filename);
   return { path, uploadUrl: uploadAddress(WHATSAPP_MEDIA_BUCKET, path) };
 }
 

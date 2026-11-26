@@ -137,6 +137,24 @@ export interface SendWhatsAppTemplateMessageParams {
   language: string;
   /** Values for the body's {{1}}, {{2}}, ... placeholders, in order. */
   bodyParameters: string[];
+  /** For a template with an image, video or document header: the file, uploaded with uploadWhatsAppMedia. */
+  headerMedia?: TemplateHeaderMedia;
+}
+
+/** Header kinds of a Meta template that need a file sent with every message. */
+export type TemplateMediaHeaderFormat = "IMAGE" | "VIDEO" | "DOCUMENT";
+
+export const TEMPLATE_MEDIA_HEADER_FORMATS: readonly TemplateMediaHeaderFormat[] = ["IMAGE", "VIDEO", "DOCUMENT"];
+
+export function isTemplateMediaHeaderFormat(value: unknown): value is TemplateMediaHeaderFormat {
+  return typeof value === "string" && (TEMPLATE_MEDIA_HEADER_FORMATS as readonly string[]).includes(value);
+}
+
+export interface TemplateHeaderMedia {
+  format: TemplateMediaHeaderFormat;
+  mediaId: string;
+  /** Shown to the recipient for a document header. */
+  filename?: string;
 }
 
 /**
@@ -148,6 +166,7 @@ export async function sendWhatsAppTemplateMessage({
   templateName,
   language,
   bodyParameters,
+  headerMedia,
 }: SendWhatsAppTemplateMessageParams): Promise<WhatsAppApiResponse> {
   const token = process.env.WHATSAPP_ACCESS_TOKEN;
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
@@ -164,14 +183,20 @@ export async function sendWhatsAppTemplateMessage({
     name: templateName,
     language: { code: language },
   };
-  if (bodyParameters.length > 0) {
-    template.components = [
-      {
-        type: "body",
-        parameters: bodyParameters.map((text) => ({ type: "text", text })),
-      },
-    ];
+  const components: Record<string, unknown>[] = [];
+  if (headerMedia) {
+    const type = headerMedia.format.toLowerCase();
+    const media: Record<string, unknown> = { id: headerMedia.mediaId };
+    if (headerMedia.format === "DOCUMENT" && headerMedia.filename) media.filename = headerMedia.filename;
+    components.push({ type: "header", parameters: [{ type, [type]: media }] });
   }
+  if (bodyParameters.length > 0) {
+    components.push({
+      type: "body",
+      parameters: bodyParameters.map((text) => ({ type: "text", text })),
+    });
+  }
+  if (components.length > 0) template.components = components;
 
   const url = `https://graph.facebook.com/v25.0/${phoneNumberId}/messages`;
   const response = await fetch(url, {
@@ -247,6 +272,18 @@ export async function fetchWhatsAppMessageTemplates(): Promise<MetaMessageTempla
 }
 
 export type WhatsAppMediaType = "image" | "video" | "audio" | "document";
+
+/** File types by extension, for files read back from storage (which keeps no type with the name). */
+export const MIME_BY_EXTENSION: Record<string, string> = {
+  jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif", webp: "image/webp",
+  mp4: "video/mp4", "3gp": "video/3gpp", mov: "video/quicktime", webm: "video/webm",
+  mp3: "audio/mpeg", ogg: "audio/ogg", opus: "audio/ogg", m4a: "audio/mp4", aac: "audio/aac", amr: "audio/amr", wav: "audio/wav",
+  pdf: "application/pdf", doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  csv: "text/csv", txt: "text/plain",
+};
 
 /**
  * Maps a browser/file MIME type to the WhatsApp Cloud API media category.
