@@ -1,8 +1,7 @@
-import { Readable, Transform, pipeline } from "node:stream";
-import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { NextResponse } from "next/server";
 import { getOwnerSessionId } from "@/lib/auth";
-import { saveUploadedBackupFile } from "@/lib/storage";
+import { encryptBackup, isEncryptedBackup } from "@/lib/backup-encryption";
+import { saveBackupFile } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
 
@@ -10,9 +9,11 @@ export const dynamic = "force-dynamic";
 const MAX_BYTES = 19 * 1024 * 1024;
 
 /**
- * Receives a backup file the owner wants to restore from (gzipped by the
- * browser) and stores it in the private backups container. Restoring is a
- * separate, confirmed step (restoreFromBackup).
+ * Receives a backup file the owner wants to restore from and stores it,
+ * encrypted, in the private backups container. The browser sends an encrypted
+ * backup (.json.gz.enc) as it is, and gzips an older plain one; a plain one is
+ * encrypted here before it is stored. Restoring is a separate, confirmed step
+ * (restoreFromBackup), which also checks the file.
  */
 export async function PUT(request: Request) {
   if (!(await getOwnerSessionId())) {
@@ -25,25 +26,30 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "The backup file is too large to upload (over 19 MB compressed)." }, { status: 413 });
   }
 
-  // Counts the bytes as they arrive, in case the declared length was wrong.
+  // Read whole (at most 19 MB): it is encrypted as one piece. Counted as it
+  // arrives, in case the declared length was wrong.
+  const chunks: Buffer[] = [];
   let received = 0;
-  const counter = new Transform({
-    transform(chunk: Buffer, _encoding, done) {
-      received += chunk.length;
-      done(received > MAX_BYTES ? new Error("File is too large.") : null, chunk);
-    },
-  });
-  const body = pipeline(Readable.fromWeb(request.body as WebReadableStream<Uint8Array>), counter, () => {});
-
-  const name = `upload-${Date.now()}.json.gz`;
   try {
-    await saveUploadedBackupFile(name, body);
+    for await (const chunk of request.body as unknown as AsyncIterable<Uint8Array>) {
+      received += chunk.length;
+      if (received > MAX_BYTES) {
+        return NextResponse.json({ error: "The backup file is too large." }, { status: 413 });
+      }
+      chunks.push(Buffer.from(chunk));
+    }
+  } catch {
+    return NextResponse.json({ error: "The file could not be uploaded. Please try again." }, { status: 400 });
+  }
+  const bytes = Buffer.concat(chunks);
+  if (bytes.length === 0) return NextResponse.json({ error: "No file received." }, { status: 400 });
+
+  const name = `upload-${Date.now()}.json.gz.enc`;
+  try {
+    await saveBackupFile(name, isEncryptedBackup(bytes) ? bytes : encryptBackup(bytes));
   } catch (err) {
     console.error("[backup upload] could not save", err instanceof Error ? err.message : err);
-    return NextResponse.json(
-      { error: received > MAX_BYTES ? "The backup file is too large." : "The file could not be uploaded. Please try again." },
-      { status: received > MAX_BYTES ? 413 : 500 },
-    );
+    return NextResponse.json({ error: "The file could not be uploaded. Please try again." }, { status: 500 });
   }
 
   return NextResponse.json({ name });

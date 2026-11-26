@@ -28,7 +28,9 @@ function formatDate(date: string) {
 
 /** "6 Nov 2026", or "6 Nov 2026, 7:45 pm (before a restore)" for a safety copy. */
 export function backupLabel(backup: StoredBackup) {
-  if (!backup.beforeRestoreAt) return formatDate(backup.date);
+  // Backups from before encryption (package 5) are marked until they age out.
+  const plain = backup.encrypted ? "" : " (not encrypted)";
+  if (!backup.beforeRestoreAt) return formatDate(backup.date) + plain;
   const taken = new Date(`${backup.date}T${backup.beforeRestoreAt}:00Z`);
   const when = taken.toLocaleString("en-IN", {
     day: "numeric",
@@ -37,7 +39,7 @@ export function backupLabel(backup: StoredBackup) {
     hour: "numeric",
     minute: "2-digit",
   });
-  return `${when} (before a restore)`;
+  return `${when} (before a restore)${plain}`;
 }
 
 /** Automatic nightly backups kept in private storage, with download links. */

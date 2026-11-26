@@ -14,7 +14,9 @@ import {
  */
 export const WHATSAPP_MEDIA_BUCKET = "whatsapp-media";
 export const PORTFOLIO_BUCKET = "portfolio-updates";
-export const BACKUP_BUCKET = "backups";
+// AZURE_STORAGE_BACKUP_CONTAINER is for tests only (a local copy must never
+// write into, or prune, the live backups); leave it unset on the server.
+export const BACKUP_BUCKET = process.env.AZURE_STORAGE_BACKUP_CONTAINER?.trim() || "backups";
 
 /** What a WhatsApp message records in media_url for a file we store. */
 const MEDIA_REF_PREFIX = `azure-blob://${WHATSAPP_MEDIA_BUCKET}/`;
@@ -231,11 +233,13 @@ export async function removePortfolioFile(path: string): Promise<void> {
 
 export type StoredFile = { name: string; bytes: number };
 
-/** Saves (or replaces) one backup file in the private backups container, creating it on first use. */
+/** Saves (or replaces) one backup file (encrypted, lib/backup-encryption.ts) in the private backups container, creating it on first use. */
 export async function saveBackupFile(name: string, body: Buffer): Promise<void> {
   const backups = container(BACKUP_BUCKET);
   await backups.createIfNotExists();
-  await backups.getBlockBlobClient(name).uploadData(body, { blobHTTPHeaders: { blobContentType: "application/gzip" } });
+  await backups
+    .getBlockBlobClient(name)
+    .uploadData(body, { blobHTTPHeaders: { blobContentType: "application/octet-stream" } });
 }
 
 /** Every file in the backups container (empty if it doesn't exist yet). */
@@ -261,16 +265,6 @@ export async function downloadBackupFile(name: string): Promise<Buffer> {
   } catch (err) {
     throw new Error(`Could not read the backup file: ${err instanceof Error ? err.message : "unknown error"}`);
   }
-}
-
-/** Writes a backup file uploaded from the browser (a stream) into the backups container. Never overwrites. */
-export async function saveUploadedBackupFile(name: string, body: Readable): Promise<void> {
-  const backups = container(BACKUP_BUCKET);
-  await backups.createIfNotExists();
-  await backups.getBlockBlobClient(name).uploadStream(body, 4 * 1024 * 1024, 4, {
-    blobHTTPHeaders: { blobContentType: "application/gzip" },
-    conditions: { ifNoneMatch: "*" },
-  });
 }
 
 /** A download link for one backup. */

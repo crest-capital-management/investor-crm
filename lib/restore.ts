@@ -1,5 +1,6 @@
 import { gunzipSync } from "node:zlib";
 import { db, type Queryable } from "@/lib/db";
+import { decryptBackup, isEncryptedBackup } from "@/lib/backup-encryption";
 import { CRM_TABLES } from "@/lib/crm-tables";
 
 /**
@@ -22,14 +23,21 @@ export interface ParsedBackup {
   data: Record<string, Record<string, unknown>[]>;
 }
 
-/** Reads a backup file (gzipped or plain JSON) and checks it looks like a CRM backup. */
+/**
+ * Reads a backup file and checks it looks like a CRM backup. Accepts an
+ * encrypted backup (lib/backup-encryption.ts) and, for backups made before
+ * package 5, gzipped or plain JSON.
+ */
 export function parseBackupFile(bytes: Buffer): ParsedBackup {
+  // Decryption errors (wrong key, changed file) are passed on as they are: they say what is wrong.
+  if (isEncryptedBackup(bytes)) bytes = decryptBackup(bytes);
+
   let text: string;
   try {
     const isGzip = bytes.length > 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
     text = (isGzip ? gunzipSync(bytes, { maxOutputLength: MAX_UNZIPPED_BYTES }) : bytes).toString("utf8");
   } catch {
-    throw new Error("The file could not be unpacked. Please use a CRM backup (.json or .json.gz).");
+    throw new Error("The file could not be unpacked. Please use a CRM backup (.json.gz.enc, .json.gz or .json).");
   }
 
   let parsed: unknown;
