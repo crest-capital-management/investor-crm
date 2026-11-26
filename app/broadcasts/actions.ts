@@ -15,6 +15,7 @@ import {
   createBroadcastHeaderUploadTarget,
   isUploadPath,
   MAX_UPLOAD_BYTES,
+  MAX_UPLOAD_NAME_LENGTH,
   mediaUrlForPath,
   WHATSAPP_MEDIA_BUCKET,
 } from "@/lib/storage";
@@ -196,6 +197,11 @@ export async function prepareBroadcastHeaderUpload(
   if (!format) return { error: "This template doesn't take a file." };
   const allowed = HEADER_FILE_TYPES[format];
   if (!size) return { error: "No file selected." };
+  // Checked here so a long name gets a clear message instead of a failed upload later.
+  if (!filename.trim()) return { error: "The file has no name. Please rename it and try again." };
+  if (filename.length > MAX_UPLOAD_NAME_LENGTH) {
+    return { error: `The file name is too long (over ${MAX_UPLOAD_NAME_LENGTH} characters). Please rename the file and try again.` };
+  }
   if (!allowed.types.includes(mimeType) || size > allowed.maxBytes) {
     return { error: `Please choose ${allowed.label}.` };
   }
@@ -369,10 +375,10 @@ export async function updateBroadcast(id: string, data: UpdateBroadcastInput) {
   }
 
   // Verify status is draft or scheduled
-  let existing: { status: string } | null;
+  let existing: { status: string; template_id: string | null } | null;
   try {
-    existing = await db.maybeOne<{ status: string }>(
-      "select status from broadcasts where id = $1 and deleted_at is null",
+    existing = await db.maybeOne<{ status: string; template_id: string | null }>(
+      "select status, template_id from broadcasts where id = $1 and deleted_at is null",
       [id],
     );
   } catch {
@@ -447,9 +453,12 @@ export async function updateBroadcast(id: string, data: UpdateBroadcastInput) {
   }
 
   // The header file follows the template: required for a media header, cleared otherwise.
+  // Checked when the template or the file is sent, so replacing only the file
+  // (same template) saves the new file too.
   let headerMediaUrl: string | null | undefined;
-  if (updatePayload.template_id !== undefined) {
-    const header = await resolveHeaderMedia(updatePayload.template_id, data.header_media_path);
+  if (updatePayload.template_id !== undefined || data.header_media_path !== undefined) {
+    const templateId = updatePayload.template_id !== undefined ? updatePayload.template_id : existing.template_id;
+    const header = await resolveHeaderMedia(templateId, data.header_media_path);
     if (header.error) return { error: header.error };
     headerMediaUrl = header.mediaUrl;
   }

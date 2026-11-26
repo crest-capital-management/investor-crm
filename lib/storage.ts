@@ -56,6 +56,9 @@ function attachment(filename: string): string {
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }
 
+/** Longest file name an upload path can hold (see UPLOAD_PATH); check it before reserving an upload. */
+export const MAX_UPLOAD_NAME_LENGTH = 200;
+
 function newUploadPath(contactId: string, filename: string): string {
   const safeFilename = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
   return `${contactId}/${Date.now()}-${safeFilename}`;
@@ -110,7 +113,10 @@ export const MAX_UPLOAD_BYTES: Record<UploadBucket, number> = {
 export const UPLOAD_WINDOW_MS = 15 * 60 * 1000;
 
 // <contact uuid>/<13-digit time>-<safe name>, as newUploadPath makes it.
-const UPLOAD_PATH = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(\d{13})-[a-zA-Z0-9._-]{1,200}$/i;
+const UPLOAD_PATH = new RegExp(
+  `^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/(\\d{13})-[a-zA-Z0-9._-]{1,${MAX_UPLOAD_NAME_LENGTH}}$`,
+  "i",
+);
 
 /** True if the path has the form newUploadPath makes (at any time). */
 export function isUploadPath(path: string): boolean {
