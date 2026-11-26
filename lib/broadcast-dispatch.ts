@@ -3,10 +3,16 @@ import { db } from "@/lib/db";
 import { encryptField } from "@/lib/encryption";
 import { phoneHash, sortByName, tagMatch } from "@/lib/pii";
 import {
+  isTemplateMediaHeaderFormat,
+  MIME_BY_EXTENSION,
   normalizePhoneForWhatsApp,
   sendWhatsAppMessage,
   sendWhatsAppTemplateMessage,
+  uploadWhatsAppMedia,
+  type TemplateHeaderMedia,
+  type TemplateMediaHeaderFormat,
 } from "@/lib/whatsapp";
+import { downloadStoredMedia, mediaStoragePathFromUrl } from "@/lib/storage";
 import { insertOutboundMessage } from "@/lib/message-status";
 import {
   extractPlaceholders,
@@ -249,7 +255,31 @@ interface PreparedBroadcast {
   templateBody: string | null;
   mappings: VariableMappings;
   /** Set for templates synced from Meta: sent as a real WhatsApp template. */
-  metaTemplate: { name: string; language: string } | null;
+  metaTemplate: {
+    name: string;
+    language: string;
+    /** For an image/video/document header: the broadcast's stored file. */
+    header: { format: TemplateMediaHeaderFormat; mediaUrl: string; path: string } | null;
+  } | null;
+  /**
+   * The header file handed to WhatsApp, once per run (every recipient of the
+   * run reuses it). A failed upload is kept too, so it isn't retried per recipient.
+   */
+  headerMedia?: Promise<TemplateHeaderMedia>;
+}
+
+/** Hands the broadcast's header file to WhatsApp (once per run) and returns its media id. */
+function headerMediaFor(prepared: PreparedBroadcast): Promise<TemplateHeaderMedia> | null {
+  const header = prepared.metaTemplate?.header;
+  if (!header) return null;
+  prepared.headerMedia ??= (async () => {
+    const filename = (header.path.split("/").pop() ?? "file").replace(/^\d+-/, "");
+    const mimeType = MIME_BY_EXTENSION[filename.split(".").pop()?.toLowerCase() ?? ""] ?? "application/octet-stream";
+    const bytes = await downloadStoredMedia(header.path);
+    const mediaId = await uploadWhatsAppMedia(bytes, mimeType, filename);
+    return { format: header.format, mediaId, filename };
+  })();
+  return prepared.headerMedia;
 }
 
 /** Loads a broadcast and checks its template and variable mappings. */
@@ -263,10 +293,11 @@ async function prepareBroadcast(
     target_ids: string[] | null;
     template_id: string | null;
     variable_mappings: unknown;
+    media_url: string | null;
   } | null;
   try {
     broadcast = await db.maybeOne(
-      `select id, message_text, target_type, target_ids, template_id, variable_mappings
+      `select id, message_text, target_type, target_ids, template_id, variable_mappings, media_url
          from broadcasts
         where id = $1 and deleted_at is null`,
       [broadcastId],
@@ -291,11 +322,14 @@ async function prepareBroadcast(
       body_text: string | null;
       meta_template_id: string | null;
       approved_at: string | null;
+      header_format: string | null;
     } | null;
     try {
+      // header_format is read through to_jsonb so this works before migration 004.
       tmpl = await db.maybeOne(
-        `select id, name, language, body_text, meta_template_id, approved_at
-           from templates
+        `select id, name, language, body_text, meta_template_id, approved_at,
+                to_jsonb(t) ->> 'header_format' as header_format
+           from templates t
           where id = $1 and deleted_at is null`,
         [broadcast.template_id],
       );
@@ -313,7 +347,17 @@ async function prepareBroadcast(
           error: `Template "${tmpl.name}" is not approved by Meta yet. Sync templates again once it is approved.`,
         };
       }
-      metaTemplate = { name: tmpl.name, language: tmpl.language };
+      let header: NonNullable<PreparedBroadcast["metaTemplate"]>["header"] = null;
+      if (isTemplateMediaHeaderFormat(tmpl.header_format)) {
+        const path = broadcast.media_url ? mediaStoragePathFromUrl(broadcast.media_url) : null;
+        if (!broadcast.media_url || !path) {
+          return {
+            error: `Template "${tmpl.name}" needs a file in its header. Edit the broadcast and attach it.`,
+          };
+        }
+        header = { format: tmpl.header_format, mediaUrl: broadcast.media_url, path };
+      }
+      metaTemplate = { name: tmpl.name, language: tmpl.language, header };
     }
 
     const validation = validateTemplateMappingsForSend(tmpl.body_text, broadcast.variable_mappings);
@@ -513,12 +557,14 @@ async function sendToRecipient(
 
   let wamid: string | undefined;
   try {
+    const headerMedia = await headerMediaFor(prepared);
     const response = prepared.metaTemplate
       ? await sendWhatsAppTemplateMessage({
           to: normalizedPhone,
           templateName: prepared.metaTemplate.name,
           language: prepared.metaTemplate.language,
           bodyParameters: templateParams,
+          headerMedia: headerMedia ?? undefined,
         })
       : await sendWhatsAppMessage({ to: normalizedPhone, message: messageToSend });
     wamid = response.messages?.[0]?.id;
@@ -533,7 +579,8 @@ async function sendToRecipient(
   // a logging failure doesn't count against the recipient.
   if (recipient.contact_id) {
     const { error: logError } = await insertOutboundMessage(
-      { contact_id: recipient.contact_id, message_text: messageToSend },
+      // The header file shows in the chat history with the text.
+      { contact_id: recipient.contact_id, message_text: messageToSend, media_url: prepared.metaTemplate?.header?.mediaUrl ?? null },
       wamid,
     );
     if (logError) {

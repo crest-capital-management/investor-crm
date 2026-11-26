@@ -14,6 +14,8 @@ import {
   sendWhatsAppMediaMessage,
   sendWhatsAppMessage,
   sendWhatsAppTemplateMessage,
+  MIME_BY_EXTENSION,
+  isTemplateMediaHeaderFormat,
   uploadWhatsAppMedia,
 } from "@/lib/whatsapp";
 import {
@@ -501,11 +503,19 @@ export async function sendWhatsAppTemplateToContact(
   );
   if (!contact) return { error: "The contact could not be found." };
 
-  type TemplateRow = { name: string; language: string; body_text: string; meta_template_id: string | null; approved_at: string | null };
+  type TemplateRow = {
+    name: string;
+    language: string;
+    body_text: string;
+    meta_template_id: string | null;
+    approved_at: string | null;
+    header_format: string | null;
+  };
   const template = await attempt(() =>
     db.maybeOne<TemplateRow>(
-      `select name, language, body_text, meta_template_id, approved_at
-         from public.templates
+      `select name, language, body_text, meta_template_id, approved_at,
+              to_jsonb(t) ->> 'header_format' as header_format
+         from public.templates t
         where id = $1 and deleted_at is null`,
       [templateId],
     ),
@@ -515,6 +525,9 @@ export async function sendWhatsAppTemplateToContact(
   }
   if (!template.approved_at) {
     return { error: `Template "${template.name}" is not approved by Meta yet.` };
+  }
+  if (isTemplateMediaHeaderFormat(template.header_format)) {
+    return { error: `Template "${template.name}" needs a file in its header. Send it as a broadcast, where the file can be attached.` };
   }
 
   const placeholders = extractPlaceholders(template.body_text);
@@ -558,16 +571,6 @@ export type SendWhatsAppMediaReplyResult =
   | { success: true; message?: SavedMessage }
   | { error: string };
 
-const MIME_BY_EXTENSION: Record<string, string> = {
-  jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif", webp: "image/webp",
-  mp4: "video/mp4", "3gp": "video/3gpp", mov: "video/quicktime", webm: "video/webm",
-  mp3: "audio/mpeg", ogg: "audio/ogg", opus: "audio/ogg", m4a: "audio/mp4", aac: "audio/aac", amr: "audio/amr", wav: "audio/wav",
-  pdf: "application/pdf", doc: "application/msword",
-  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  xls: "application/vnd.ms-excel",
-  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  csv: "text/csv", txt: "text/plain",
-};
 
 /**
  * Sends again a message that WhatsApp reported as not delivered. It goes out as

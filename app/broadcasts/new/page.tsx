@@ -23,8 +23,9 @@ export default async function NewBroadcastPage() {
     loadBroadcastContactChoices(),
     db
       .query<TemplateOption>(
-        `select id, name, category, body_text, variables, approved_at, meta_template_id
-           from templates
+        `select id, name, category, body_text, variables, approved_at, meta_template_id,
+                to_jsonb(t) ->> 'header_format' as header_format
+           from templates t
           where deleted_at is null
           order by name asc`,
       )

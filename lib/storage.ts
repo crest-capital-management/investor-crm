@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Readable } from "node:stream";
 import {
   BlobSASPermissions,
@@ -55,6 +56,9 @@ function attachment(filename: string): string {
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }
 
+/** Longest file name an upload path can hold (see UPLOAD_PATH); check it before reserving an upload. */
+export const MAX_UPLOAD_NAME_LENGTH = 200;
+
 function newUploadPath(contactId: string, filename: string): string {
   const safeFilename = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
   return `${contactId}/${Date.now()}-${safeFilename}`;
@@ -109,7 +113,15 @@ export const MAX_UPLOAD_BYTES: Record<UploadBucket, number> = {
 export const UPLOAD_WINDOW_MS = 15 * 60 * 1000;
 
 // <contact uuid>/<13-digit time>-<safe name>, as newUploadPath makes it.
-const UPLOAD_PATH = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(\d{13})-[a-zA-Z0-9._-]{1,200}$/i;
+const UPLOAD_PATH = new RegExp(
+  `^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/(\\d{13})-[a-zA-Z0-9._-]{1,${MAX_UPLOAD_NAME_LENGTH}}$`,
+  "i",
+);
+
+/** True if the path has the form newUploadPath makes (at any time). */
+export function isUploadPath(path: string): boolean {
+  return UPLOAD_PATH.test(path);
+}
 
 /** True if the path is one newUploadPath made in the last UPLOAD_WINDOW_MS. */
 export function isFreshUploadPath(path: string): boolean {
@@ -130,6 +142,16 @@ function uploadAddress(bucket: UploadBucket, path: string): string {
  */
 export async function createMediaUploadTarget(contactId: string, filename: string): Promise<UploadTarget> {
   const path = newUploadPath(contactId, filename);
+  return { path, uploadUrl: uploadAddress(WHATSAPP_MEDIA_BUCKET, path) };
+}
+
+/**
+ * Same as createMediaUploadTarget, for the file a broadcast sends in its
+ * template's image/video/document header. It belongs to no contact, so it gets
+ * a folder of its own (a random id, which keeps the usual path form).
+ */
+export async function createBroadcastHeaderUploadTarget(filename: string): Promise<UploadTarget> {
+  const path = newUploadPath(randomUUID(), filename);
   return { path, uploadUrl: uploadAddress(WHATSAPP_MEDIA_BUCKET, path) };
 }
 

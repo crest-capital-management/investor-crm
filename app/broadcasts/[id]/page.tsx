@@ -5,6 +5,7 @@ import { ArrowLeft } from "lucide-react";
 import { requireAuthFast } from "@/lib/auth";
 import { isUuid } from "@/lib/validate";
 import { db } from "@/lib/db";
+import { mediaStoragePathFromUrl } from "@/lib/storage";
 import { loadBroadcastContactChoices } from "@/lib/sections";
 import { BroadcastEditor } from "@/components/broadcast-editor";
 import {
@@ -42,8 +43,9 @@ export default async function BroadcastDetailPage({ params }: PageProps) {
     loadBroadcastContactChoices(),
     db
       .query<TemplateOption>(
-        `select id, name, category, body_text, variables, approved_at, meta_template_id
-           from templates
+        `select id, name, category, body_text, variables, approved_at, meta_template_id,
+                to_jsonb(t) ->> 'header_format' as header_format
+           from templates t
           where deleted_at is null
           order by name asc`,
       )
@@ -132,6 +134,7 @@ export default async function BroadcastDetailPage({ params }: PageProps) {
         <BroadcastEditor
           mode="edit"
           existingBroadcast={broadcast}
+          existingHeaderMediaPath={broadcast.media_url ? mediaStoragePathFromUrl(broadcast.media_url) : null}
           groups={groups}
           contacts={contactChoices.contacts}
           sections={contactChoices.sections}
