@@ -11,8 +11,8 @@ Live at https://investor-crm.crest-capital.com (Azure server, behind nginx, app 
 - **Contact / investor detail**: meeting notes (typed or voice note → transcript), follow-ups with AI suggestions, full WhatsApp chat with replies and media, AI chat summary, AI message drafting, prospect score, portfolio updates with AI analysis.
 - **WhatsApp (Meta Cloud API, direct, Coexistence mode)**: inbound webhook with delivery statuses, broadcasts (group/tag/manual targeting, scheduling, per-recipient results, retry failed), templates synced from Meta, unread inbox and unknown numbers, PDF auto-reply to a template button.
 - **Dashboard**: KPIs, follow-up trend, tag distribution, upcoming follow-ups.
-- **Settings**: daily reminder email, backups (download, stored nightly backups, restore).
-- **Security** (VAPT fixes, TSK-38): personal data encrypted in the database (AES-256-GCM), HSTS, startup checks of required secrets, id validation on every server action.
+- **My Profile / settings**: change your password, daily reminder email, backups (encrypted download, stored nightly backups, restore with password confirmation).
+- **Security** (VAPT fixes, TSK-38): personal data encrypted in the database (AES-256-GCM), encrypted backup files, Content-Security-Policy with a per-request nonce, sign-in with a code sent by email (package 7b), sessions that end on a password change, an API check in `proxy.ts`, HSTS, startup checks of required secrets, id validation on every server action. Status per package: `HANDOFF.md`, section 00.
 
 ## Tech stack
 
@@ -21,7 +21,7 @@ Live at https://investor-crm.crest-capital.com (Azure server, behind nginx, app 
 | Framework | Next.js 16 (App Router), React 19, TypeScript |
 | Styling / UI | Tailwind CSS v4, Base UI (`@base-ui/react`) with shadcn/ui components, Lucide icons, recharts |
 | Database | PostgreSQL on the Azure server (`crest_crm`), accessed with `pg` (`lib/db.ts`) |
-| Login | NextAuth (credentials), accounts in `crm_users`; route guard in `proxy.ts` |
+| Login | NextAuth (credentials): password, then a 6-digit code by email (`app/login/actions.ts`, `lib/login-codes.ts`); accounts in `crm_users`; sessions checked in `proxy.ts` and `lib/auth.ts` (`lib/session.ts`) |
 | Encryption | Field encryption in `lib/encryption.ts`, decrypted automatically on read in `lib/db.ts`; key from `PII_ENCRYPTION_SECRET_KEY` (`azure/ENCRYPTION_KEYS.md`) |
 | Files | Azure Blob Storage (`lib/storage.ts`), private containers with short-lived signed links |
 | AI | Claude (`@anthropic-ai/sdk`, `lib/claude.ts`); Gemini only for voice-note transcription (`lib/gemini.ts`) |
@@ -65,7 +65,7 @@ Copy `.env.example` to `.env.local` and fill in the values, including the encryp
 npm run dev
 ```
 
-Open http://localhost:3000. To set or change the login password, use `azure/set-password.mjs`.
+Open http://localhost:3000. Logins: `node azure/set-password.mjs` (add a login or reset a password) and `node azure/delete-user.mjs` (remove one); users change their own password on My Profile. Without an email provider (the local copy), the sign-in code is printed in the `npm run dev` terminal.
 
 Before committing:
 

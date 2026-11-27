@@ -40,6 +40,12 @@ function problems(env: NodeJS.ProcessEnv): string[] {
 }
 
 export function validateEnv(env: NodeJS.ProcessEnv = process.env): void {
+  if (env.EMAIL_CODE_LOGIN_DISABLED === "1") {
+    console.warn(
+      "[security] WARNING: EMAIL_CODE_LOGIN_DISABLED=1, signing in needs only the password (no emailed code). " +
+        "Emergency use only: remove it from .env and restart as soon as email works again.",
+    );
+  }
   const found = problems(env);
   if (found.length === 0) return;
 

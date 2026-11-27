@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { EMAIL_CODE_AMR, emailCodeLoginDisabled } from "@/lib/login-mode";
 
 /**
  * Is a signed session still valid? (TSK-38 package 7a.)
@@ -40,10 +41,15 @@ async function currentPasswordVersion(userId: string): Promise<string | null> {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** True if the session's user still exists and their password is unchanged since this session signed in. */
-export async function isSessionCurrent(userId: unknown, passwordVersion: unknown): Promise<boolean> {
+/**
+ * True if the session's user still exists, their password is unchanged since
+ * this session signed in, and it signed in with an emailed code (package 7b;
+ * password-only sessions count only while EMAIL_CODE_LOGIN_DISABLED=1).
+ */
+export async function isSessionCurrent(userId: unknown, passwordVersion: unknown, amr: unknown): Promise<boolean> {
   if (typeof userId !== "string" || !UUID.test(userId)) return false;
   if (typeof passwordVersion !== "string" || !passwordVersion) return false;
+  if (amr !== EMAIL_CODE_AMR && !emailCodeLoginDisabled()) return false;
   try {
     return (await currentPasswordVersion(userId)) === passwordVersion;
   } catch (err) {

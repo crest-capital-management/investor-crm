@@ -4,8 +4,9 @@ import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
-import { ArrowRight, Eye, EyeOff, Lock, Mail, Shield } from "lucide-react";
+import { ArrowLeft, ArrowRight, Eye, EyeOff, KeyRound, Lock, Mail, Shield } from "lucide-react";
 
+import { startLogin } from "@/app/login/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -17,27 +18,64 @@ export default function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  // Step 2 (TSK-38 package 7b): the code emailed after the right password.
+  const [codeStep, setCodeStep] = useState<{ token: string; sentTo: string } | null>(null);
+  const [code, setCode] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-    setIsLoading(true);
-
-    const result = await signIn("credentials", { email, password, redirect: false });
-
+  async function finishSignIn(credentials: Record<string, string>) {
+    const result = await signIn("credentials", { ...credentials, redirect: false });
     if (!result?.ok || result.error) {
-      // "CredentialsSignin" is a wrong email or password; anything else is a message from the server.
-      setError(
-        !result?.error || result.error === "CredentialsSignin"
-          ? "Invalid email or password."
-          : result.error,
-      );
+      // "CredentialsSignin" means nothing usable was sent; anything else is a message from the server.
+      setError(!result?.error || result.error === "CredentialsSignin" ? "Please sign in again." : result.error);
+      setIsLoading(false);
+      return false;
+    }
+    router.replace("/dashboard");
+    router.refresh();
+    return true;
+  }
+
+  /** Step 1: password checked on the server, which emails a code. Also used for "send a new code". */
+  async function requestCode() {
+    setError(null);
+    setNotice(null);
+    setIsLoading(true);
+    const result = await startLogin(email, password);
+    if ("error" in result) {
+      setError(result.error);
       setIsLoading(false);
       return;
     }
+    if (result.step === "password-only") {
+      // The emergency switch is on (EMAIL_CODE_LOGIN_DISABLED=1): no code.
+      await finishSignIn({ email, password });
+      return;
+    }
+    setCodeStep({ token: result.token, sentTo: result.sentTo });
+    setCode("");
+    setNotice(`We emailed a 6-digit code to ${result.sentTo}. It expires in 10 minutes.`);
+    setIsLoading(false);
+  }
 
-    router.replace("/dashboard");
-    router.refresh();
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!codeStep) {
+      await requestCode();
+      return;
+    }
+    setError(null);
+    setIsLoading(true);
+    const ok = await finishSignIn({ token: codeStep.token, code: code.trim() });
+    if (!ok) setCode("");
+  }
+
+  function backToPassword() {
+    setCodeStep(null);
+    setCode("");
+    setError(null);
+    setNotice(null);
+    setPassword("");
   }
 
   return (
@@ -87,51 +125,102 @@ export default function LoginForm() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-3 short:space-y-2">
-              <div className="space-y-2">
-                <label htmlFor="email" className="text-sm font-medium text-foreground">
-                  Email
-                </label>
-                <div className="relative">
-                  <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    id="email"
-                    type="email"
-                    autoComplete="email"
-                    required
-                    placeholder="name@crest.com"
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    className="pl-9"
-                  />
+              {codeStep ? (
+                <div className="space-y-2">
+                  <label htmlFor="code" className="text-sm font-medium text-foreground">
+                    Sign-in code
+                  </label>
+                  <div className="relative">
+                    <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      id="code"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      pattern="[0-9]{6}"
+                      maxLength={6}
+                      required
+                      autoFocus
+                      placeholder="6-digit code"
+                      value={code}
+                      onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                      className="pl-9 tracking-[0.3em]"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <button
+                      type="button"
+                      onClick={backToPassword}
+                      disabled={isLoading}
+                      className="inline-flex items-center gap-1 text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                    >
+                      <ArrowLeft className="h-3 w-3" />
+                      Back
+                    </button>
+                    <button
+                      type="button"
+                      onClick={requestCode}
+                      disabled={isLoading}
+                      className="text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                    >
+                      Send a new code
+                    </button>
+                  </div>
                 </div>
-              </div>
-              <div className="space-y-2">
-                <label htmlFor="password" className="text-sm font-medium text-foreground">
-                  Password
-                </label>
-                <div className="relative">
-                  <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    id="password"
-                    type={showPassword ? "text" : "password"}
-                    autoComplete="current-password"
-                    required
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    className="pl-9 pr-9"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((prev) => !prev)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground focus:outline-hidden"
-                    tabIndex={-1}
-                    aria-label={showPassword ? "Hide password" : "Show password"}
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    <label htmlFor="email" className="text-sm font-medium text-foreground">
+                      Email
+                    </label>
+                    <div className="relative">
+                      <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        id="email"
+                        type="email"
+                        autoComplete="email"
+                        required
+                        placeholder="name@crest.com"
+                        value={email}
+                        onChange={(event) => setEmail(event.target.value)}
+                        className="pl-9"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label htmlFor="password" className="text-sm font-medium text-foreground">
+                      Password
+                    </label>
+                    <div className="relative">
+                      <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        id="password"
+                        type={showPassword ? "text" : "password"}
+                        autoComplete="current-password"
+                        required
+                        placeholder="••••••••"
+                        value={password}
+                        onChange={(event) => setPassword(event.target.value)}
+                        className="pl-9 pr-9"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((prev) => !prev)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground focus:outline-hidden"
+                        tabIndex={-1}
+                        aria-label={showPassword ? "Hide password" : "Show password"}
+                      >
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {notice && !error && (
+                <div role="status" className="rounded-md border border-border bg-muted/40 p-3 text-sm text-foreground">
+                  {notice}
                 </div>
-              </div>
+              )}
 
               {error && (
                 <div role="alert" className="rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
@@ -141,10 +230,10 @@ export default function LoginForm() {
 
               <Button type="submit" className="w-full flex items-center justify-center gap-2" disabled={isLoading}>
                 {isLoading ? (
-                  "Logging in..."
+                  codeStep ? "Checking..." : "Please wait..."
                 ) : (
                   <>
-                    <span>Log In</span>
+                    <span>{codeStep ? "Verify and log in" : "Continue"}</span>
                     <ArrowRight className="h-4 w-4" />
                   </>
                 )}
