@@ -380,6 +380,18 @@ create table public.crm_users (
 
 create unique index crm_users_email_unique on public.crm_users (email);
 
+-- One-time sign-in codes sent by email (formerly azure/migrations/006_login_codes.sql).
+create table public.login_codes (
+  token_hash  text primary key,
+  user_id     uuid not null references public.crm_users (id) on delete cascade,
+  code_hash   text not null,
+  attempts    integer not null default 0,
+  expires_at  timestamp with time zone not null,
+  used_at     timestamp with time zone,
+  created_at  timestamp with time zone not null default now()
+);
+create index login_codes_user_created_idx on public.login_codes (user_id, created_at);
+
 -- Contact sections (formerly azure/003_contact_sections.sql): each contact
 -- belongs to one section, shown as tabs on the Contacts and Investors pages.
 create table public.contact_sections (

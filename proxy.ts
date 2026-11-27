@@ -29,8 +29,9 @@ export async function proxy(request: NextRequest) {
   // makes sure the account still exists and its password hasn't changed since
   // (lib/session.ts, one cached database lookup).
   const token = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET });
-  const signedIn = Boolean(token?.sub) && (await isSessionCurrent(token?.sub, token?.pv));
-  // A valid cookie whose session has ended (password changed, account removed, or from before this check).
+  const signedIn = Boolean(token?.sub) && (await isSessionCurrent(token?.sub, token?.pv, token?.amr));
+  // A valid cookie whose session has ended (password changed, account removed,
+  // signed in without the emailed code, or from before these checks).
   const ended = Boolean(token?.sub) && !signedIn;
   const pathname = request.nextUrl.pathname;
 

@@ -31,7 +31,7 @@ export async function getOwnerSessionId(): Promise<string | null> {
     req: { cookies: await cookies(), headers: {} } as unknown as Parameters<typeof getToken>[0]["req"],
     secret: process.env.NEXTAUTH_SECRET,
   });
-  if (!token?.sub || !(await isSessionCurrent(token.sub, token.pv))) return null;
+  if (!token?.sub || !(await isSessionCurrent(token.sub, token.pv, token.amr))) return null;
   return token.sub;
 }
 
