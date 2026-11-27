@@ -43,6 +43,7 @@ IMPORTANT:
 - `run-sql.mjs <file>`: apply a migration (asks for the database name).
 - `register-keys.mjs`: record key fingerprints (once, and after adding a key).
 - `set-password.mjs`: add a login or change its password (name stored encrypted).
+- `delete-user.mjs`: remove a login (lists the logins, asks the email and the database name; refuses the last login; CRM data is not tied to logins). With package 7a live, the person's open sessions end within ~10 s.
 - `encrypt-columns.mjs <1|2|3> [--dry-run | --hash-only | --verify-only | --decrypt]`: per-phase migration; refuses without matching key, recent backup (< 6 h), right column types, no triggers on those columns.
 - `verify-encryption.mjs`: offline self-test (16 checks).
 - `copy-to-local.mjs`: copies live into a local PostgreSQL 16 (`LOCAL_DATABASE_URL` in `.env.local`, database `crest_crm_local`) and writes `.env.development.local` so `npm run dev` uses the copy with WhatsApp sending, storage and email off. Add `--local` to the other scripts to work on the copy. A copy (`crest_crm_local`, made 25 Nov, **phases 1, 2 and 3 encrypted** by the phase 3 test, with migration 003) is kept on Aditya's PC for future tests, and `.env.development.local` is in place, so **`npm run dev` on his PC uses the local copy, not live**; delete that file to work on live again. Re-run the script for a fresh copy before each test. The copy holds all CRM data, so drop it when it is no longer needed.
