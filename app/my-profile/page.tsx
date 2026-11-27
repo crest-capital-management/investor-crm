@@ -12,6 +12,7 @@ import {
   Clock,
   ArrowRight,
 } from "lucide-react";
+import { ChangePassword } from "@/components/change-password";
 import { LogoutButton } from "@/components/logout-button";
 import { SettingsPanel } from "@/components/settings-panel";
 import { requireAuth, type CrmUser } from "@/lib/auth";
@@ -235,6 +236,13 @@ export default async function MyProfilePage() {
               Privacy Policy
               <ArrowRight className="h-3 w-3" />
             </Link>
+          </div>
+
+          <div className="mt-4 pt-4 border-t flex items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground">
+              Change your password (signs you out everywhere)
+            </p>
+            <ChangePassword />
           </div>
 
           <div className="mt-4 pt-4 border-t flex items-center justify-between">

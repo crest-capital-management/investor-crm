@@ -23,6 +23,15 @@ function keysFor(email: string, ip: string | null): string[] {
   return ip ? [`ip:${ip}`, `pair:${ip}|${email}`] : [`email:${email}`];
 }
 
+/**
+ * The visitor's address from an x-forwarded-for header. The last entry is the
+ * one our own proxy (nginx) added; earlier entries come from the visitor and
+ * can be made up.
+ */
+export function clientIpFromForwardedFor(forwardedFor: string | null): string | null {
+  return forwardedFor?.split(",").at(-1)?.trim() || null;
+}
+
 export function isLoginBlocked(email: string, ip: string | null): boolean {
   const now = Date.now();
   return keysFor(email, ip).some((key) => recent(key, now).length >= MAX_FAILURES);

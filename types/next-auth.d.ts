@@ -4,4 +4,15 @@ declare module "next-auth" {
   interface Session {
     user: DefaultSession["user"] & { id: string };
   }
+  interface User {
+    /** crm_users.password_updated_at at sign-in (lib/session.ts). */
+    passwordVersion?: string;
+  }
+}
+
+declare module "next-auth/jwt" {
+  interface JWT {
+    /** The password version the session signed in with (lib/session.ts). */
+    pv?: string;
+  }
 }
