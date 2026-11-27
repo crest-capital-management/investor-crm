@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireActionAuth } from "@/lib/auth";
+import { confirmPassword } from "@/lib/reauth";
 import { STORED_BACKUP_NAME, UPLOADED_BACKUP_NAME, saveDailyBackup, saveSafetyBackup } from "@/lib/backup";
 import { RESTORE_TABLES, currentCounts, parseBackupFile, replaceAllData } from "@/lib/restore";
 import { createBackupDownloadUrl, downloadBackupFile, listBackupFiles, removeBackupFiles } from "@/lib/storage";
@@ -137,11 +138,15 @@ export async function previewRestore(name: string): Promise<{ preview?: RestoreP
 export async function restoreFromBackup(
   name: string,
   confirmation: string,
+  password: string,
 ): Promise<{ counts?: Record<string, number>; safetyBackup?: string; error?: string }> {
-  const { error: authError } = await requireActionAuth();
+  const { error: authError, userId } = await requireActionAuth();
   if (authError) return { error: "Unauthorized" };
   if (!isRestorableName(name)) return { error: "Unknown backup." };
   if (confirmation.trim() !== "RESTORE") return { error: 'Type RESTORE to confirm.' };
+  // The password again: an open session alone isn't enough to replace all data.
+  const passwordProblem = await confirmPassword(userId, password);
+  if (passwordProblem) return { error: passwordProblem };
 
   let backup;
   try {

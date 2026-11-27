@@ -1,7 +1,8 @@
-import { getServerSession } from "next-auth";
+import { getToken } from "next-auth/jwt";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { authOptions } from "@/lib/auth-options";
 import { db } from "@/lib/db";
+import { isSessionCurrent } from "@/lib/session";
 
 /**
  * Anyone who signed in with an account in public.crm_users is a CRM user, with
@@ -20,14 +21,18 @@ export type CrmUser = {
 };
 
 /**
- * The signed-in user's id, or null. The session is a signed cookie checked on
- * this server (no database or network call), so it is cheap enough for API
- * routes that are polled every few seconds.
+ * The signed-in user's id, or null. The session is a signed cookie, checked on
+ * this server, and must still be current: the account exists and its password
+ * hasn't changed since this session signed in (lib/session.ts; one cached
+ * database lookup, cheap enough for API routes polled every few seconds).
  */
 export async function getOwnerSessionId(): Promise<string | null> {
-  const session = await getServerSession(authOptions);
-  const id = session?.user?.id;
-  return id || null;
+  const token = await getToken({
+    req: { cookies: await cookies(), headers: {} } as unknown as Parameters<typeof getToken>[0]["req"],
+    secret: process.env.NEXTAUTH_SECRET,
+  });
+  if (!token?.sub || !(await isSessionCurrent(token.sub, token.pv))) return null;
+  return token.sub;
 }
 
 /**

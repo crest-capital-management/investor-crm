@@ -76,6 +76,7 @@ export function RestoreBackup() {
   // The backup that was checked (its stored name) and what it holds.
   const [checked, setChecked] = useState<{ name: string; preview: RestorePreview } | null>(null);
   const [confirmation, setConfirmation] = useState("");
+  const [password, setPassword] = useState("");
 
   const busy = checking || restoring;
 
@@ -86,6 +87,7 @@ export function RestoreBackup() {
     setError(null);
     setChecked(null);
     setConfirmation("");
+    setPassword("");
   }
 
   async function handleOpenChange(next: boolean) {
@@ -133,10 +135,11 @@ export function RestoreBackup() {
   }
 
   async function handleRestore() {
-    if (!checked || confirmation.trim() !== "RESTORE") return;
+    if (!checked || confirmation.trim() !== "RESTORE" || !password) return;
     setError(null);
     setRestoring(true);
-    const result = await restoreFromBackup(checked.name, confirmation);
+    const result = await restoreFromBackup(checked.name, confirmation, password);
+    setPassword("");
     if (result.error) {
       setRestoring(false);
       setError(result.error);
@@ -173,7 +176,7 @@ export function RestoreBackup() {
             <DialogDescription>
               This replaces <strong>all</strong> contacts, groups, notes, follow-ups, templates, broadcasts,
               WhatsApp messages, portfolio updates and settings with the backup. Anything added after the
-              backup was taken is removed. Nothing changes until you type RESTORE and confirm.
+              backup was taken is removed. Nothing changes until you type RESTORE, enter your password and confirm.
             </DialogDescription>
           </DialogHeader>
 
@@ -303,6 +306,20 @@ export function RestoreBackup() {
                     disabled={restoring}
                   />
                 </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="restore-password" className="text-sm">
+                    Your password, to confirm it&apos;s you
+                  </label>
+                  <Input
+                    id="restore-password"
+                    type="password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    autoComplete="current-password"
+                    disabled={restoring}
+                  />
+                </div>
               </div>
             )}
 
@@ -325,7 +342,7 @@ export function RestoreBackup() {
               type="button"
               variant="destructive"
               onClick={handleRestore}
-              disabled={!checked || confirmation.trim() !== "RESTORE" || busy}
+              disabled={!checked || confirmation.trim() !== "RESTORE" || !password || busy}
             >
               {restoring && <Loader2 className="size-4 animate-spin" />}
               {restoring ? "Restoring…" : "Replace all data"}
