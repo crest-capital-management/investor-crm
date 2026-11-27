@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Playfair_Display } from "next/font/google";
 import localFont from "next/font/local";
+import { headers } from "next/headers";
+import { CSPProvider } from "@base-ui/react/csp-provider";
 import { AppSidebar } from "@/components/app-sidebar";
 import { TopNav } from "@/components/top-nav";
 import { ToastProvider } from "@/components/toast-provider";
@@ -44,7 +46,10 @@ export const metadata: Metadata = {
   description: "Internal CRM for managing investor contacts and follow-ups.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  // The per-request nonce from proxy.ts (Content-Security-Policy, lib/csp.ts).
+  // Reading headers makes every page render per request, which the nonce needs.
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
     <html
       lang="en"
@@ -52,21 +57,24 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${geistSans.variable} ${geistMono.variable} ${playfair.variable} ${maharlika.variable} h-full antialiased`}
     >
       <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
       <body className="flex h-full flex-col">
-        <ThemeProvider>
-          <ToastProvider>
-            <SidebarProvider>
-              <RealtimeBridge />
-              <TopNav />
-              <div className="flex flex-1 overflow-hidden">
-                <AppSidebar />
-                <MainContent>{children}</MainContent>
-              </div>
-            </SidebarProvider>
-          </ToastProvider>
-        </ThemeProvider>
+        {/* Base UI adds a small <style> (hides scrollbars in dropdowns); it needs the nonce too. */}
+        <CSPProvider nonce={nonce}>
+          <ThemeProvider>
+            <ToastProvider>
+              <SidebarProvider>
+                <RealtimeBridge />
+                <TopNav />
+                <div className="flex flex-1 overflow-hidden">
+                  <AppSidebar />
+                  <MainContent>{children}</MainContent>
+                </div>
+              </SidebarProvider>
+            </ToastProvider>
+          </ThemeProvider>
+        </CSPProvider>
       </body>
     </html>
   );
